@@ -1,0 +1,39 @@
+name: Sync catalogs
+
+# Hourly: fire API + pyrecast capabilities -> catalog.json / pyrecast_runs.json /
+# weather_runs.json on B2. Odd minute to dodge the GH scheduler rush.
+on:
+  schedule:
+    - cron: "7 * * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: catalogs
+  cancel-in-progress: false
+
+jobs:
+  sync-catalogs:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: worker
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+          enable-cache: true
+          cache-dependency-glob: "worker/uv.lock"
+
+      - name: Install dependencies
+        run: uv sync
+
+      - name: Sync catalogs
+        env:
+          B2_KEY_ID: ${{ secrets.B2_KEY_ID }}
+          B2_APP_KEY: ${{ secrets.B2_APP_KEY }}
+          B2_BUCKET: responder-debrief-data
+          B2_S3_ENDPOINT: ${{ vars.B2_S3_ENDPOINT }}
+        run: uv run python -m responder_worker.cli sync-catalogs

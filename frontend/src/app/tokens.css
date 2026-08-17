@@ -1,0 +1,205 @@
+@font-face {
+  font-family: 'Newsreader';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('/fonts/newsreader-400.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Newsreader';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url('/fonts/newsreader-600.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Newsreader';
+  font-style: normal;
+  font-weight: 800;
+  font-display: swap;
+  src: url('/fonts/newsreader-800.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Public Sans';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('/fonts/public-sans-400.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Public Sans';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url('/fonts/public-sans-500.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Public Sans';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url('/fonts/public-sans-600.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Public Sans';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url('/fonts/public-sans-700.woff2') format('woff2');
+}
+
+/* Design tokens — cornea (fires.cornea.is) palette, verbatim where possible. */
+
+:root {
+  /* light theme */
+  --color-bg: #fdfcf9;
+  --color-surface: #fdfaf4;
+  --color-card-bg: #f5f5f5;
+  --color-hover-bg: #f0ece4;
+  --color-text: #3b1d29;
+  --color-text-muted: #666;
+  --color-border: #ddd;
+  --color-accent: #ffbd5a;
+  --color-on-accent: #3b1d29;
+  --color-error: #d4572e;
+  --color-map-bg: #fcf2e8;
+  --timeline-bg: #fdf6ec;
+  --timeline-date-label: #686868;
+  --color-tick: rgba(0, 0, 0, 0.3);
+  --playhead-cover-bg: rgba(255, 255, 255, 0.7);
+  --play-btn-bg: rgba(249, 238, 221, 0.72);
+  --hotspot-circle: rgba(245, 190, 104, 0.85);
+  --hotspot-connector: rgba(245, 190, 104, 0.55);
+  --badge-active-bg: #ffbd5a;
+  --badge-active-text: #000;
+  --dropdown-bg: #fff;
+  --dropdown-border: #ddd;
+  --overlay-bg: rgba(253, 252, 249, 0.85);
+  --pulse-color: #ff9500;
+
+  /* shared fire-data colors */
+  --perimeter: #cc0000;
+  --hotspot-active: #ff7518;
+  --hotspot-new: #ff6467;
+  --hotspot-old: #c05de1;
+  --pin-wildfire: #ffbb56;
+  --pin-prescribed: #c3b392;
+
+  --font-serif: 'Newsreader', Georgia, serif;
+  --font-sans: 'Public Sans', -apple-system, system-ui, sans-serif;
+  --radius: 4px;
+  --sidebar-w: 380px;
+  --timeline-h: 64px;
+}
+
+:root[data-theme='dark'] {
+  --color-bg: #1a1218;
+  --color-surface: #241c21;
+  --color-card-bg: #241c21;
+  --color-hover-bg: #2e252a;
+  --color-text: #e8e2e5;
+  --color-text-muted: #998e94;
+  --color-border: #332a2f;
+  --color-accent: #ffbd5a;
+  --color-on-accent: #3b1d29;
+  --color-error: #d4572e;
+  --color-map-bg: #332a2f;
+  --timeline-bg: #332a2f;
+  --timeline-date-label: #998e94;
+  --color-tick: rgba(255, 255, 255, 0.3);
+  --playhead-cover-bg: rgba(26, 18, 24, 0.7);
+  --play-btn-bg: rgba(46, 37, 42, 0.72);
+  --badge-active-bg: #7c2d12;
+  --badge-active-text: #fed7aa;
+  --dropdown-bg: #2a2226;
+  --dropdown-border: #3a3035;
+  --overlay-bg: rgba(26, 18, 24, 0.85);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  font-family: var(--font-sans);
+  font-size: 15px;
+  color: var(--color-text);
+  background: var(--color-bg);
+  overscroll-behavior: none;
+}
+
+button {
+  font-family: inherit;
+  font-size: inherit;
+  color: inherit;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+}
+
+h1,
+h2,
+h3 {
+  font-family: var(--font-serif);
+  font-weight: 600;
+  margin: 0;
+}
+
+a {
+  color: var(--color-accent);
+}
+
+/* App shell */
+.rd-app {
+  position: relative;
+  height: 100%;
+  overflow: hidden;
+  background: var(--color-map-bg);
+}
+
+/* Extra specificity: maplibre-gl.css loads later and sets
+   .maplibregl-map { position: relative } on the same element. */
+.rd-app .rd-map-root.rd-map-root {
+  position: absolute;
+  inset: 0 0 var(--timeline-h) 0;
+}
+
+.rd-map-root .maplibregl-map {
+  font-family: var(--font-sans);
+}
+
+/* scrollbars that match the theme (webkit) */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: 5px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.rd-toast {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 40;
+  background: var(--color-surface);
+  color: var(--color-text);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  padding: 8px 14px;
+  font-size: 13px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+}

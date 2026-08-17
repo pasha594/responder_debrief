@@ -1,0 +1,67 @@
+name: Mirror incidents
+
+# 4x/day: FTP crawl -> match to active fires -> mirror PDFs -> GeoPDF tiles +
+# IR vectors -> B2. Odd minute to dodge the GH scheduler rush.
+on:
+  schedule:
+    - cron: "25 1,7,13,19 * * *"
+  workflow_dispatch:
+    inputs:
+      fire:
+        description: "Limit to one fire (slug), e.g. elk"
+        required: false
+        type: string
+      since:
+        description: "Backfill daily dirs since YYYYMMDD"
+        required: false
+        type: string
+      force:
+        description: "Force re-download / re-tile"
+        required: false
+        type: boolean
+        default: false
+
+concurrency:
+  group: mirror
+  cancel-in-progress: false
+
+jobs:
+  sync-incidents:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: worker
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install GDAL CLI tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends gdal-bin
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+          enable-cache: true
+          cache-dependency-glob: "worker/uv.lock"
+
+      - name: Install dependencies
+        run: uv sync
+
+      - name: Sync incidents
+        env:
+          B2_KEY_ID: ${{ secrets.B2_KEY_ID }}
+          B2_APP_KEY: ${{ secrets.B2_APP_KEY }}
+          B2_BUCKET: responder-debrief-data
+          B2_S3_ENDPOINT: ${{ vars.B2_S3_ENDPOINT }}
+          TILE_BUDGET: "40"
+          INPUT_FIRE: ${{ inputs.fire }}
+          INPUT_SINCE: ${{ inputs.since }}
+          INPUT_FORCE: ${{ inputs.force }}
+        run: |
+          FLAGS=()
+          [ -n "$INPUT_FIRE" ] && FLAGS+=(--fire "$INPUT_FIRE")
+          [ -n "$INPUT_SINCE" ] && FLAGS+=(--since "$INPUT_SINCE")
+          [ "$INPUT_FORCE" = "true" ] && FLAGS+=(--force)
+          uv run python -m responder_worker.cli sync-incidents "${FLAGS[@]}"

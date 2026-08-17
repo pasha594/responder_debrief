@@ -1,0 +1,3 @@
+{
+  "_comment": "Manual FTP-dir -> fire pins. Key: '{region}/{year}/{dir_name}' (e.g. 'rocky_mtn/2026/2026_Elk'); value: fire_slug to pin, or 'ignore' to suppress matching for that dir. Keys starting with '_' are ignored."
+}
