@@ -19,12 +19,15 @@ import {
   type WeatherProduct,
 } from '../api/types';
 import { useStore, type WeatherLayerState } from '../state/store';
-import { SPREAD_PRODUCT_LABELS } from './tabs/ForecastTab';
+import { LegendSwatch, SPREAD_PRODUCT_LABELS } from './tabs/ForecastTab';
+import { GradientLegend } from '../utils/GradientLegend';
 
 interface WeatherLegendRow {
   product: WeatherProduct;
   label: string;
   url: string;
+  stops?: [number, string][];
+  units?: string;
 }
 
 export function LegendBar() {
@@ -51,8 +54,14 @@ export function LegendBar() {
     legendKey && legendKey.startsWith('spread:')
       ? (legendKey.slice('spread:'.length) as SpreadProduct)
       : null;
+  const showSpread = spreadVisible && !!spreadProduct && !!run;
+  const spreadMeta = showSpread && spreadProduct ? run?.products?.[spreadProduct] : undefined;
+  const toaRamp = spreadProduct === 'time-of-arrival' ? run?.toa_ramp : undefined;
+  // Legacy image fallback for pre-v2 catalogs only.
   const spreadLegendSrc =
-    spreadVisible && spreadProduct && run ? spreadLegendUrl(spreadProduct, run) : null;
+    showSpread && spreadProduct && !spreadMeta?.legend_stops && !toaRamp
+      ? spreadLegendUrl(spreadProduct, run)
+      : null;
 
   const weatherRows = useMemo<WeatherLegendRow[]>(() => {
     const visible = Object.entries(weatherState).filter(
@@ -65,36 +74,60 @@ export function LegendBar() {
     for (const [product] of visible) {
       let label: string = product;
       let legendTemplate: string | undefined;
+      let stops: [number, string][] | undefined;
+      let units: string | undefined;
       let found = false;
       for (const model of Object.values(weatherRuns.models)) {
         const meta = model.products[product];
         if (meta && model.runs.length) {
           label = meta.label;
           legendTemplate = model.legend_template;
+          stops = meta.legend_stops;
+          units = meta.units;
           found = true;
           break;
         }
       }
       if (!found) continue;
-      rows.push({ product, label, url: weatherLegendUrl(product, legendTemplate) });
+      rows.push({ product, label, url: weatherLegendUrl(product, legendTemplate), stops, units });
     }
     return rows;
   }, [weatherState, weatherRuns]);
 
-  if (!spreadLegendSrc && weatherRows.length === 0) return null;
+  if (!showSpread && weatherRows.length === 0) return null;
 
   return (
     <div className="rd-legendbar">
-      {spreadLegendSrc && spreadProduct && (
+      {showSpread && spreadProduct && (
         <div className="rd-legendbar-spread">
           <div className="rd-legendbar-caption">{SPREAD_PRODUCT_LABELS[spreadProduct]}</div>
-          <LegendImg src={spreadLegendSrc} alt="Forecast legend" />
+          {toaRamp ? (
+            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+              {toaRamp.stops.map(([name, color]) => (
+                <LegendSwatch key={name} color={color} label={name} />
+              ))}
+            </div>
+          ) : spreadMeta?.legend_labels && spreadMeta.legend_stops ? (
+            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+              {spreadMeta.legend_stops.map(([, color], i) => (
+                <LegendSwatch key={i} color={color} label={spreadMeta.legend_labels?.[i] ?? ''} />
+              ))}
+            </div>
+          ) : spreadMeta?.legend_stops ? (
+            <GradientLegend stops={spreadMeta.legend_stops} units={spreadMeta.units ?? undefined} />
+          ) : spreadLegendSrc ? (
+            <LegendImg src={spreadLegendSrc} alt="Forecast legend" />
+          ) : null}
         </div>
       )}
       {weatherRows.map((row) => (
         <div key={row.product} className="rd-legendbar-weather-row">
           <span className="rd-legendbar-label">{row.label}</span>
-          <LegendImg src={row.url} alt={`${row.label} legend`} />
+          {row.stops ? (
+            <GradientLegend stops={row.stops} units={row.units} />
+          ) : (
+            <LegendImg src={row.url} alt={`${row.label} legend`} />
+          )}
         </div>
       ))}
     </div>

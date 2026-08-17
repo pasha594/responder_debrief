@@ -1,0 +1,39 @@
+{
+ "matches": {
+  "wa-sinlahekin": {
+   "cornea_id": "{78D35D3B-F791-4961-AE36-C6D1A4DFF5A0}",
+   "post_title": "SINLAHEKIN",
+   "method": "name+spatial",
+   "dist_km": 3.7,
+   "matched_at": "2026-08-13T16:45:29Z"
+  },
+  "ca-bug": {
+   "cornea_id": "ca6b8a6a-12e9-4e87-8f9b-5cb01dd5a25f",
+   "post_title": "Bug",
+   "method": "name+spatial",
+   "dist_km": 15.3,
+   "matched_at": "2026-08-13T16:42:10Z"
+  }
+ },
+ "unmatched": {
+  "or-inc-476": {
+   "reason": "no candidates in state",
+   "last_tried": "2026-08-17T21:08:06Z"
+  },
+  "ok-glory-road": {
+   "reason": "no name or spatial pass",
+   "candidates": [
+    {
+     "post_title": "Allison Road",
+     "dist_km": 303.6
+    },
+    {
+     "post_title": "Mt Scott Road",
+     "dist_km": 132.5
+    }
+   ],
+   "last_tried": "2026-08-17T21:08:05Z"
+  }
+ },
+ "generated": "2026-08-17T21:08:10Z"
+}

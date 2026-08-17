@@ -96,7 +96,7 @@ export const useStore = create<AppState>((set, get) => ({
   },
 
   layers: {
-    spread: { visible: true, product: 'spread-rate', percentile: 50, opacity: 0.8 },
+    spread: { visible: true, product: 'time-of-arrival', percentile: 50, opacity: 0.8 },
     weather: {},
     hotspots: { visible: true },
     perimeters: { visible: true },

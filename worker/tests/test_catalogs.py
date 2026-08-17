@@ -1,26 +1,28 @@
 """Catalog assembly against the data contracts: every field present,
-bbox [w,s,e,n], time_instants verbatim strings, filename parsing on real names."""
+spread flags fed by the archives doc, filename parsing on real names."""
 
+import json
+
+from responder_worker import archives
 from responder_worker.catalogs import (
     build_catalog,
-    build_pyrecast_runs,
-    build_weather_runs,
+    build_weather_runs_hrrr,
     build_incident_manifest,
     map_entry,
     parse_product_filename,
     product_label,
 )
-from responder_worker.pyrecast import parse_gs01_caps, parse_gs02_caps
 
 
 def _fires():
     return [
         {
-            "fire_slug": "paradise", "post_title": "Paradise", "state": "OR",
-            "cornea_id": "{AAA}", "unique_fire_id": "2026-ORVAD-000123",
-            "coordinates": [-117.9, 46.0], "acres": 1000, "containment": 10,
+            "fire_slug": "sinlahekin", "post_title": "SINLAHEKIN", "state": "WA",
+            "cornea_id": "{78D35D3B-F791-4961-AE36-C6D1A4DFF5A0}",
+            "unique_fire_id": "2026-WANES-000391",
+            "coordinates": [-119.68, 48.74], "acres": 1000, "containment": 10,
             "active": True, "last_updated": "2026-08-17T00:00:00Z",
-            "poly_last_updated": None, "timezone": "America/Boise",
+            "poly_last_updated": None, "timezone": "America/Los_Angeles",
         },
         {
             "fire_slug": "elk", "post_title": "Elk", "state": "CO",
@@ -91,102 +93,71 @@ class TestFilenameParsing:
 
 
 # ---------------------------------------------------------------------------
-# pyrecast_runs.json contract
-# ---------------------------------------------------------------------------
-
-class TestPyrecastRunsContract:
-    def test_contract_shape(self, fixtures):
-        _, gs02 = parse_gs02_caps((fixtures / "gs02_caps_excerpt.xml").read_bytes())
-        doc = build_pyrecast_runs(_fires(), gs02)
-
-        assert doc["schema_version"] == 1
-        assert doc["source"] == "geoserver02"
-        assert "wms_proxy_path" not in doc  # proxy removed (static frames)
-        assert "generated_at" in doc
-
-        assert "paradise" in doc["fires"]
-        entry = doc["fires"]["paradise"]
-        assert entry["pyrecast_slug"] == "or-paradise"
-        run = entry["runs"][0]
-        for field in ("workspace", "run_time", "bbox", "native_crs",
-                      "percentiles", "time_instants", "products", "frames"):
-            assert field in run
-        w, s, e, n = run["bbox"]
-        assert w < e and s < n
-        # verbatim ISO strings, minute-precision first instant
-        assert run["time_instants"][0] == "2026-08-17T11:25:00.000Z"
-        assert all(isinstance(t, str) and t.endswith("Z") for t in run["time_instants"])
-        for name, p in run["products"].items():
-            assert "timed" in p and "layer_template" in p
-            assert "legend_url" not in p  # proxy-era field dropped
-            assert p["legend"] == f"/frames/legends/spread-{name}.png"
-
-        # frames block per spec-frames.md
-        fr = run["frames"]
-        assert fr["percentiles"] == [10, 50]
-        assert fr["timed_template"] == "/frames/spread/{ws}/{pct}/{product}/{epoch_ms}.png"
-        assert fr["static_template"] == "/frames/spread/{ws}/{pct}/{product}/static.png"
-        assert fr["complete"] is False  # nothing fetched yet
-        # thinned instants: verbatim subset, first (minute-precision) kept
-        assert fr["instants"][0] == run["time_instants"][0]
-        assert set(fr["instants"]) <= set(run["time_instants"])
-
-    def test_frames_complete_from_state(self, fixtures):
-        _, gs02 = parse_gs02_caps((fixtures / "gs02_caps_excerpt.xml").read_bytes())
-        ws = next(r["workspace"] for r in gs02.values() if r["slug"] == "or-paradise")
-        doc = build_pyrecast_runs(_fires(), gs02,
-                                  frames_state={ws: {"done": True, "fetched": 456}})
-        run = doc["fires"]["paradise"]["runs"][0]
-        assert run["frames"]["complete"] is True
-
-    def test_unmatched_workspaces_surfaced(self, fixtures):
-        _, gs02 = parse_gs02_caps((fixtures / "gs02_caps_excerpt.xml").read_bytes())
-        doc = build_pyrecast_runs(_fires(), gs02)
-        # ar-dallas + sd-false-bottom-creek have no matching fire in _fires()
-        slugs = {u["slug"] for u in doc["unmatched_workspaces"]}
-        assert "ar-dallas-500153" in slugs
-        assert "sd-false-bottom-creek" in slugs
-        for u in doc["unmatched_workspaces"]:
-            assert "workspace" in u and "run_time" in u and "bbox" in u
-
-
-# ---------------------------------------------------------------------------
 # weather_runs.json contract
 # ---------------------------------------------------------------------------
 
+def _hrrr_runs():
+    """hrrr.discover_runs output shape (newest first)."""
+    from datetime import datetime, timedelta, timezone
+
+    def run(cycle_h, n_hours):
+        cycle = datetime(2026, 8, 17, cycle_h, tzinfo=timezone.utc)
+        return {
+            "workspace": f"hrrr_20260817_{cycle_h:02d}",
+            "run_time": cycle.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "hours": [(cycle + timedelta(hours=k)).strftime("%Y-%m-%dT%H:%M:%SZ")
+                      for k in range(n_hours)],
+        }
+
+    return [run(12, 49), run(11, 19)]
+
+
 class TestWeatherRunsContract:
-    def test_contract_shape(self, fixtures):
-        gs01 = parse_gs01_caps((fixtures / "gs01_hrrr_caps_excerpt.xml").read_bytes())
-        doc = build_weather_runs(gs01)
+    def test_contract_shape(self):
+        doc = build_weather_runs_hrrr(_hrrr_runs())
+        assert doc["source"] == "noaa-hrrr"
         hrrr = doc["models"]["hrrr"]
-        assert hrrr["label"] == "HRRR"
-        assert "tmpf" in hrrr["products"] and "label" in hrrr["products"]["tmpf"]
-        # trimmed to the 8 fire-critical pre-rendered products
+        assert hrrr["label"] == "HRRR (NOAA)"
+        # v1 products (no wd/ffwi — deferred per spec-hrrr.md)
         assert set(hrrr["products"]) == {
-            "tmpf", "rh", "ws", "wg", "wd", "ffwi", "smoke", "apcp01"}
-        assert "tcdc" not in hrrr["products"]
-        assert hrrr["legend_template"] == "/frames/legends/weather-{product}.png"
-        assert len(hrrr["runs"]) == 2  # newest complete + one previous
+            "ws", "wg", "tmpf", "rh", "smoke", "apcp01"}
+        for name, p in hrrr["products"].items():
+            assert p["label"] and p["units"]
+            stops = p["legend_stops"]
+            assert stops and all(
+                isinstance(v, (int, float)) and c.startswith("#")
+                for v, c in stops)
+            assert [v for v, _ in stops] == sorted(v for v, _ in stops)
+        assert hrrr["products"]["ws"]["units"] == "mph"
+        assert hrrr["products"]["ws"]["legend_stops"][0] == [0, "#78b4dc"]
+        # gradient legends replace legend images entirely
+        assert "legend_template" not in hrrr
+
+        assert len(hrrr["runs"]) == 2  # newest cycle + one previous
         newest = hrrr["runs"][0]
-        assert newest["workspace"] == "fire-weather-forecast_hrrr_20260817_12"
+        assert newest["workspace"] == "hrrr_20260817_12"
         assert newest["run_time"] == "2026-08-17T12:00:00Z"
         assert newest["hours"][0] == "2026-08-17T12:00:00Z"
         assert len(newest["hours"]) == 49
-        assert "tcdc" not in newest["products"]
-        assert "legend_url_template" not in newest  # proxy-era field dropped
-        # frames block per spec-frames.md
+        # frames block: same shape as spec-frames.md
         fr = newest["frames"]
         assert fr["bounds"] == [-125.0, 24.5, -66.5, 49.5]
         assert fr["image_template"] == "/frames/weather/{ws}/{product}/{epoch_ms}.png"
         assert fr["hours"] == [] and fr["complete"] is False  # nothing fetched yet
 
-    def test_frames_complete_from_state(self, fixtures):
-        gs01 = parse_gs01_caps((fixtures / "gs01_hrrr_caps_excerpt.xml").read_bytes())
-        doc = build_weather_runs(gs01, frames_state={
-            "fire-weather-forecast_hrrr_20260817_12": {"done": True, "fetched": 392}})
+    def test_frames_complete_from_state(self):
+        doc = build_weather_runs_hrrr(_hrrr_runs(), hrrr_state={
+            "hrrr_20260817_12": {"done": True, "fetched": 292}})
         newest = doc["models"]["hrrr"]["runs"][0]
         assert newest["frames"]["complete"] is True
         assert newest["frames"]["hours"] == newest["hours"]
+
+    def test_more_than_two_runs_trimmed(self):
+        runs = _hrrr_runs() + [{"workspace": "hrrr_20260817_10",
+                                "run_time": "2026-08-17T10:00:00Z",
+                                "hours": ["2026-08-17T10:00:00Z"]}]
+        doc = build_weather_runs_hrrr(runs)
+        assert len(doc["models"]["hrrr"]["runs"]) == 2
 
 
 # ---------------------------------------------------------------------------
@@ -195,10 +166,14 @@ class TestWeatherRunsContract:
 
 class TestCatalogContract:
     def test_contract_shape(self, fixtures):
-        _, gs02 = parse_gs02_caps((fixtures / "gs02_caps_excerpt.xml").read_bytes())
-        pyre = build_pyrecast_runs(_fires(), gs02)
+        # spread_index now derives from the archives doc (schema_version 2)
+        manifest = json.loads(
+            (fixtures / "archive_manifest_excerpt.json").read_text())
+        matches = json.loads(
+            (fixtures / "archive_fire_matches_excerpt.json").read_text())
+        pyre = archives.build_pyrecast_runs(_fires(), manifest, matches)
         spread_index = {slug: e["runs"][0]["run_time"]
-                        for slug, e in pyre["fires"].items()}
+                        for slug, e in pyre["fires"].items() if e["runs"]}
         matches = {"elk": {
             "method": "unit_id", "confidence": 1.0,
             "dir_url": "https://ftp.wildfire.gov/.../2026_Elk/",
@@ -233,8 +208,9 @@ class TestCatalogContract:
         assert elk["has_incident_maps"] is True
         assert elk["incident_manifest"] == "/catalogs/incidents/elk.json"
         assert elk["ftp_match"]["method"] == "unit_id"
-        assert by_slug["paradise"]["has_spread_forecast"] is True
-        assert by_slug["paradise"]["spread_latest_run"] == "2026-08-17T11:25:00Z"
+        assert by_slug["sinlahekin"]["has_spread_forecast"] is True
+        assert by_slug["sinlahekin"]["spread_latest_run"] == "2026-08-17T10:05:00Z"
+        assert by_slug["elk"]["has_spread_forecast"] is False
         # coordinates are [lon, lat]
         lon, lat = elk["coordinates"]
         assert -125 < lon < -66 and 24 < lat < 50

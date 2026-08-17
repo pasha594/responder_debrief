@@ -16,7 +16,7 @@ from pathlib import Path
 
 import httpx
 
-from . import config
+from . import config, frames
 from .ftp_index import Entry, list_dir
 from .http import get
 from .state import now_iso
@@ -54,6 +54,7 @@ class MirrorResult:
     skipped_unchanged: int = 0
     skipped_too_big: int = 0
     bytes_downloaded: int = 0
+    skipped_deferred: int = 0
 
 
 class IncidentMirror:
@@ -194,6 +195,12 @@ class IncidentMirror:
             cap = min(cap, mobile_cap) if cap else mobile_cap
         if cap and e.size_hint and e.size_hint > cap:
             res.skipped_too_big += 1
+            return
+
+        # Honor the mirror wall-clock mid-incident: a big fire's QR/daily sets
+        # can take many minutes; deferred files re-enter next scheduled run.
+        if frames.deadline_passed():
+            res.skipped_deferred += 1
             return
 
         meta = inc_state["files"].get(rel, {})

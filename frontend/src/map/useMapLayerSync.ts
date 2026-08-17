@@ -136,16 +136,12 @@ export function useMapLayerSync(): void {
   const hotspotQuery = useMemo(() => {
     if (!layers.hotspots.visible) return null;
     if (view.mode === 'fire') {
-      const base: Bounds4326 | null = spreadRun
-        ? spreadRun.bbox
-        : catalogFire
-          ? [
-              catalogFire.coordinates[0] - 0.5,
-              catalogFire.coordinates[1] - 0.4,
-              catalogFire.coordinates[0] + 0.5,
-              catalogFire.coordinates[1] + 0.4,
-            ]
-          : null;
+      // run.bbox is back-filled client-side after the first tif decode (v2
+      // catalogs omit it); until then fall back to a centroid-padded box.
+      const center = spreadRun?.centroid ?? catalogFire?.coordinates ?? null;
+      const base: Bounds4326 | null =
+        spreadRun?.bbox ??
+        (center ? [center[0] - 0.5, center[1] - 0.4, center[0] + 0.5, center[1] + 0.4] : null);
       if (!base) return null;
       const created = selectedFire ? Date.parse(selectedFire.created_on) : NaN;
       const sinceDays = Number.isFinite(created)
@@ -244,6 +240,7 @@ export function useMapLayerSync(): void {
       return;
     }
     const center =
+      spreadRun?.centroid ??
       catalogFire?.coordinates ??
       parseFireCoordinates(
         fires?.fires.find((x) => x.cornea_id === view.corneaId)?.fire_coordinates,

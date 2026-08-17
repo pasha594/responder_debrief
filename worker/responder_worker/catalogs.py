@@ -1,8 +1,9 @@
 """Assemble the worker -> frontend JSON contracts.
 
-catalog.json / pyrecast_runs.json / weather_runs.json / per-fire incident
-manifests. Upload ordering (atomicity) lives in cli.py: immutable assets ->
-incident manifests -> runs catalogs -> catalog.json LAST.
+catalog.json / weather_runs.json / per-fire incident manifests
+(pyrecast_runs.json moved to archives.py — schema_version 2, built from the
+public forecast archive). Upload ordering (atomicity) lives in cli.py:
+immutable assets -> incident manifests -> runs catalogs -> catalog.json LAST.
 """
 
 from __future__ import annotations
@@ -10,8 +11,8 @@ from __future__ import annotations
 import re
 from datetime import datetime, timezone
 
-from . import config, frames
-from .matching import UNIT_TOKEN_RE, match_pyrecast_slug
+from . import config, hrrr
+from .matching import UNIT_TOKEN_RE
 
 SCHEMA_VERSION = 1
 
@@ -110,101 +111,35 @@ def tiling_priority(parsed: dict) -> int:
 
 
 # ---------------------------------------------------------------------------
-# pyrecast_runs.json
-# ---------------------------------------------------------------------------
-
-def build_pyrecast_runs(fires: list[dict], gs02_runs: dict[str, dict],
-                        frames_state: dict | None = None) -> dict:
-    frames_state = frames_state or {}
-    by_slug: dict[str, list[dict]] = {}
-    for run in gs02_runs.values():
-        by_slug.setdefault(run["slug"], []).append(run)
-    for runs in by_slug.values():
-        runs.sort(key=lambda r: r["run_time"] or "", reverse=True)
-
-    fires_out: dict[str, dict] = {}
-    unmatched: list[dict] = []
-    slug_to_fire: dict[str, dict] = {}
-    for slug, runs in sorted(by_slug.items()):
-        fire, method, conf = match_pyrecast_slug(slug, fires)
-        if fire is None:
-            for r in runs:
-                unmatched.append({
-                    "workspace": r["workspace"],
-                    "slug": slug,
-                    "run_time": r["run_time"],
-                    "bbox": r["bbox"] or [],
-                })
-            continue
-        slug_to_fire[slug] = fire
-        entry = fires_out.setdefault(fire["fire_slug"], {
-            "pyrecast_slug": slug,
-            "match_method": method,
-            "match_confidence": conf,
-            "runs": [],
-        })
-        for r in runs:
-            run_out = {
-                "workspace": r["workspace"],
-                "run_time": r["run_time"],
-                "bbox": r["bbox"],
-                "native_crs": r["native_crs"],
-                "percentiles": r["percentiles"],
-                "time_instants": r["time_instants"] or [],
-                # legend_url (proxy-era) dropped: frames.annotate_spread_run
-                # adds the static B2 "legend" path per product instead.
-                "products": {
-                    name: {k: v for k, v in p.items() if k != "legend_url"}
-                    for name, p in r["products"].items()
-                },
-            }
-            frames.annotate_spread_run(run_out, frames_state)
-            entry["runs"].append(run_out)
-
-    return {
-        "schema_version": SCHEMA_VERSION,
-        "generated_at": now_iso(),
-        "source": "geoserver02",
-        "fires": fires_out,
-        "unmatched_workspaces": unmatched,
-    }
-
-
-# ---------------------------------------------------------------------------
 # weather_runs.json
 # ---------------------------------------------------------------------------
 
-def build_weather_runs(gs01_runs: dict[str, dict],
-                       frames_state: dict | None = None) -> dict:
-    frames_state = frames_state or {}
-    complete = [r for r in gs01_runs.values() if r["hours"]]
-    complete.sort(key=lambda r: r["run_time"] or "", reverse=True)
-    picked = complete[:2]  # newest complete + one previous
+def build_weather_runs_hrrr(hrrr_runs: list[dict],
+                            hrrr_state: dict | None = None) -> dict:
+    """weather_runs.json from NOAA HRRR cycle discovery (docs/spec-hrrr.md).
 
+    hrrr_runs: hrrr.discover_runs output, newest first (newest cycle with
+    enough sfc hours + the previous cycle = 2 runs). Products carry units +
+    legend_stops (gradient legends — no legend image fetching)."""
+    hrrr_state = hrrr_state or {}
     runs_out = []
-    for r in picked:
-        ws = r["workspace"]
+    for r in hrrr_runs[:2]:
         run_out = {
-            "workspace": ws,
+            "workspace": r["workspace"],
             "run_time": r["run_time"],
-            "hours": r["hours"],
-            "products": [p for p in r["products"]
-                         if p in config.WEATHER_FRAME_PRODUCTS],
+            "hours": list(r["hours"]),
         }
-        frames.annotate_weather_run(run_out, frames_state)
+        hrrr.annotate_run(run_out, hrrr_state)
         runs_out.append(run_out)
 
     return {
         "schema_version": SCHEMA_VERSION,
         "generated_at": now_iso(),
-        "source": "geoserver01",
+        "source": "noaa-hrrr",
         "models": {
             "hrrr": {
-                "label": "HRRR",
-                # trimmed to the 8 fire-critical pre-rendered products
-                "products": {k: dict(v) for k, v in config.WEATHER_PRODUCTS.items()
-                             if k in config.WEATHER_FRAME_PRODUCTS},
-                "legend_template": frames.WEATHER_LEGEND_TEMPLATE,
+                "label": "HRRR (NOAA)",
+                "products": hrrr.manifest_products(),
                 "runs": runs_out,
             }
         },

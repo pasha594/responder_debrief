@@ -154,51 +154,74 @@ export type SpreadProduct =
 export type Percentile = 10 | 30 | 50 | 70 | 90;
 
 /**
- * Pre-rendered spread-forecast frames on B2 (worker `frames.py`). Templates
- * are root-relative to DATA_BASE_URL; `{epoch_ms}` = Date.parse of a VERBATIM
- * instant from `instants`. Frames are run-stamped and immutable.
+ * v2 (schema_version 2, docs/spec-archives.md): per hourly product — which
+ * percentiles have a granule tar, the archive-base-relative tar template, and
+ * a data-driven legend ramp. `legend` is the v1 legend-image leftover, kept
+ * optional for parse tolerance only.
  */
-export interface SpreadFrames {
-  /** Only these percentiles are pre-rendered (v1: [50, 90]). */
-  percentiles: Percentile[];
-  /** Thinned VERBATIM ISO subset of time_instants — the scrubber uses THESE. */
-  instants: string[];
-  /** e.g. "/frames/spread/{ws}/{pct}/{product}/{epoch_ms}.png" */
-  timed_template: string;
-  /** e.g. "/frames/spread/{ws}/{pct}/{product}/static.png" */
-  static_template: string;
-  /** false while the worker's per-sync image budget cut this run short. */
-  complete: boolean;
+export interface SpreadProductMeta {
+  /** Percentiles with an ok tar in the archive manifest (subset of 10..90). */
+  percentiles: number[];
+  /** e.g. "/forecast_archive/{slug}/{run_ts}/{pct}_{product}.tar" */
+  tar_template: string;
+  units: string | null;
+  /** [value, cssColor] pairs ascending — GradientLegend + client colormap. */
+  legend_stops: [number, string][];
+  /** Present for discrete products (crown-fire): one label per stop. */
+  legend_labels?: string[];
+  /** v1 leftover (legend image path) — unused in v2, tolerated when present. */
+  legend?: string;
 }
 
+/** Time-of-arrival colorize hint: burned + leading-edge colors. */
+export interface ToaRamp {
+  /** Width of the bright leading edge, in hours behind the scrub time. */
+  recent_hours: number;
+  /** [["burned", css], ["recent", css]] */
+  stops: [string, string][];
+}
+
+/**
+ * v2 run: rendered CLIENT-SIDE straight from the public forecast archive
+ * (docs/spec-archives.md). ToA tifs and hourly product tars are decoded in
+ * the browser; url/tar templates are archive-base-relative — resolve via
+ * wmsUrls spread resolvers (prepends the catalog's archive_base).
+ */
 export interface PyrecastRun {
+  /** "{slug}_{run_ts}" */
   workspace: string;
-  run_time: string;
-  bbox: [number, number, number, number]; // [w, s, e, n] EPSG:4326
-  native_crs: string;
-  percentiles: Percentile[];
-  /** VERBATIM ISO strings from caps — first instant has minute precision. */
-  time_instants: string[];
-  products: Partial<
-    Record<
-      SpreadProduct,
-      {
-        timed: boolean;
-        vector?: boolean;
-        /** Root-relative legend image, e.g. "/frames/legends/spread-{product}.png". */
-        legend?: string;
-      }
-    >
-  >;
-  /** Static-frame block — absent only on catalogs older than the frames worker. */
-  frames?: SpreadFrames;
+  slug: string;
+  run_ts: string;
+  run_time: string; // ISO
+  /** Timeline extent: coverage = run_time .. run_time + horizon_hours. */
+  horizon_hours: number;
+  centroid: [number, number] | null; // [lon, lat]
+  /**
+   * [w, s, e, n] EPSG:4326. v2 catalogs do NOT emit this (the grid lives in
+   * the tifs); the spread layer back-fills it from the decoded grid. Every
+   * consumer must guard for null/absent.
+   */
+  bbox: [number, number, number, number] | null;
+  /** Time-of-arrival availability; null when no {pct}.tif is ok. */
+  toa: {
+    /** Percentiles with files[pct].ok in the archive manifest. */
+    percentiles: number[];
+    /** e.g. "/forecast_archive/{slug}/{run_ts}/{pct}.tif" */
+    url_template: string;
+  } | null;
+  products: Partial<Record<SpreadProduct, SpreadProductMeta>>;
+  toa_ramp?: ToaRamp;
 }
 
 export interface PyrecastRunsCatalog {
   schema_version: number;
   generated_at: string;
+  /** Loose provenance string, e.g. "fire-forecast-archive". */
+  source?: string;
+  /** Public archive origin; prepended to the runs' relative templates. */
+  archive_base?: string;
   fires: Record<string, { pyrecast_slug: string; runs: PyrecastRun[] }>;
-  unmatched_workspaces: { workspace: string; slug: string; run_time: string; bbox: number[] }[];
+  unmatched_slugs?: string[];
 }
 
 export type WeatherProduct =
@@ -256,14 +279,28 @@ export interface WeatherRun {
   frames?: WeatherFrames;
 }
 
+/**
+ * Per-product metadata in the weather manifest. `legend_stops` (HRRR worker)
+ * is a value→color ramp mirroring the gdaldem ramp files; when present the UI
+ * renders a data-driven gradient legend instead of a legend image.
+ */
+export interface WeatherProductMeta {
+  label: string;
+  units?: string;
+  /** [value, cssColor] pairs sorted ascending by value. */
+  legend_stops?: [number, string][];
+}
+
 export interface WeatherRunsCatalog {
   schema_version: number;
   generated_at: string;
+  /** Loose provenance string, e.g. "noaa-hrrr" (older catalogs omit it). */
+  source?: string;
   models: Record<
     string,
     {
       label: string;
-      products: Partial<Record<WeatherProduct, { label: string }>>;
+      products: Partial<Record<WeatherProduct, WeatherProductMeta>>;
       runs: WeatherRun[];
       /** Root-relative legend template, e.g. "/frames/legends/weather-{product}.png". */
       legend_template?: string;

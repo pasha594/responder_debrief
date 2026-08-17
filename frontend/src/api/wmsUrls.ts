@@ -1,15 +1,16 @@
 /**
- * Static-frame URL resolvers. The browser never talks to a WMS server: the
- * worker pre-renders every frame/legend to B2 and the manifests carry
- * root-relative path templates, resolved here against DATA_BASE_URL via
- * dataUrl(). Spread/weather frames are immutable run-stamped keys; the
- * national perimeters image is MUTABLE (cache-busted with as_of).
+ * URL resolvers. Weather frames + legends stay worker-rendered on B2
+ * (root-relative templates joined against DATA_BASE_URL via dataUrl()); the
+ * national perimeters image is MUTABLE (cache-busted with as_of). Spread
+ * forecasts are NOT frames anymore: the v2 runs catalog carries
+ * archive-base-relative templates for the raw archive files (ToA tifs,
+ * hourly-product tars), joined here against the catalog's `archive_base`
+ * (spec docs/spec-archives.md) — the browser decodes them client-side.
  */
 import { dataUrl } from './catalogs';
 import { boundsToImageCoords } from './geo';
 import type {
   MasterCatalog,
-  Percentile,
   PyrecastRun,
   SpreadProduct,
   WeatherProduct,
@@ -18,36 +19,87 @@ import type {
 
 // Fallback templates matching the worker's B2 key scheme (docs/spec-frames.md)
 // — used only when a manifest predates the frames blocks.
-const SPREAD_TIMED_TEMPLATE = '/frames/spread/{ws}/{pct}/{product}/{epoch_ms}.png';
-const SPREAD_STATIC_TEMPLATE = '/frames/spread/{ws}/{pct}/{product}/static.png';
 const WEATHER_IMAGE_TEMPLATE = '/frames/weather/{ws}/{product}/{epoch_ms}.png';
 const SPREAD_LEGEND_TEMPLATE = '/frames/legends/spread-{product}.png';
 const WEATHER_LEGEND_TEMPLATE = '/frames/legends/weather-{product}.png';
 
+// ---------- Spread (public forecast archive, client-side decode) ----------
+
+/** Spec source base — used until a v2 catalog supplies its own archive_base. */
+const DEFAULT_SPREAD_ARCHIVE_BASE = 'https://f005.backblazeb2.com/file/fire-forecast-archive';
+
+// Fallback archive key scheme (spec) for runs missing their templates.
+const TOA_URL_TEMPLATE = '/forecast_archive/{slug}/{run_ts}/{pct}.tif';
+const PRODUCT_TAR_TEMPLATE = '/forecast_archive/{slug}/{run_ts}/{pct}_{product}.tar';
+
+let spreadArchiveBase = DEFAULT_SPREAD_ARCHIVE_BASE;
+
 /**
- * Pre-rendered spread-forecast frame. `timeInstant` must be a VERBATIM
- * instant from run.frames.instants (Date.parse → {epoch_ms}); null selects
- * the static frame (time-of-arrival / isochrones). One URL per
- * (run, product, pct, instant) — immutable.
+ * Remember the runs catalog's `archive_base` (call whenever the catalog
+ * loads). Relative spread templates resolve against the last base seen.
  */
-export function spreadFrameUrl(
+export function setSpreadArchiveBase(base: string | null | undefined): void {
+  if (base) spreadArchiveBase = base.replace(/\/+$/, '');
+}
+
+function archiveUrl(rel: string): string {
+  return `${spreadArchiveBase}${rel.startsWith('/') ? '' : '/'}${rel}`;
+}
+
+function fillRunTemplate(tpl: string, run: PyrecastRun, pct: number): string {
+  return tpl
+    .replace('{slug}', run.slug)
+    .replace('{run_ts}', run.run_ts)
+    .replace('{pct}', String(pct));
+}
+
+/** Absolute URL of a run's time-of-arrival {pct}.tif in the archive. */
+export function spreadToaUrl(run: PyrecastRun, pct: number): string {
+  return archiveUrl(fillRunTemplate(run.toa?.url_template ?? TOA_URL_TEMPLATE, run, pct));
+}
+
+/** Absolute URL of a run's hourly {pct}_{product}.tar in the archive. */
+export function spreadProductTarUrl(
   run: PyrecastRun,
   product: SpreadProduct,
-  pct: Percentile,
-  timeInstant: string | null,
+  pct: number,
 ): string {
-  const tpl =
-    timeInstant === null
-      ? (run.frames?.static_template ?? SPREAD_STATIC_TEMPLATE)
-      : (run.frames?.timed_template ?? SPREAD_TIMED_TEMPLATE);
-  let rel = tpl
-    .replace('{ws}', run.workspace)
-    .replace('{pct}', String(pct))
-    .replace('{product}', product);
-  if (timeInstant !== null) {
-    rel = rel.replace('{epoch_ms}', String(Date.parse(timeInstant)));
+  const tpl = run.products[product]?.tar_template ?? PRODUCT_TAR_TEMPLATE;
+  return archiveUrl(fillRunTemplate(tpl, run, pct).replace('{product}', product));
+}
+
+/** Percentiles with an ok ToA tif for the run ([] when none/no run). */
+export function toaPercentiles(run: PyrecastRun | null | undefined): number[] {
+  return run?.toa?.percentiles ?? [];
+}
+
+/**
+ * Percentiles available for a product selection — ToA percentiles for
+ * 'time-of-arrival', the product's tar percentiles otherwise.
+ */
+export function productPercentiles(
+  run: PyrecastRun | null | undefined,
+  product: SpreadProduct,
+): number[] {
+  if (product === 'time-of-arrival') return toaPercentiles(run);
+  return run?.products[product]?.percentiles ?? [];
+}
+
+/**
+ * The percentile to actually render: `want` when available, else the nearest
+ * available (ties → the smaller). Null when nothing is available.
+ */
+export function nearestPercentile(available: number[], want: number): number | null {
+  let best: number | null = null;
+  let bestDist = Infinity;
+  for (const p of available) {
+    const d = Math.abs(p - want);
+    if (d < bestDist) {
+      best = p;
+      bestDist = d;
+    }
   }
-  return dataUrl(rel);
+  return best;
 }
 
 /**

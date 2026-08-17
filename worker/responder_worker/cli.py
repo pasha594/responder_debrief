@@ -1,4 +1,5 @@
-"""CLI: python -m responder_worker.cli {sync-catalogs|sync-incidents|backfill|prune}
+"""CLI: python -m responder_worker.cli
+{sync-catalogs|sync-incidents|backfill|prune|cleanup-spread-frames}
 
 --dry-run everywhere: no B2 needed; outputs land under ./out/ mirroring the B2
 key layout, state at ./out/state/state.json.
@@ -13,8 +14,8 @@ import tempfile
 from collections import Counter
 from pathlib import Path
 
-from . import catalogs as cat
-from . import config, frames, geopdf, ir_vectors, pyrecast, state as state_mod
+from . import archives, catalogs as cat
+from . import config, frames, geopdf, hrrr, ir_vectors, pyrecast, state as state_mod
 from .b2 import make_storage
 from .fires import fetch_active_fires
 from .ftp_index import list_dir
@@ -42,30 +43,30 @@ def log(msg: str) -> None:
 def cmd_sync_catalogs(args) -> int:
     storage = make_storage(args.dry_run, args.out)
     state = state_mod.load_state(storage)
-    frames_state = state.setdefault("frames", {})
 
     frame_budget = int(os.environ.get("FRAME_BUDGET", config.FRAME_BUDGET_DEFAULT))
-    fires_filter = (set(s for s in args.frames_fires.split(",") if s)
-                    if args.frames_fires else None)
     products_filter = (set(s for s in args.frames_products.split(",") if s)
                        if args.frames_products else None)
+    if args.frames_fires:
+        # spread is client-rendered from the archive now; the manifest is
+        # cheap so it always covers every matched fire.
+        log("[catalogs] note: --frames-fires no longer limits anything "
+            "(spread frames are gone; kept for CLI compatibility)")
 
     with make_client() as client:
         log("[catalogs] fetching active fires ...")
         fires = fetch_active_fires(client)
         log(f"[catalogs] active wildfires: {len(fires)}")
 
-        log("[catalogs] fetching gs02 capabilities ...")
-        last_seq = None if args.force else state["pyrecast"].get("gs02_update_sequence")
-        seq, gs02_runs = pyrecast.fetch_gs02_runs(client, last_seq)
-        if gs02_runs is None:
-            log(f"[catalogs] gs02 unchanged (updateSequence={seq}) — keeping previous runs catalog")
-        else:
-            log(f"[catalogs] gs02 updateSequence={seq}, runs={len(gs02_runs)}")
+        log("[catalogs] fetching forecast-archive manifest + fire matches ...")
+        pyre = archives.sync(client, storage, state, fires,
+                             force=args.force, log=log)
 
-        log("[catalogs] probing gs01 HRRR cycles (namespace-filtered caps) ...")
-        gs01_runs = pyrecast.probe_gs01_runs(client)
-        log(f"[catalogs] gs01 hrrr workspaces found: {sorted(gs01_runs)}")
+        log("[catalogs] discovering NOAA HRRR cycles (AWS S3 listing) ...")
+        hrrr_runs = hrrr.discover_runs(client)
+        log("[catalogs] hrrr cycles: "
+            + (", ".join(f"{r['workspace']} ({len(r['hours'])}h)"
+                         for r in hrrr_runs) or "none found"))
 
         log("[catalogs] probing gs01 national detection layers ...")
         national_probe = pyrecast.probe_gs01_national_layers(client)
@@ -74,35 +75,21 @@ def cmd_sync_catalogs(args) -> int:
         else:
             log("[catalogs] national perimeters layer unavailable (frontend hides it)")
 
-        if gs02_runs is None:
-            # updatesequence short-circuit: keep the previously published runs
-            # catalog (frames blocks are re-annotated/updated by the sync below)
-            pyre = (storage.get_json("catalogs/pyrecast_runs.json")
-                    or cat.build_pyrecast_runs(fires, {}, frames_state))
-            gs02_runs = {}
-        else:
-            pyre = cat.build_pyrecast_runs(fires, gs02_runs, frames_state)
-        weather = cat.build_weather_runs(gs01_runs, frames_state)
+        weather = cat.build_weather_runs_hrrr(hrrr_runs, state.get("hrrr"))
 
-        # ---- pre-render WMS frames BEFORE uploading the manifests that
+        # ---- pre-render weather frames BEFORE uploading the manifests that
         # reference them (upload ordering = atomicity) ----------------------
         frames.start_deadline()  # FRAMES_MAX_SECONDS (default 720): the job
         # must always reach the manifest/catalog uploads below.
         log(f"[frames] budget={frame_budget} images"
-            + (f" fires_filter={sorted(fires_filter)}" if fires_filter else "")
             + (f" hours_limit={args.frames_hours}" if args.frames_hours else "")
             + (f" products_filter={sorted(products_filter)}" if products_filter else ""))
-        budget_left = frames.sync_spread_frames(
-            client, storage, state, pyre,
-            budget=frame_budget, fires_filter=fires_filter, log=log)
-        budget_left = frames.sync_weather_frames(
+        budget_left = hrrr.sync_weather(
             client, storage, state, weather,
-            budget=budget_left, hours_limit=args.frames_hours,
+            budget=frame_budget, hours_limit=args.frames_hours,
             products_filter=products_filter, log=log)
         national_layers = frames.sync_national_frame(
             client, storage, national_probe, log=log)
-        frames.sync_legends(client, storage, pyre, weather,
-                            products_filter=products_filter, log=log)
         log(f"[frames] images fetched this sync: {frame_budget - budget_left}")
 
     spread_index = {
@@ -136,7 +123,6 @@ def cmd_sync_catalogs(args) -> int:
     storage.put_json(f"catalogs/versions/catalog.{version}.json", catalog)
     storage.put_json("catalogs/catalog.json", catalog)
 
-    state["pyrecast"]["gs02_update_sequence"] = seq
     state["catalog_version"] = version
     state_mod.save_state(storage, state)
 
@@ -145,8 +131,7 @@ def cmd_sync_catalogs(args) -> int:
         "[catalogs] done: "
         f"fires={catalog['counts']['active_fires']} "
         f"spread_fires={catalog['counts']['spread_forecast_fires']} "
-        f"spread_workspaces={len(gs02_runs)} "
-        f"unmatched_workspaces={len(pyre['unmatched_workspaces'])} "
+        f"unmatched_slugs={len(pyre['unmatched_slugs'])} "
         f"weather_runs={len(weather_runs)} "
         f"weather_hours={[len(r['hours']) for r in weather_runs]} "
         f"catalog_version={version}"
@@ -388,9 +373,21 @@ def cmd_sync_incidents(args) -> int:
         cands = _collect_candidates(client, args, fires)
         log(f"[incidents] candidate incident dirs: {len(cands)}")
 
+        # Wall-clock budget: the job must ALWAYS reach tiling + manifest +
+        # catalog publication and state save below — a run killed by the CI
+        # timeout publishes nothing and loses its checkpoints (observed on the
+        # first full mirror). Remaining incidents defer to the next 6-hourly
+        # run; per-file state means nothing re-downloads.
+        frames.start_deadline(int(os.environ.get(
+            "MIRROR_MAX_SECONDS", str(config.MIRROR_MAX_SECONDS_DEFAULT))))
+
         mirrors: dict[str, dict] = {}
         matched = 0
+        deferred = 0
         for cand in cands:
+            if frames.deadline_passed():
+                deferred += 1
+                continue
             # deterministic evidence (skip listing work when unchanged & known)
             prev = state["incidents"].get(cand.key)
             if (prev and not args.force and prev.get("dir_mtime") == cand.dir_mtime
@@ -436,6 +433,9 @@ def cmd_sync_incidents(args) -> int:
                 "fire": fire, "candidate": cand, "match": m, "result": res,
             }
 
+        if deferred:
+            log(f"[incidents] deadline reached — {deferred} candidate dirs deferred "
+                "to the next scheduled run")
         _tile_and_manifest(args, storage, state, fires_by_slug, mirrors)
 
         # master catalog rebuild (catalog.json LAST)
@@ -477,7 +477,15 @@ def cmd_sync_incidents(args) -> int:
 # ===========================================================================
 
 def cmd_prune(args) -> int:
+    """Manual-only, explicit-opt-in deletion. USER POLICY (2026-08-17): FTP-
+    derived incident data is kept indefinitely — this command refuses to run
+    without BOTH --days and --confirm, and is never invoked by CI."""
     from datetime import datetime, timedelta, timezone
+
+    if args.days is None or not args.confirm:
+        log("[prune] refused: incident data is kept indefinitely by policy. "
+            "To delete anyway, pass BOTH --days N and --confirm.")
+        return 2
 
     storage = make_storage(args.dry_run, args.out)
     state = state_mod.load_state(storage)
@@ -487,7 +495,7 @@ def cmd_prune(args) -> int:
     active_slugs = {f["fire_slug"] for f in fires}
 
     now = datetime.now(timezone.utc)
-    cutoff = now - timedelta(days=config.PRUNE_INACTIVE_DAYS)
+    cutoff = now - timedelta(days=args.days)
     inactive_since = state["prune"]["inactive_since"]
 
     removed = []
@@ -502,7 +510,7 @@ def cmd_prune(args) -> int:
             continue
         if datetime.strptime(first_seen, "%Y-%m-%dT%H:%M:%SZ").replace(
                 tzinfo=timezone.utc) < cutoff:
-            log(f"[prune] {slug}: inactive > {config.PRUNE_INACTIVE_DAYS}d — deleting")
+            log(f"[prune] {slug}: inactive > {args.days}d — deleting")
             for prefix in (f"raw/incidents/{slug}/", f"tiles/incidents/{slug}/",
                            f"previews/incidents/{slug}/", f"vectors/ir/{slug}/",
                            f"catalogs/incidents/{slug}.json"):
@@ -514,6 +522,29 @@ def cmd_prune(args) -> int:
 
     state_mod.save_state(storage, state)
     log(f"[prune] done: removed={removed or 'none'}")
+    return 0
+
+
+# ===========================================================================
+# cleanup-spread-frames (one-time)
+# ===========================================================================
+
+def cmd_cleanup_spread_frames(args) -> int:
+    """One-time cleanup after the client-side-rendering migration
+    (docs/spec-archives.md): the pre-rendered spread frames and spread legend
+    images on B2 are dead. Manual-only; requires --confirm."""
+    if not args.confirm:
+        log("[cleanup] refused: this permanently deletes frames/spread/ and "
+            "frames/legends/ from the bucket. Pass --confirm to proceed.")
+        return 2
+
+    storage = make_storage(args.dry_run, args.out)
+    total = 0
+    for prefix in ("frames/spread/", "frames/legends/"):
+        n = storage.delete_prefix(prefix)
+        total += n
+        log(f"[cleanup] {prefix}: {n} objects removed")
+    log(f"[cleanup] done: {total} objects removed")
     return 0
 
 
@@ -535,11 +566,11 @@ def build_parser() -> argparse.ArgumentParser:
                         help="ignore change-detection state")
 
     sp = sub.add_parser("sync-catalogs",
-                        help="fire API + pyrecast caps -> frames + catalogs")
+                        help="fire API + forecast archive + HRRR -> frames + catalogs")
     common(sp)
     sp.add_argument("--frames-fires",
-                    help="CSV of fire_slugs: limit spread frames to these fires "
-                         "(dry-run politeness)")
+                    help="no-op (spread frames removed — client-side archive "
+                         "rendering); kept for CLI compatibility")
     sp.add_argument("--frames-hours", type=int, default=None,
                     help="limit weather frames to the first N forecast hours")
     sp.add_argument("--frames-products",
@@ -572,7 +603,19 @@ def build_parser() -> argparse.ArgumentParser:
 
     sp = sub.add_parser("prune", help="drop fires inactive > 14 days")
     common(sp)
+    sp.add_argument("--days", type=int, default=None,
+                    help="inactivity threshold; required (policy: keep forever)")
+    sp.add_argument("--confirm", action="store_true",
+                    help="required second flag to actually delete")
     sp.set_defaults(func=cmd_prune)
+
+    sp = sub.add_parser("cleanup-spread-frames",
+                        help="one-time: delete the dead pre-rendered spread "
+                             "frame/legend objects (frames/spread/, frames/legends/)")
+    common(sp)
+    sp.add_argument("--confirm", action="store_true",
+                    help="required flag to actually delete")
+    sp.set_defaults(func=cmd_cleanup_spread_frames)
     return p
 
 

@@ -1,0 +1,905 @@
+{
+ "runs": {
+  "wa-sinlahekin/20260817_112500": {
+   "slug": "wa-sinlahekin",
+   "run_ts": "20260817_112500",
+   "first_seen": "2026-08-17T19:26:07Z",
+   "complete": false,
+   "expired": false,
+   "files": {},
+   "errors": {
+    "10": "HTTP 403 at 2026-08-17T21:07:02Z",
+    "30": "HTTP 403 at 2026-08-17T21:07:04Z",
+    "50": "HTTP 403 at 2026-08-17T21:07:07Z",
+    "70": "HTTP 403 at 2026-08-17T21:07:09Z",
+    "90": "HTTP 403 at 2026-08-17T21:07:11Z"
+   },
+   "last_seen": "2026-08-17T21:07:00Z",
+   "vars": {
+    "10": {},
+    "30": {
+     "hours-since-burned": {
+      "ok": true,
+      "n": 169,
+      "got": 169,
+      "last": "20260824_110000",
+      "complete": true
+     },
+     "spread-rate": {
+      "ok": true,
+      "n": 169,
+      "got": 169,
+      "last": "20260824_110000",
+      "complete": true
+     }
+    },
+    "50": {
+     "isochrones": {
+      "ok": true,
+      "n": 5
+     },
+     "crown-fire": {
+      "ok": true,
+      "n": 169,
+      "got": 158,
+      "last": "20260824_110000",
+      "complete": true
+     }
+    },
+    "70": {},
+    "90": {
+     "isochrones": {
+      "ok": true,
+      "n": 5
+     },
+     "crown-fire": {
+      "ok": true,
+      "n": 169,
+      "got": 169,
+      "last": "20260824_110000",
+      "complete": true
+     },
+     "flame-length": {
+      "ok": true,
+      "n": 169,
+      "got": 169,
+      "last": "20260824_110000",
+      "complete": true
+     },
+     "hours-since-burned": {
+      "ok": true,
+      "n": 169,
+      "got": 158,
+      "last": "20260824_110000",
+      "complete": true
+     }
+    }
+   }
+  },
+  "wa-sinlahekin/20260817_100500": {
+   "slug": "wa-sinlahekin",
+   "run_ts": "20260817_100500",
+   "first_seen": "2026-08-17T14:02:55Z",
+   "complete": true,
+   "expired": false,
+   "files": {
+    "10": {
+     "bytes": 183327,
+     "etag": "\"6a8303ef-2cc1f\"",
+     "ok": true
+    },
+    "30": {
+     "bytes": 223370,
+     "etag": "\"6a8303ee-3688a\"",
+     "ok": true
+    },
+    "50": {
+     "bytes": 229585,
+     "etag": "\"6a8303ee-380d1\"",
+     "ok": true
+    },
+    "70": {
+     "bytes": 362339,
+     "etag": "\"6a8303ee-58763\"",
+     "ok": true
+    },
+    "90": {
+     "bytes": 491781,
+     "etag": "\"6a8303ee-78105\"",
+     "ok": true
+    }
+   },
+   "errors": {},
+   "last_seen": "2026-08-17T21:06:30Z",
+   "vars": {
+    "10": {
+     "crown-fire": {
+      "ok": true,
+      "n": 169,
+      "got": 169,
+      "last": "20260824_100000",
+      "complete": true
+     },
+     "flame-length": {
+      "ok": true,
+      "n": 169,
+      "got": 169,
+      "last": "20260824_100000",
+      "complete": true
+     },
+     "hours-since-burned": {
+      "ok": true,
+      "n": 169,
+      "got": 161,
+      "last": "20260824_100000",
+      "complete": true
+     },
+     "isochrones": {
+      "ok": true,
+      "n": 5
+     },
+     "spread-rate": {
+      "ok": true,
+      "n": 169,
+      "got": 169,
+      "last": "20260824_100000",
+      "complete": true
+     }
+    },
+    "30": {
+     "isochrones": {
+      "ok": true,
+      "n": 5
+     },
+     "hours-since-burned": {
+      "ok": true,
+      "n": 169,
+      "got": 169,
+      "last": "20260824_100000",
+      "complete": true
+     },
+     "spread-rate": {
+      "ok": true,
+      "n": 169,
+      "got": 169,
+      "last": "20260824_100000",
+      "complete": true
+     }
+    },
+    "50": {
+     "isochrones": {
+      "ok": true,
+      "n": 5
+     },
+     "crown-fire": {
+      "ok": true,
+      "n": 169,
+      "got": 159,
+      "last": "20260824_100000",
+      "complete": true
+     }
+    },
+    "70": {
+     "flame-length": {
+      "ok": true,
+      "n": 169,
+      "got": 169,
+      "last": "20260824_100000",
+      "complete": true
+     },
+     "hours-since-burned": {
+      "ok": true,
+      "n": 169,
+      "got": 169,
+      "last": "20260824_100000",
+      "complete": true
+     },
+     "spread-rate": {
+      "ok": true,
+      "n": 169,
+      "got": 161,
+      "last": "20260824_100000",
+      "complete": true
+     }
+    },
+    "90": {
+     "crown-fire": {
+      "ok": true,
+      "n": 169,
+      "got": 169,
+      "last": "20260824_100000",
+      "complete": true
+     },
+     "flame-length": {
+      "ok": true,
+      "n": 169,
+      "got": 169,
+      "last": "20260824_100000",
+      "complete": true
+     },
+     "hours-since-burned": {
+      "ok": true,
+      "n": 169,
+      "got": 163,
+      "last": "20260824_100000",
+      "complete": true
+     }
+    }
+   },
+   "centroid": [
+    -119.68245,
+    48.7372
+   ]
+  },
+  "wa-sinlahekin/20260816_215300": {
+   "slug": "wa-sinlahekin",
+   "run_ts": "20260816_215300",
+   "first_seen": "2026-08-17T03:42:11Z",
+   "complete": false,
+   "expired": true,
+   "files": {},
+   "errors": {
+    "10": "HTTP 403 at 2026-08-17T17:03:50Z",
+    "30": "HTTP 403 at 2026-08-17T17:03:52Z",
+    "50": "HTTP 403 at 2026-08-17T17:03:54Z",
+    "70": "HTTP 403 at 2026-08-17T17:03:57Z",
+    "90": "HTTP 403 at 2026-08-17T17:03:59Z"
+   },
+   "last_seen": "2026-08-17T17:03:48Z",
+   "vars": {
+    "10": {
+     "hours-since-burned": {
+      "ok": true,
+      "n": 169,
+      "got": 169,
+      "last": "20260823_210000",
+      "complete": true
+     },
+     "spread-rate": {
+      "ok": true,
+      "n": 169,
+      "got": 169,
+      "last": "20260823_210000",
+      "complete": true
+     },
+     "crown-fire": {
+      "ok": true,
+      "n": 169,
+      "got": 169,
+      "last": "20260823_210000",
+      "complete": true
+     },
+     "flame-length": {
+      "ok": true,
+      "n": 169,
+      "got": 169,
+      "last": "20260823_210000",
+      "complete": true
+     }
+    },
+    "30": {
+     "isochrones": {
+      "ok": true,
+      "n": 5
+     },
+     "crown-fire": {
+      "ok": true,
+      "n": 169,
+      "got": 157,
+      "last": "20260823_210000",
+      "complete": true
+     },
+     "flame-length": {
+      "ok": true,
+      "n": 169,
+      "got": 162,
+      "last": "20260823_210000",
+      "complete": true
+     }
+    },
+    "50": {
+     "spread-rate": {
+      "ok": true,
+      "n": 169,
+      "got": 169,
+      "last": "20260823_210000",
+      "complete": true
+     },
+     "hours-since-burned": {
+      "ok": true,
+      "n": 169,
+      "got": 169,
+      "last": "20260823_210000",
+      "complete": true
+     }
+    },
+    "70": {
+     "isochrones": {
+      "ok": true,
+      "n": 5
+     },
+     "crown-fire": {
+      "ok": true,
+      "n": 169,
+      "got": 169,
+      "last": "20260823_210000",
+      "complete": true
+     },
+     "flame-length": {
+      "ok": true,
+      "n": 169,
+      "got": 157,
+      "last": "20260823_210000",
+      "complete": true
+     },
+     "hours-since-burned": {
+      "ok": true,
+      "n": 169,
+      "got": 169,
+      "last": "20260823_210000",
+      "complete": true
+     },
+     "spread-rate": {
+      "ok": true,
+      "n": 169,
+      "got": 161,
+      "last": "20260823_210000",
+      "complete": true
+     }
+    },
+    "90": {
+     "hours-since-burned": {
+      "ok": true,
+      "n": 169,
+      "got": 169,
+      "last": "20260823_210000",
+      "complete": true
+     },
+     "spread-rate": {
+      "ok": true,
+      "n": 169,
+      "got": 169,
+      "last": "20260823_210000",
+      "complete": true
+     },
+     "flame-length": {
+      "ok": true,
+      "n": 169,
+      "got": 169,
+      "last": "20260823_210000",
+      "complete": true
+     },
+     "isochrones": {
+      "ok": true,
+      "n": 5
+     },
+     "crown-fire": {
+      "ok": true,
+      "n": 169,
+      "got": 169,
+      "last": "20260823_210000",
+      "complete": true
+     }
+    }
+   }
+  },
+  "wa-sinlahekin/20260816_205500": {
+   "slug": "wa-sinlahekin",
+   "run_ts": "20260816_205500",
+   "first_seen": "2026-08-17T02:23:22Z",
+   "complete": true,
+   "expired": false,
+   "files": {
+    "70": {
+     "bytes": 132486,
+     "etag": "\"6a82504f-20586\"",
+     "ok": true
+    },
+    "90": {
+     "bytes": 513819,
+     "etag": "\"6a825050-7d71b\"",
+     "ok": true
+    },
+    "50": {
+     "bytes": 102134,
+     "etag": "\"6a82504f-18ef6\"",
+     "ok": true
+    },
+    "10": {
+     "bytes": 75538,
+     "etag": "\"6a82504d-12712\"",
+     "ok": true
+    },
+    "30": {
+     "bytes": 90004,
+     "etag": "\"6a82504e-15f94\"",
+     "ok": true
+    }
+   },
+   "errors": {},
+   "last_seen": "2026-08-17T13:23:24Z",
+   "vars": {
+    "10": {
+     "isochrones": {
+      "ok": true,
+      "n": 5
+     },
+     "crown-fire": {
+      "ok": true,
+      "n": 169,
+      "got": 169,
+      "last": "20260823_200000",
+      "complete": true
+     },
+     "flame-length": {
+      "ok": true,
+      "n": 169,
+      "got": 169,
+      "last": "20260823_200000",
+      "complete": true
+     },
+     "hours-since-burned": {
+      "ok": true,
+      "n": 169,
+      "got": 155,
+      "last": "20260823_200000",
+      "complete": true
+     },
+     "spread-rate": {
+      "ok": true,
+      "n": 169,
+      "got": 169,
+      "last": "20260823_200000",
+      "complete": true
+     }
+    },
+    "30": {
+     "isochrones": {
+      "ok": true,
+      "n": 5
+     },
+     "crown-fire": {
+      "ok": true,
+      "n": 169,
+      "got": 169,
+      "last": "20260823_200000",
+      "complete": true
+     },
+     "flame-length": {
+      "ok": true,
+      "n": 169,
+      "got": 169,
+      "last": "20260823_200000",
+      "complete": true
+     },
+     "hours-since-burned": {
+      "ok": true,
+      "n": 169,
+      "got": 157,
+      "last": "20260823_200000",
+      "complete": true
+     },
+     "spread-rate": {
+      "ok": true,
+      "n": 169,
+      "got": 169,
+      "last": "20260823_200000",
+      "complete": true
+     }
+    },
+    "50": {
+     "isochrones": {
+      "ok": true,
+      "n": 5
+     },
+     "crown-fire": {
+      "ok": true,
+      "n": 169,
+      "got": 169,
+      "last": "20260823_200000",
+      "complete": true
+     },
+     "flame-length": {
+      "ok": true,
+      "n": 169,
+      "got": 169,
+      "last": "20260823_200000",
+      "complete": true
+     },
+     "hours-since-burned": {
+      "ok": true,
+      "n": 169,
+      "got": 157,
+      "last": "20260823_200000",
+      "complete": true
+     },
+     "spread-rate": {
+      "ok": true,
+      "n": 169,
+      "got": 161,
+      "last": "20260823_200000",
+      "complete": true
+     }
+    },
+    "70": {
+     "flame-length": {
+      "ok": true,
+      "n": 169,
+      "got": 169,
+      "last": "20260823_200000",
+      "complete": true
+     },
+     "hours-since-burned": {
+      "ok": true,
+      "n": 169,
+      "got": 169,
+      "last": "20260823_200000",
+      "complete": true
+     },
+     "spread-rate": {
+      "ok": true,
+      "n": 169,
+      "got": 162,
+      "last": "20260823_200000",
+      "complete": true
+     },
+     "isochrones": {
+      "ok": true,
+      "n": 5
+     },
+     "crown-fire": {
+      "ok": true,
+      "n": 169,
+      "got": 169,
+      "last": "20260823_200000",
+      "complete": true
+     }
+    },
+    "90": {
+     "isochrones": {
+      "ok": true,
+      "n": 5
+     },
+     "crown-fire": {
+      "ok": true,
+      "n": 169,
+      "got": 169,
+      "last": "20260823_200000",
+      "complete": true
+     }
+    }
+   },
+   "centroid": [
+    -119.68243,
+    48.73695
+   ]
+  },
+  "wa-sinlahekin/20260815_104100": {
+   "slug": "wa-sinlahekin",
+   "run_ts": "20260815_104100",
+   "first_seen": "2026-08-15T23:22:45Z",
+   "complete": true,
+   "expired": false,
+   "files": {
+    "10": {
+     "bytes": 128314,
+     "etag": "\"6a80ca55-1f53a\"",
+     "ok": true
+    },
+    "30": {
+     "bytes": 147355,
+     "etag": "\"6a80ca55-23f9b\"",
+     "ok": true
+    },
+    "50": {
+     "bytes": 153650,
+     "etag": "\"6a80ca55-25832\"",
+     "ok": true
+    },
+    "70": {
+     "bytes": 195459,
+     "etag": "\"6a80ca55-2fb83\"",
+     "ok": true
+    },
+    "90": {
+     "bytes": 360640,
+     "etag": "\"6a80ca55-580c0\"",
+     "ok": true
+    }
+   },
+   "errors": {},
+   "last_seen": "2026-08-16T23:02:47Z",
+   "centroid": [
+    -119.68243,
+    48.73695
+   ],
+   "vars": {
+    "10": {
+     "isochrones": {
+      "ok": true,
+      "n": 5
+     },
+     "crown-fire": {
+      "ok": true,
+      "n": 169,
+      "got": 153,
+      "last": "20260822_100000",
+      "complete": true
+     },
+     "flame-length": {
+      "ok": true,
+      "n": 169,
+      "got": 169,
+      "last": "20260822_100000",
+      "complete": true
+     },
+     "hours-since-burned": {
+      "ok": true,
+      "n": 169,
+      "got": 169,
+      "last": "20260822_100000",
+      "complete": true
+     },
+     "spread-rate": {
+      "ok": true,
+      "n": 169,
+      "got": 162,
+      "last": "20260822_100000",
+      "complete": true
+     }
+    },
+    "30": {
+     "isochrones": {
+      "ok": true,
+      "n": 5
+     },
+     "crown-fire": {
+      "ok": true,
+      "n": 169,
+      "got": 169,
+      "last": "20260822_100000",
+      "complete": true
+     },
+     "flame-length": {
+      "ok": true,
+      "n": 169,
+      "got": 169,
+      "last": "20260822_100000",
+      "complete": true
+     },
+     "hours-since-burned": {
+      "ok": true,
+      "n": 169,
+      "got": 157,
+      "last": "20260822_100000",
+      "complete": true
+     },
+     "spread-rate": {
+      "ok": true,
+      "n": 169,
+      "got": 169,
+      "last": "20260822_100000",
+      "complete": true
+     }
+    },
+    "50": {
+     "isochrones": {
+      "ok": true,
+      "n": 5
+     },
+     "crown-fire": {
+      "ok": true,
+      "n": 169,
+      "got": 169,
+      "last": "20260822_100000",
+      "complete": true
+     },
+     "flame-length": {
+      "ok": true,
+      "n": 169,
+      "got": 169,
+      "last": "20260822_100000",
+      "complete": true
+     },
+     "hours-since-burned": {
+      "ok": true,
+      "n": 169,
+      "got": 157,
+      "last": "20260822_100000",
+      "complete": true
+     },
+     "spread-rate": {
+      "ok": true,
+      "n": 169,
+      "got": 169,
+      "last": "20260822_100000",
+      "complete": true
+     }
+    },
+    "70": {
+     "isochrones": {
+      "ok": true,
+      "n": 5
+     },
+     "crown-fire": {
+      "ok": true,
+      "n": 169,
+      "got": 169,
+      "last": "20260822_100000",
+      "complete": true
+     },
+     "flame-length": {
+      "ok": true,
+      "n": 169,
+      "got": 157,
+      "last": "20260822_100000",
+      "complete": true
+     },
+     "spread-rate": {
+      "ok": true,
+      "n": 169,
+      "got": 169,
+      "last": "20260822_100000",
+      "complete": true
+     },
+     "hours-since-burned": {
+      "ok": true,
+      "n": 169,
+      "got": 161,
+      "last": "20260822_100000",
+      "complete": true
+     }
+    },
+    "90": {
+     "isochrones": {
+      "ok": true,
+      "n": 5
+     },
+     "crown-fire": {
+      "ok": true,
+      "n": 169,
+      "got": 169,
+      "last": "20260822_100000",
+      "complete": true
+     },
+     "flame-length": {
+      "ok": true,
+      "n": 169,
+      "got": 157,
+      "last": "20260822_100000",
+      "complete": true
+     },
+     "spread-rate": {
+      "ok": true,
+      "n": 169,
+      "got": 169,
+      "last": "20260822_100000",
+      "complete": true
+     }
+    }
+   }
+  },
+  "ca-talbot/20260813_110300": {
+   "slug": "ca-talbot",
+   "run_ts": "20260813_110300",
+   "first_seen": "2026-08-13T16:42:37Z",
+   "complete": true,
+   "expired": false,
+   "files": {
+    "10": {
+     "bytes": 256611,
+     "etag": "\"6a7dce36-3ea63\"",
+     "ok": true
+    },
+    "30": {
+     "bytes": 365270,
+     "etag": "\"6a7dce38-592d6\"",
+     "ok": true
+    },
+    "50": {
+     "bytes": 467268,
+     "etag": "\"6a7dce38-72144\"",
+     "ok": true
+    },
+    "70": {
+     "bytes": 620065,
+     "etag": "\"6a7dce38-97621\"",
+     "ok": true
+    },
+    "90": {
+     "bytes": 1223537,
+     "etag": "\"6a7dce38-12ab71\"",
+     "ok": true
+    }
+   },
+   "errors": {},
+   "centroid": [
+    -120.38036,
+    39.17827
+   ],
+   "last_seen": "2026-08-13T20:59:33Z",
+   "vars": {
+    "10": {
+     "isochrones": {
+      "ok": true,
+      "n": 5
+     },
+     "crown-fire": {
+      "ok": true,
+      "n": 169,
+      "got": 169,
+      "last": "20260820_110000",
+      "complete": true
+     },
+     "flame-length": {
+      "ok": true,
+      "n": 169,
+      "got": 169,
+      "last": "20260820_110000",
+      "complete": true
+     },
+     "hours-since-burned": {
+      "ok": true,
+      "n": 169,
+      "got": 157,
+      "last": "20260820_110000",
+      "complete": true
+     }
+    },
+    "30": {
+     "isochrones": {
+      "ok": true,
+      "n": 5
+     },
+     "crown-fire": {
+      "ok": true,
+      "n": 169,
+      "got": 169,
+      "last": "20260820_110000",
+      "complete": true
+     },
+     "flame-length": {
+      "ok": true,
+      "n": 169,
+      "got": 169,
+      "last": "20260820_110000",
+      "complete": true
+     },
+     "hours-since-burned": {
+      "ok": true,
+      "n": 169,
+      "got": 157,
+      "last": "20260820_110000",
+      "complete": true
+     }
+    },
+    "50": {
+     "crown-fire": {
+      "ok": true,
+      "n": 169,
+      "got": 169,
+      "last": "20260820_110000",
+      "complete": true
+     },
+     "flame-length": {
+      "ok": true,
+      "n": 169,
+      "got": 169,
+      "last": "20260820_110000",
+      "complete": true
+     },
+     "hours-since-burned": {
+      "ok": true,
+      "n": 169,
+      "got": 159,
+      "last": "20260820_110000",
+      "complete": true
+     }
+    },
+    "70": {},
+    "90": {}
+   }
+  }
+ },
+ "generated": "2026-08-17T21:10:35Z"
+}

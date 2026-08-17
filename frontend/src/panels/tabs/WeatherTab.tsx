@@ -3,21 +3,27 @@ import { LegendImg } from '../../utils/LegendImg';
 import { useState } from 'react';
 import { useWeatherRuns } from '../../api/queries';
 import { weatherLegendUrl } from '../../api/wmsUrls';
-import { RENDERED_WEATHER_PRODUCTS, type WeatherProduct } from '../../api/types';
+import {
+  RENDERED_WEATHER_PRODUCTS,
+  type WeatherProduct,
+  type WeatherProductMeta,
+} from '../../api/types';
 import { useStore } from '../../state/store';
 import { formatDateTime, formatRelative } from '../../utils/format';
+import { GradientLegend } from '../../utils/GradientLegend';
 
 const STALE_MS = 7 * 3600_000;
 
 function WeatherRow({
   product,
-  label,
+  meta,
   legendTemplate,
 }: {
   product: WeatherProduct;
-  label: string;
+  meta: WeatherProductMeta;
   legendTemplate: string | undefined;
 }) {
+  const label = meta.label;
   const state = useStore((s) => s.layers.weather[product]);
   const actions = useStore((s) => s.actions);
   const [legendOpen, setLegendOpen] = useState(false);
@@ -59,7 +65,11 @@ function WeatherRow({
       )}
       {legendOpen && (
         <div className="rd-mini-legend">
-          <LegendImg src={weatherLegendUrl(product, legendTemplate)} alt={`${label} legend`} />
+          {meta.legend_stops ? (
+            <GradientLegend stops={meta.legend_stops} units={meta.units} />
+          ) : (
+            <LegendImg src={weatherLegendUrl(product, legendTemplate)} alt={`${label} legend`} />
+          )}
         </div>
       )}
     </div>
@@ -87,18 +97,13 @@ export function WeatherTab() {
         // Only products that are BOTH in the manifest and pre-rendered.
         const products = RENDERED_WEATHER_PRODUCTS.flatMap((p) => {
           const meta = model.products[p];
-          return meta ? ([[p, meta]] as [WeatherProduct, { label: string }][]) : [];
+          return meta ? ([[p, meta]] as [WeatherProduct, WeatherProductMeta][]) : [];
         });
         return (
           <section key={modelId} className="rd-section">
             {usable.length > 1 && <h3 className="rd-section-title">{model.label}</h3>}
             {products.map(([p, meta]) => (
-              <WeatherRow
-                key={p}
-                product={p}
-                label={meta.label}
-                legendTemplate={model.legend_template}
-              />
+              <WeatherRow key={p} product={p} meta={meta} legendTemplate={model.legend_template} />
             ))}
             <div className="rd-runinfo">
               {stale

@@ -12,10 +12,16 @@ from pathlib import Path
 
 FIRE_API = "https://fire-api-prod.web.app"
 GS01_OWS = "https://geoserver-usw1.pyrecast.org/geoserver01/ows"
-GS02_OWS = "https://geoserver-usw1.pyrecast.org/geoserver02/ows"
 FTP_BASE = "https://ftp.wildfire.gov/public/incident_specific_maps"
 
-WMS_PROXY = {"gs01": "/wms01", "gs02": "/wms02"}
+# Public forecast archive (docs/spec-archives.md): the browser renders spread
+# forecasts directly from this CORS-enabled bucket; the worker only merges its
+# manifest/fire_matches into the catalogs (archives.py).
+ARCHIVE_BASE_DEFAULT = "https://f005.backblazeb2.com/file/fire-forecast-archive"
+
+
+def archive_base() -> str:
+    return (os.environ.get("ARCHIVE_BASE") or ARCHIVE_BASE_DEFAULT).rstrip("/")
 
 USER_AGENT = "responder-debrief-mirror/1.0 (contact: pashaminkovsky@gmail.com)"
 
@@ -31,13 +37,15 @@ RETRY_ATTEMPTS = 3
 
 FRAMES_CONCURRENCY = 2   # max concurrent GetMap requests per geoserver
 FRAME_BUDGET_DEFAULT = 3000  # images per sync (env FRAME_BUDGET overrides)
+MIRROR_MAX_SECONDS_DEFAULT = 1500  # mirror phase wall-clock (env MIRROR_MAX_SECONDS);
+# leaves ~20 min of the 45-min CI timeout for tiling + manifests + catalog
 
 PRODUCTS_DAILY_KEEP = 3  # newest N Products|GIS/YYYYMMDD dirs
 IR_KEEP = 7              # newest N IR/ entries
 MOBILE_CAP_MB = 40       # Avenza mobile PDFs above this are skipped
 TILE_BUDGET = 40         # GeoPDF sheets tiled per run
 TILER_VERSION = 1
-PRUNE_INACTIVE_DAYS = 14
+# User policy: incident data kept indefinitely; prune is manual + explicit-flags only.
 
 # ---------------------------------------------------------------------------
 # FTP region roots (the 11 GACC dirs observed live at FTP_BASE)
@@ -127,34 +135,15 @@ SHEET_DPI = {
 DEFAULT_DPI = 200
 
 # ---------------------------------------------------------------------------
-# Weather (gs01) products
+# Weather products: defined in hrrr.py (NOAA HRRR pipeline — labels, units,
+# idx record matching, color ramps / legend_stops all live in hrrr.PRODUCTS).
 # ---------------------------------------------------------------------------
 
-WEATHER_PRODUCTS = {
-    "tmpf": {"label": "Temperature (°F)"},
-    "rh": {"label": "Relative humidity"},
-    "ws": {"label": "Wind speed"},
-    "wg": {"label": "Wind gust"},
-    "wd": {"label": "Wind direction"},
-    "ffwi": {"label": "Fosberg fire wx index"},
-    "smoke": {"label": "Near-surface smoke"},
-    "tcdc": {"label": "Cloud cover"},
-    "pign": {"label": "P(ignition)"},
-    "meq": {"label": "Fuel moisture eq."},
-    "apcp01": {"label": "1-h precip"},
-    "apcptot": {"label": "Run-total precip"},
-}
-
-# The 8 fire-critical products pre-rendered as frames (and the only ones in
-# the v1 weather manifest — tcdc/pign/meq/apcptot are dropped).
-WEATHER_FRAME_PRODUCTS = ["tmpf", "rh", "ws", "wg", "wd", "ffwi", "smoke", "apcp01"]
-
 # ---------------------------------------------------------------------------
-# Pre-rendered frames (docs/spec-frames.md)
+# Pre-rendered frames (weather + national; spread frames are gone — the
+# browser renders spread directly from the public archive, docs/spec-archives.md)
 # ---------------------------------------------------------------------------
 
-SPREAD_FRAME_PERCENTILES = [10, 50]  # user decision: median + low-percentile scenario
-SPREAD_FRAME_MAX_DIM = 1536       # run-bbox GetMap max edge, aspect-correct
 WEATHER_FRAME_WIDTH = 2560        # CONUS width (height aspect-correct)
 NATIONAL_FRAME_WIDTH = 2048       # national perimeters snapshot width
 CONUS_BOUNDS = [-125.0, 24.5, -66.5, 49.5]  # [w, s, e, n] EPSG:4326
@@ -168,7 +157,6 @@ B2_ENV = ("B2_S3_ENDPOINT", "B2_KEY_ID", "B2_APP_KEY", "B2_BUCKET")
 CACHE_CONTROL_RULES: list[tuple[str, str]] = [
     # (key prefix, Cache-Control) — first match wins
     ("frames/national/", "public, max-age=300"),          # mutable snapshot
-    ("frames/legends/", "public, max-age=86400"),
     ("frames/", "public, max-age=31536000, immutable"),   # run-stamped frames
     ("tiles/", "public, max-age=31536000, immutable"),
     ("previews/", "public, max-age=31536000, immutable"),

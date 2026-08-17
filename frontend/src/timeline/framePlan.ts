@@ -43,42 +43,33 @@ export function resolvePerimeterVersion(
 
 // ---------- Spread forecast ----------
 
-export interface SpreadFrame {
-  /** VERBATIM instant string — Date.parse of it is the frame's {epoch_ms}. */
-  instant: string;
-  index: number;
-}
-
 /**
- * The instants that actually exist as pre-rendered frames: the run's thinned
- * frames.instants when present, else the verbatim time_instants (older
- * catalogs). Both are VERBATIM ISO strings — first instant has minute
- * precision, never do hour arithmetic.
+ * Coverage of a v2 archive run: [run_time, run_time + horizon_hours]. Spread
+ * renders CONTINUOUSLY inside this window (client-side decode — no frame
+ * snapping); the timeline's fire-mode end derives from it.
  */
-export function spreadInstants(run: PyrecastRun | null): string[] {
-  if (!run) return [];
-  return run.frames?.instants?.length ? run.frames.instants : (run.time_instants ?? []);
-}
-
-/**
- * Nearest instant <= t among the run's renderable instants (binary search).
- * Null when t is outside the run's coverage (before first instant) or the
- * product is static.
- */
-export function resolveSpreadFrame(run: PyrecastRun | null, t: number): SpreadFrame | null {
-  const instants = spreadInstants(run);
-  if (!instants.length) return null;
-  const times = instants.map((s) => Date.parse(s));
-  const i = lastIndexLE(times, t);
-  if (i < 0) return null;
-  return { instant: instants[i], index: i };
-}
-
-/** Is t within [first instant, last instant] of the run? */
 export function spreadCoverage(run: PyrecastRun | null): [number, number] | null {
-  const instants = spreadInstants(run);
-  if (!instants.length) return null;
-  return [Date.parse(instants[0]), Date.parse(instants[instants.length - 1])];
+  if (!run) return null;
+  const start = Date.parse(run.run_time);
+  const horizon = run.horizon_hours;
+  if (!Number.isFinite(start) || !Number.isFinite(horizon) || horizon <= 0) return null;
+  return [start, start + horizon * 3600_000];
+}
+
+/**
+ * Hourly playback ticks run_start .. run_start + horizon (run-anchored, so a
+ * minute-precision run start like 11:25 steps 11:25, 12:25, …), clipped to
+ * [from, to].
+ */
+export function spreadHourTicks(run: PyrecastRun | null, from: number, to: number): number[] {
+  const cov = spreadCoverage(run);
+  if (!cov) return [];
+  const HOUR = 3600_000;
+  const out: number[] = [];
+  for (let ts = cov[0]; ts <= cov[1]; ts += HOUR) {
+    if (ts >= from && ts <= to) out.push(ts);
+  }
+  return out;
 }
 
 // ---------- Weather ----------
@@ -138,15 +129,13 @@ export interface FramePlanInput {
 /**
  * Sorted union of active layers' frame times clipped to [from, to]; hourly
  * fallback when only past layers (perimeter/hotspots) are active — their
- * updates are cheap and continuous.
+ * updates are cheap and continuous. Spread contributes hourly ticks over its
+ * coverage (rendering itself is continuous; the ticks just pace playback).
  */
 export function buildFrameTimes(input: FramePlanInput): number[] {
   const set = new Set<number>();
   if (input.spreadActive) {
-    for (const s of spreadInstants(input.spreadRun)) {
-      const ts = Date.parse(s);
-      if (ts >= input.from && ts <= input.to) set.add(ts);
-    }
+    for (const ts of spreadHourTicks(input.spreadRun, input.from, input.to)) set.add(ts);
   }
   if (input.weatherActive) {
     for (const s of weatherHours(input.weatherRun)) {

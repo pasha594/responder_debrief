@@ -3,8 +3,9 @@ import {
   buildFrameTimes,
   lastIndexLE,
   resolvePerimeterVersion,
-  resolveSpreadFrame,
   resolveWeatherFrame,
+  spreadCoverage,
+  spreadHourTicks,
 } from './framePlan';
 import type { PyrecastRun, WeatherRun } from '../api/types';
 
@@ -38,83 +39,50 @@ describe('resolvePerimeterVersion', () => {
   });
 });
 
-// The minute-precision first instant is the critical real-world case:
-// runs start at e.g. 11:25:00Z, then step hourly on the hour.
+// v2 archive run: coverage is run_time .. run_time + horizon_hours; minute-
+// precision run starts (11:25) are the critical real-world case.
 const run = {
-  workspace: 'fire-spread-forecast_or-paradise_20260817_112500',
-  time_instants: [
-    '2026-08-17T11:25:00.000Z',
-    '2026-08-17T12:00:00.000Z',
-    '2026-08-17T13:00:00.000Z',
-  ],
+  workspace: 'wa-sinlahekin_20260817_112500',
+  slug: 'wa-sinlahekin',
+  run_ts: '20260817_112500',
+  run_time: '2026-08-17T11:25:00Z',
+  horizon_hours: 3,
 } as unknown as PyrecastRun;
 
-describe('resolveSpreadFrame', () => {
-  it('returns the verbatim instant string, never rounded', () => {
-    const f = resolveSpreadFrame(run, T('2026-08-17T11:40:00Z'));
-    expect(f?.instant).toBe('2026-08-17T11:25:00.000Z');
+describe('spreadCoverage (v2: run_time + horizon_hours)', () => {
+  it('spans run start to start + horizon', () => {
+    expect(spreadCoverage(run)).toEqual([
+      T('2026-08-17T11:25:00Z'),
+      T('2026-08-17T14:25:00Z'),
+    ]);
   });
-  it('exact hits and later instants', () => {
-    expect(resolveSpreadFrame(run, T('2026-08-17T12:00:00Z'))?.instant).toBe(
-      '2026-08-17T12:00:00.000Z',
-    );
-    expect(resolveSpreadFrame(run, T('2026-08-17T23:00:00Z'))?.instant).toBe(
-      '2026-08-17T13:00:00.000Z',
-    );
-  });
-  it('null before coverage', () => {
-    expect(resolveSpreadFrame(run, T('2026-08-17T11:00:00Z'))).toBeNull();
-    expect(resolveSpreadFrame(null, Date.now())).toBeNull();
+  it('null on missing run / bad fields', () => {
+    expect(spreadCoverage(null)).toBeNull();
+    expect(
+      spreadCoverage({ ...run, run_time: 'garbage' } as unknown as PyrecastRun),
+    ).toBeNull();
+    expect(
+      spreadCoverage({ ...run, horizon_hours: 0 } as unknown as PyrecastRun),
+    ).toBeNull();
   });
 });
 
-// Static-frames mode: the run carries a thinned frames.instants subset — only
-// those frames exist on B2, so snapping must use THEM, not time_instants.
-const framedRun = {
-  workspace: 'fire-spread-forecast_or-paradise_20260817_112500',
-  time_instants: [
-    '2026-08-17T11:25:00.000Z',
-    '2026-08-17T12:00:00.000Z',
-    '2026-08-17T13:00:00.000Z',
-    '2026-08-17T14:00:00.000Z',
-  ],
-  frames: {
-    percentiles: [50, 90],
-    // Thinned: 13:00 was dropped by the worker.
-    instants: ['2026-08-17T11:25:00.000Z', '2026-08-17T12:00:00.000Z', '2026-08-17T14:00:00.000Z'],
-    timed_template: '/frames/spread/{ws}/{pct}/{product}/{epoch_ms}.png',
-    static_template: '/frames/spread/{ws}/{pct}/{product}/static.png',
-    complete: true,
-  },
-} as unknown as PyrecastRun;
-
-describe('resolveSpreadFrame with frames.instants', () => {
-  it('binary-searches the thinned frames.instants, not time_instants', () => {
-    // 13:30 would snap to 13:00 via time_instants — but that frame was never
-    // rendered; the thinned list must win (→ 12:00).
-    expect(resolveSpreadFrame(framedRun, T('2026-08-17T13:30:00Z'))?.instant).toBe(
-      '2026-08-17T12:00:00.000Z',
-    );
-    expect(resolveSpreadFrame(framedRun, T('2026-08-17T14:00:00Z'))?.instant).toBe(
-      '2026-08-17T14:00:00.000Z',
-    );
+describe('spreadHourTicks', () => {
+  it('steps hourly anchored to the (minute-precision) run start', () => {
+    expect(spreadHourTicks(run, T('2026-08-17T00:00:00Z'), T('2026-08-18T00:00:00Z'))).toEqual([
+      T('2026-08-17T11:25:00Z'),
+      T('2026-08-17T12:25:00Z'),
+      T('2026-08-17T13:25:00Z'),
+      T('2026-08-17T14:25:00Z'),
+    ]);
   });
-  it('keeps the minute-precision first instant verbatim', () => {
-    expect(resolveSpreadFrame(framedRun, T('2026-08-17T11:30:00Z'))?.instant).toBe(
-      '2026-08-17T11:25:00.000Z',
-    );
+  it('clips to [from, to]', () => {
+    expect(spreadHourTicks(run, T('2026-08-17T12:00:00Z'), T('2026-08-17T13:00:00Z'))).toEqual([
+      T('2026-08-17T12:25:00Z'),
+    ]);
   });
-  it('null before coverage of the thinned list', () => {
-    expect(resolveSpreadFrame(framedRun, T('2026-08-17T11:00:00Z'))).toBeNull();
-  });
-  it('falls back to time_instants when frames.instants is empty', () => {
-    const emptyFrames = {
-      ...(framedRun as unknown as Record<string, unknown>),
-      frames: { ...(framedRun.frames as object), instants: [] },
-    } as unknown as PyrecastRun;
-    expect(resolveSpreadFrame(emptyFrames, T('2026-08-17T13:30:00Z'))?.instant).toBe(
-      '2026-08-17T13:00:00.000Z',
-    );
+  it('empty without a run', () => {
+    expect(spreadHourTicks(null, 0, Date.now())).toEqual([]);
   });
 });
 
@@ -167,7 +135,7 @@ describe('resolveWeatherFrame with frames.hours', () => {
 });
 
 describe('buildFrameTimes', () => {
-  it('unions active layers, clipped and sorted', () => {
+  it('unions spread hourly ticks with weather hours, clipped and sorted', () => {
     const times = buildFrameTimes({
       spreadRun: run,
       spreadActive: true,
@@ -177,25 +145,25 @@ describe('buildFrameTimes', () => {
       to: T('2026-08-17T13:00:00Z'),
     });
     expect(times).toEqual([
-      T('2026-08-17T11:25:00.000Z'),
+      T('2026-08-17T11:25:00Z'),
       T('2026-08-17T12:00:00Z'),
+      T('2026-08-17T12:25:00Z'),
       T('2026-08-17T13:00:00Z'),
     ]);
   });
-  it('uses the thinned frames.instants when present', () => {
+  it('spread alone contributes run-anchored hourly ticks', () => {
     const times = buildFrameTimes({
-      spreadRun: framedRun,
+      spreadRun: run,
       spreadActive: true,
       weatherRun: null,
       weatherActive: false,
       from: T('2026-08-17T11:00:00Z'),
       to: T('2026-08-17T14:00:00Z'),
     });
-    // 13:00 exists in time_instants but not in frames.instants → excluded.
     expect(times).toEqual([
-      T('2026-08-17T11:25:00.000Z'),
-      T('2026-08-17T12:00:00Z'),
-      T('2026-08-17T14:00:00Z'),
+      T('2026-08-17T11:25:00Z'),
+      T('2026-08-17T12:25:00Z'),
+      T('2026-08-17T13:25:00Z'),
     ]);
   });
   it('hourly fallback when nothing is active', () => {

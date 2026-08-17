@@ -16,9 +16,10 @@ def empty_state() -> dict:
         "updated_at": None,
         "incidents": {},
         "tiled": {},
-        # pre-rendered WMS frames: {workspace: {"done": bool, "fetched": N}}
-        "frames": {},
-        "pyrecast": {"gs02_update_sequence": None, "gs01_probed_runs": []},
+        # NOAA HRRR weather frames: {workspace: {"done": bool, "fetched": N}}
+        "hrrr": {},
+        # forecast-archive doc ETags: {"manifest.json_etag", "fire_matches.json_etag", "fetched_at"}
+        "archives": {},
         "prune": {"inactive_since": {}},
         "catalog_version": 0,
     }

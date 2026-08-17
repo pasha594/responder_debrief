@@ -11,15 +11,6 @@ export const DATA_BASE_URL: string =
 export const BASEMAP_STYLE_DARK = 'https://tiles.openfreemap.org/styles/dark';
 export const BASEMAP_STYLE_LIGHT = 'https://tiles.openfreemap.org/styles/positron';
 
-/** Spread-forecast frame images: longest edge in px (worker renders at this). */
-export const SPREAD_FRAME_MAX_DIM = 1536;
-
-/** Max concurrent frame prefetches. B2 static files — no flow control upstream. */
-export const PREFETCH_CONCURRENCY = 6;
-
-/** LRU cap for decoded frame images. */
-export const FRAME_CACHE_MAX_ENTRIES = 500;
-
 /** Playback speed default: model-hours advanced per wall-clock second. */
 export const DEFAULT_PLAYBACK_SPEED = 2;
 

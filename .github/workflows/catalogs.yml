@@ -31,6 +31,10 @@ jobs:
       - name: Install dependencies
         run: uv sync
 
+      # HRRR weather frames need CLI GDAL (gdalwarp/gdaldem/gdal_calc.py)
+      - name: Install GDAL
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends gdal-bin python3-gdal
+
       - name: Sync catalogs
         env:
           B2_KEY_ID: ${{ secrets.B2_KEY_ID }}
