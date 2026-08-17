@@ -1,4 +1,5 @@
 /** Weather layer toggles: one checkbox row per pre-rendered catalog product. */
+import { LegendImg } from '../../utils/LegendImg';
 import { useState } from 'react';
 import { useWeatherRuns } from '../../api/queries';
 import { weatherLegendUrl } from '../../api/wmsUrls';
@@ -58,11 +59,7 @@ function WeatherRow({
       )}
       {legendOpen && (
         <div className="rd-mini-legend">
-          <img
-            src={weatherLegendUrl(product, legendTemplate)}
-            alt={`${label} legend`}
-            loading="lazy"
-          />
+          <LegendImg src={weatherLegendUrl(product, legendTemplate)} alt={`${label} legend`} />
         </div>
       )}
     </div>

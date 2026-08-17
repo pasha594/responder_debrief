@@ -1,4 +1,5 @@
 /** Spread-forecast controls: product, percentile, opacity, legend. */
+import { LegendImg } from '../../utils/LegendImg';
 import { useEffect, useMemo } from 'react';
 import {
   latestRun,
@@ -133,10 +134,9 @@ export function ForecastTab({ corneaId }: { corneaId: string }) {
       </div>
 
       <div className="rd-legend-card">
-        <img
+        <LegendImg
           src={spreadLegendUrl(spread.product, run)}
           alt={`${SPREAD_PRODUCT_LABELS[spread.product]} legend`}
-          loading="lazy"
         />
       </div>
     </div>

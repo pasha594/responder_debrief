@@ -3,6 +3,7 @@
  * spread product (ui.legendKey = "spread:{product}") and every visible
  * weather layer.
  */
+import { LegendImg } from '../utils/LegendImg';
 import { useMemo } from 'react';
 import {
   latestRun,
@@ -87,13 +88,13 @@ export function LegendBar() {
       {spreadLegendSrc && spreadProduct && (
         <div className="rd-legendbar-spread">
           <div className="rd-legendbar-caption">{SPREAD_PRODUCT_LABELS[spreadProduct]}</div>
-          <img src={spreadLegendSrc} alt="Forecast legend" loading="lazy" />
+          <LegendImg src={spreadLegendSrc} alt="Forecast legend" />
         </div>
       )}
       {weatherRows.map((row) => (
         <div key={row.product} className="rd-legendbar-weather-row">
           <span className="rd-legendbar-label">{row.label}</span>
-          <img src={row.url} alt={`${row.label} legend`} loading="lazy" />
+          <LegendImg src={row.url} alt={`${row.label} legend`} />
         </div>
       ))}
     </div>
