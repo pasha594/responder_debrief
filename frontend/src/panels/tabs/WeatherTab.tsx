@@ -1,27 +1,21 @@
-/** Weather layer toggles: one checkbox row per catalog product. */
+/** Weather layer toggles: one checkbox row per pre-rendered catalog product. */
 import { useState } from 'react';
 import { useWeatherRuns } from '../../api/queries';
-import { legendUrl, WMS01 } from '../../api/wmsUrls';
-import type { WeatherProduct, WeatherRun } from '../../api/types';
+import { weatherLegendUrl } from '../../api/wmsUrls';
+import { RENDERED_WEATHER_PRODUCTS, type WeatherProduct } from '../../api/types';
 import { useStore } from '../../state/store';
 import { formatDateTime, formatRelative } from '../../utils/format';
 
 const STALE_MS = 7 * 3600_000;
 
-export function weatherDefaultLayer(run: WeatherRun, product: string): string {
-  return run.default_layer_template
-    .replace('{ws}', run.workspace)
-    .replace('{product}', product);
-}
-
 function WeatherRow({
   product,
   label,
-  run,
+  legendTemplate,
 }: {
   product: WeatherProduct;
   label: string;
-  run: WeatherRun;
+  legendTemplate: string | undefined;
 }) {
   const state = useStore((s) => s.layers.weather[product]);
   const actions = useStore((s) => s.actions);
@@ -65,7 +59,7 @@ function WeatherRow({
       {legendOpen && (
         <div className="rd-mini-legend">
           <img
-            src={legendUrl(WMS01, weatherDefaultLayer(run, product))}
+            src={weatherLegendUrl(product, legendTemplate)}
             alt={`${label} legend`}
             loading="lazy"
           />
@@ -93,15 +87,21 @@ export function WeatherTab() {
       {usable.map(([modelId, model]) => {
         const run = model.runs[0];
         const stale = Date.now() - Date.parse(run.run_time) > STALE_MS;
-        const products = Object.entries(model.products) as [
-          WeatherProduct,
-          { label: string },
-        ][];
+        // Only products that are BOTH in the manifest and pre-rendered.
+        const products = RENDERED_WEATHER_PRODUCTS.flatMap((p) => {
+          const meta = model.products[p];
+          return meta ? ([[p, meta]] as [WeatherProduct, { label: string }][]) : [];
+        });
         return (
           <section key={modelId} className="rd-section">
             {usable.length > 1 && <h3 className="rd-section-title">{model.label}</h3>}
             {products.map(([p, meta]) => (
-              <WeatherRow key={p} product={p} label={meta.label} run={run} />
+              <WeatherRow
+                key={p}
+                product={p}
+                label={meta.label}
+                legendTemplate={model.legend_template}
+              />
             ))}
             <div className="rd-runinfo">
               {stale

@@ -6,7 +6,7 @@ import {
   useMasterCatalog,
   usePyrecastRuns,
 } from '../../api/queries';
-import { proxyRelative } from '../../api/wmsUrls';
+import { spreadLegendUrl } from '../../api/wmsUrls';
 import type { Percentile, PyrecastRun, SpreadProduct } from '../../api/types';
 import { spreadCoverage } from '../../timeline/framePlan';
 import { useStore } from '../../state/store';
@@ -60,7 +60,8 @@ export function ForecastTab({ corneaId }: { corneaId: string }) {
     (p) => run.products[p],
   );
   const coverage = spreadCoverage(run);
-  const legendRel = run.products[spread.product]?.legend_url ?? null;
+  // Only pre-rendered percentiles are selectable in static mode.
+  const renderedPercentiles = run.frames?.percentiles ?? run.percentiles;
 
   return (
     <div className="rd-tab-body">
@@ -91,18 +92,22 @@ export function ForecastTab({ corneaId }: { corneaId: string }) {
       <div className="rd-field">
         <span className="rd-field-label">Ensemble percentile</span>
         <div className="rd-pills" role="group" aria-label="Ensemble percentile">
-          {ALL_PERCENTILES.map((p) => (
-            <button
-              key={p}
-              type="button"
-              className={`rd-pill${spread.percentile === p ? ' rd-pill--active' : ''}`}
-              disabled={!run.percentiles.includes(p)}
-              aria-pressed={spread.percentile === p}
-              onClick={() => actions.setSpreadPercentile(p)}
-            >
-              {p}
-            </button>
-          ))}
+          {ALL_PERCENTILES.map((p) => {
+            const enabled = renderedPercentiles.includes(p);
+            return (
+              <button
+                key={p}
+                type="button"
+                className={`rd-pill${spread.percentile === p ? ' rd-pill--active' : ''}`}
+                disabled={!enabled}
+                title={enabled ? undefined : 'Not pre-rendered in static mode'}
+                aria-pressed={spread.percentile === p}
+                onClick={() => actions.setSpreadPercentile(p)}
+              >
+                {p}
+              </button>
+            );
+          })}
         </div>
       </div>
 
@@ -127,15 +132,13 @@ export function ForecastTab({ corneaId }: { corneaId: string }) {
         )}
       </div>
 
-      {legendRel && (
-        <div className="rd-legend-card">
-          <img
-            src={proxyRelative(legendRel)}
-            alt={`${SPREAD_PRODUCT_LABELS[spread.product]} legend`}
-            loading="lazy"
-          />
-        </div>
-      )}
+      <div className="rd-legend-card">
+        <img
+          src={spreadLegendUrl(spread.product, run)}
+          alt={`${SPREAD_PRODUCT_LABELS[spread.product]} legend`}
+          loading="lazy"
+        />
+      </div>
     </div>
   );
 }

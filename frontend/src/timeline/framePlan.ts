@@ -44,31 +44,41 @@ export function resolvePerimeterVersion(
 // ---------- Spread forecast ----------
 
 export interface SpreadFrame {
-  /** VERBATIM instant string for the WMS time= param. */
+  /** VERBATIM instant string — Date.parse of it is the frame's {epoch_ms}. */
   instant: string;
   index: number;
 }
 
 /**
- * Nearest instant <= t from the run's verbatim time_instants (first instant
- * has minute precision — never do hour arithmetic). Null when t is outside
- * the run's coverage (before first instant) or the product is static.
+ * The instants that actually exist as pre-rendered frames: the run's thinned
+ * frames.instants when present, else the verbatim time_instants (older
+ * catalogs). Both are VERBATIM ISO strings — first instant has minute
+ * precision, never do hour arithmetic.
+ */
+export function spreadInstants(run: PyrecastRun | null): string[] {
+  if (!run) return [];
+  return run.frames?.instants?.length ? run.frames.instants : (run.time_instants ?? []);
+}
+
+/**
+ * Nearest instant <= t among the run's renderable instants (binary search).
+ * Null when t is outside the run's coverage (before first instant) or the
+ * product is static.
  */
 export function resolveSpreadFrame(run: PyrecastRun | null, t: number): SpreadFrame | null {
-  if (!run?.time_instants?.length) return null;
-  const times = run.time_instants.map((s) => Date.parse(s));
+  const instants = spreadInstants(run);
+  if (!instants.length) return null;
+  const times = instants.map((s) => Date.parse(s));
   const i = lastIndexLE(times, t);
   if (i < 0) return null;
-  return { instant: run.time_instants[i], index: i };
+  return { instant: instants[i], index: i };
 }
 
 /** Is t within [first instant, last instant] of the run? */
 export function spreadCoverage(run: PyrecastRun | null): [number, number] | null {
-  if (!run?.time_instants?.length) return null;
-  return [
-    Date.parse(run.time_instants[0]),
-    Date.parse(run.time_instants[run.time_instants.length - 1]),
-  ];
+  const instants = spreadInstants(run);
+  if (!instants.length) return null;
+  return [Date.parse(instants[0]), Date.parse(instants[instants.length - 1])];
 }
 
 // ---------- Weather ----------
@@ -79,12 +89,23 @@ export interface WeatherFrame {
 }
 
 /**
- * Nearest hour within tolerance (90 min), else null (layer hides + chip).
- * Weather frames are layer-name swaps, not TIME params.
+ * The hours that actually exist as pre-rendered frames: frames.hours when
+ * present (hours actually rendered — may lag `hours` while a run is
+ * budget-limited), else the run's full hour list (older catalogs).
+ */
+export function weatherHours(run: WeatherRun | null): string[] {
+  if (!run) return [];
+  return run.frames?.hours?.length ? run.frames.hours : (run.hours ?? []);
+}
+
+/**
+ * Nearest rendered hour within tolerance (90 min), else null (layer hides +
+ * chip). Weather frames are per-hour image swaps.
  */
 export function resolveWeatherFrame(run: WeatherRun | null, t: number): WeatherFrame | null {
-  if (!run?.hours?.length) return null;
-  const times = run.hours.map((s) => Date.parse(s));
+  const hours = weatherHours(run);
+  if (!hours.length) return null;
+  const times = hours.map((s) => Date.parse(s));
   // nearest, not just <=
   const i = lastIndexLE(times, t);
   const candidates: number[] = [];
@@ -100,7 +121,7 @@ export function resolveWeatherFrame(run: WeatherRun | null, t: number): WeatherF
     }
   }
   if (best < 0 || bestDist > WEATHER_SNAP_TOLERANCE_MS) return null;
-  return { hourIso: run.hours[best], index: best };
+  return { hourIso: hours[best], index: best };
 }
 
 // ---------- Frame plan for playback ----------
@@ -121,14 +142,14 @@ export interface FramePlanInput {
  */
 export function buildFrameTimes(input: FramePlanInput): number[] {
   const set = new Set<number>();
-  if (input.spreadActive && input.spreadRun?.time_instants) {
-    for (const s of input.spreadRun.time_instants) {
+  if (input.spreadActive) {
+    for (const s of spreadInstants(input.spreadRun)) {
       const ts = Date.parse(s);
       if (ts >= input.from && ts <= input.to) set.add(ts);
     }
   }
-  if (input.weatherActive && input.weatherRun?.hours) {
-    for (const s of input.weatherRun.hours) {
+  if (input.weatherActive) {
+    for (const s of weatherHours(input.weatherRun)) {
       const ts = Date.parse(s);
       if (ts >= input.from && ts <= input.to) set.add(ts);
     }

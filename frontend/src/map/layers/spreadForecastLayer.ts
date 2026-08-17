@@ -1,9 +1,10 @@
 /**
- * Pyrecast spread forecast as a single-image WMS source. Frames are atomic
- * updateImage({url}) swaps (the FramePrefetcher warms the HTTP cache); timed
- * products resolve their instant from currentTime, static products
- * (time-of-arrival / isochrones) ignore it. WMS errors on this source signal
- * run rotation → ctx.onFrameError(), throttled to once per 30 s.
+ * Pyrecast spread forecast as a single-image source over pre-rendered B2
+ * frames. Frames are atomic updateImage({url}) swaps (the FramePrefetcher
+ * warms the HTTP cache); timed products resolve their instant from
+ * currentTime, static products (time-of-arrival / isochrones) ignore it.
+ * Load errors on this source (404 = frames pruned) signal run rotation →
+ * ctx.onFrameError(), throttled to once per 30 s.
  */
 import type { ImageSource, Map as MlMap } from 'maplibre-gl';
 import { boundsToImageCoords } from '../../api/geo';

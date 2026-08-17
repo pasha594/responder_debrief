@@ -29,6 +29,9 @@ LISTING_DELAY_S = 0.5  # ~1 rps listings, stay gentle
 HTTP_TIMEOUT_S = 60.0
 RETRY_ATTEMPTS = 3
 
+FRAMES_CONCURRENCY = 2   # max concurrent GetMap requests per geoserver
+FRAME_BUDGET_DEFAULT = 3000  # images per sync (env FRAME_BUDGET overrides)
+
 PRODUCTS_DAILY_KEEP = 3  # newest N Products|GIS/YYYYMMDD dirs
 IR_KEEP = 7              # newest N IR/ entries
 MOBILE_CAP_MB = 40       # Avenza mobile PDFs above this are skipped
@@ -142,6 +145,20 @@ WEATHER_PRODUCTS = {
     "apcptot": {"label": "Run-total precip"},
 }
 
+# The 8 fire-critical products pre-rendered as frames (and the only ones in
+# the v1 weather manifest — tcdc/pign/meq/apcptot are dropped).
+WEATHER_FRAME_PRODUCTS = ["tmpf", "rh", "ws", "wg", "wd", "ffwi", "smoke", "apcp01"]
+
+# ---------------------------------------------------------------------------
+# Pre-rendered frames (docs/spec-frames.md)
+# ---------------------------------------------------------------------------
+
+SPREAD_FRAME_PERCENTILES = [10, 50]  # user decision: median + low-percentile scenario
+SPREAD_FRAME_MAX_DIM = 1536       # run-bbox GetMap max edge, aspect-correct
+WEATHER_FRAME_WIDTH = 2560        # CONUS width (height aspect-correct)
+NATIONAL_FRAME_WIDTH = 2048       # national perimeters snapshot width
+CONUS_BOUNDS = [-125.0, 24.5, -66.5, 49.5]  # [w, s, e, n] EPSG:4326
+
 # ---------------------------------------------------------------------------
 # B2 / cache-control
 # ---------------------------------------------------------------------------
@@ -150,6 +167,9 @@ B2_ENV = ("B2_S3_ENDPOINT", "B2_KEY_ID", "B2_APP_KEY", "B2_BUCKET")
 
 CACHE_CONTROL_RULES: list[tuple[str, str]] = [
     # (key prefix, Cache-Control) — first match wins
+    ("frames/national/", "public, max-age=300"),          # mutable snapshot
+    ("frames/legends/", "public, max-age=86400"),
+    ("frames/", "public, max-age=31536000, immutable"),   # run-stamped frames
     ("tiles/", "public, max-age=31536000, immutable"),
     ("previews/", "public, max-age=31536000, immutable"),
     ("vectors/", "public, max-age=31536000, immutable"),

@@ -1,33 +1,39 @@
 /**
- * Weather rasters (gs01 WMS tiles). Frames are layer-NAME swaps, not TIME
- * params, so each enabled product keeps an A/B pair of raster sources: the
- * hidden member loads the next hour's tiles, then a ~150 ms raster-opacity
- * crossfade swaps roles — no white flash while stepping through hours.
+ * Weather rasters — pre-rendered CONUS frame images from B2, one per product
+ * per forecast hour. Frames are whole-image swaps, so each enabled product
+ * keeps an A/B pair of image sources: the next hour's PNG is preloaded via
+ * Image().decode() (B2 frames are immutable → the HTTP cache makes the
+ * subsequent source fetch instant), then the hidden member updateImage()s and
+ * a ~150 ms raster-opacity crossfade swaps roles — no white flash stepping
+ * through hours.
  */
-import type { Map as MlMap, RasterTileSource } from 'maplibre-gl';
-import { WMS01, weatherLayerName, wmsTileTemplate } from '../../api/wmsUrls';
-import type { WeatherProduct } from '../../api/types';
+import type { ImageSource, Map as MlMap } from 'maplibre-gl';
+import { weatherImageUrl } from '../../api/wmsUrls';
+import { boundsToImageCoords, type Bounds4326 } from '../../api/geo';
+import { RENDERED_WEATHER_PRODUCTS, type WeatherProduct, type WeatherRun } from '../../api/types';
 import { resolveWeatherFrame } from '../../timeline/framePlan';
 import { beforeIdFor, type RdLayerId } from '../zOrder';
 import type { LayerManager } from '../layerTypes';
-
-const PRODUCTS: WeatherProduct[] = [
-  'tmpf', 'rh', 'ws', 'wg', 'wd', 'ffwi',
-  'smoke', 'tcdc', 'pign', 'meq', 'apcp01', 'apcptot',
-];
 
 const FADE_MS = 150;
 const LOAD_TIMEOUT_MS = 2000;
 const DEFAULT_OPACITY = 0.7;
 
+/** Spec CONUS bounds — fallback for manifests missing frames.bounds. */
+const CONUS_BOUNDS: Bounds4326 = [-125.0, 24.5, -66.5, 49.5];
+
+function frameCoords(run: WeatherRun): ReturnType<typeof boundsToImageCoords> {
+  return boundsToImageCoords(run.frames?.bounds ?? CONUS_BOUNDS);
+}
+
 type MemberKey = 'a' | 'b';
 
 interface Pair {
   active: MemberKey;
-  /** Qualified WMS layer name currently loaded into each member (null = empty). */
-  layerName: { a: string | null; b: string | null };
-  /** In-flight step (tile wait and/or crossfade). */
-  pending: { member: MemberKey; layerName: string; cancel(): void } | null;
+  /** Frame URL currently loaded into each member (null = empty). */
+  url: { a: string | null; b: string | null };
+  /** In-flight step (preload wait and/or crossfade). */
+  pending: { member: MemberKey; url: string; cancel(): void } | null;
   /** Last raster-opacity applied to the active member. */
   appliedOpacity: number | null;
   shown: boolean;
@@ -37,22 +43,20 @@ const pairs = new Map<WeatherProduct, Pair>();
 
 const memberId = (p: WeatherProduct, m: MemberKey): string => `rd-weather-${p}-${m}`;
 
-/** Point a member at a qualified layer (setTiles when available, else rebuild). */
-function ensureMember(map: MlMap, p: WeatherProduct, m: MemberKey, layerName: string): void {
+/** Point a member's image source at a frame URL (updateImage when possible). */
+function ensureMember(
+  map: MlMap,
+  p: WeatherProduct,
+  m: MemberKey,
+  url: string,
+  coordinates: ReturnType<typeof boundsToImageCoords>,
+): void {
   const id = memberId(p, m);
-  const tpl = wmsTileTemplate(WMS01, layerName);
-  const src = map.getSource(id);
+  const src = map.getSource(id) as ImageSource | undefined;
   if (src) {
-    const rts = src as Partial<RasterTileSource>;
-    if (typeof rts.setTiles === 'function') {
-      rts.setTiles([tpl]);
-    } else {
-      if (map.getLayer(id)) map.removeLayer(id);
-      map.removeSource(id);
-    }
-  }
-  if (!map.getSource(id)) {
-    map.addSource(id, { type: 'raster', tiles: [tpl], tileSize: 512 });
+    src.updateImage({ url, coordinates });
+  } else {
+    map.addSource(id, { type: 'image', url, coordinates });
   }
   if (!map.getLayer(id)) {
     map.addLayer(
@@ -67,37 +71,26 @@ function ensureMember(map: MlMap, p: WeatherProduct, m: MemberKey, layerName: st
   }
 }
 
-/** Resolve once the member's tiles are loaded, or after a 2 s fallback. */
-function waitForSourceLoaded(map: MlMap, sourceId: string, cb: () => void): () => void {
+/**
+ * Warm + decode a frame off-DOM, then cb. Proceeds on error too (a 404 frame
+ * must not wedge stepping) and after a 2 s fallback timeout.
+ */
+function preloadImage(url: string, cb: () => void): () => void {
   let done = false;
   const finish = () => {
     if (done) return;
     done = true;
-    cleanup();
+    clearTimeout(timer);
     cb();
   };
-  const check = () => {
-    if (done) return;
-    let loaded = false;
-    try {
-      loaded = !!map.getSource(sourceId) && map.isSourceLoaded(sourceId) && map.areTilesLoaded();
-    } catch {
-      loaded = false;
-    }
-    if (loaded) finish();
-  };
   const timer = setTimeout(finish, LOAD_TIMEOUT_MS);
-  const cleanup = () => {
-    clearTimeout(timer);
-    map.off('sourcedata', check);
-    map.off('idle', check);
-  };
-  map.on('sourcedata', check);
-  map.on('idle', check);
-  queueMicrotask(check);
+  const img = new Image();
+  img.decoding = 'async';
+  img.src = url;
+  img.decode().then(finish, finish);
   return () => {
     done = true;
-    cleanup();
+    clearTimeout(timer);
   };
 }
 
@@ -164,7 +157,7 @@ export const weatherLayers: LayerManager = {
   update(map, ctx) {
     const frame = resolveWeatherFrame(ctx.weatherRun, ctx.currentTime);
 
-    for (const p of PRODUCTS) {
+    for (const p of RENDERED_WEATHER_PRODUCTS) {
       const st = ctx.layers.weather[p];
       let pair = pairs.get(p);
 
@@ -179,12 +172,13 @@ export const weatherLayers: LayerManager = {
         if (pair) hidePair(map, p, pair); // outside forecast coverage
         continue;
       }
-      const wanted = weatherLayerName(ctx.weatherRun, p, frame.hourIso);
+      const wanted = weatherImageUrl(ctx.weatherRun, p, frame.hourIso);
+      const coords = frameCoords(ctx.weatherRun);
 
       if (!pair) {
         pair = {
           active: 'a',
-          layerName: { a: null, b: null },
+          url: { a: null, b: null },
           pending: null,
           appliedOpacity: null,
           shown: true,
@@ -202,8 +196,8 @@ export const weatherLayers: LayerManager = {
       }
 
       // Already showing the wanted frame: just track opacity changes.
-      if (pr.layerName[pr.active] === wanted) {
-        if (pr.pending && pr.pending.layerName !== wanted) cancelPending(pr);
+      if (pr.url[pr.active] === wanted) {
+        if (pr.pending && pr.pending.url !== wanted) cancelPending(pr);
         if (!pr.pending && pr.appliedOpacity !== target) {
           const id = memberId(p, pr.active);
           if (map.getLayer(id)) map.setPaintProperty(id, 'raster-opacity', target);
@@ -214,19 +208,20 @@ export const weatherLayers: LayerManager = {
 
       // A step toward `wanted` is already in flight — let it land.
       if (pr.pending) {
-        if (pr.pending.layerName === wanted) continue;
+        if (pr.pending.url === wanted) continue;
         cancelPending(pr);
       }
 
-      if (pr.layerName[pr.active] === null) {
-        // First show for this product: load into the active member, fade in.
+      if (pr.url[pr.active] === null) {
+        // First show for this product: preload, load into the active member,
+        // fade in.
         const m = pr.active;
         const id = memberId(p, m);
-        ensureMember(map, p, m, wanted);
-        pr.layerName[m] = wanted;
-        setLayerVisibility(map, id, true);
         let cancelFade: (() => void) | null = null;
-        const cancelWait = waitForSourceLoaded(map, id, () => {
+        const cancelWait = preloadImage(wanted, () => {
+          ensureMember(map, p, m, wanted, coords);
+          pr.url[m] = wanted;
+          setLayerVisibility(map, id, true);
           cancelFade = animateOpacity(map, id, 0, target, () => {
             pr.pending = null;
           });
@@ -234,7 +229,7 @@ export const weatherLayers: LayerManager = {
         });
         pr.pending = {
           member: m,
-          layerName: wanted,
+          url: wanted,
           cancel: () => {
             cancelWait();
             cancelFade?.();
@@ -243,19 +238,20 @@ export const weatherLayers: LayerManager = {
         continue;
       }
 
-      // Standard A/B step: load the inactive member, crossfade, swap roles.
+      // Standard A/B step: preload, update the inactive member, crossfade,
+      // swap roles.
       const inM: MemberKey = pr.active === 'a' ? 'b' : 'a';
       const inId = memberId(p, inM);
       const outId = memberId(p, pr.active);
-      ensureMember(map, p, inM, wanted);
-      pr.layerName[inM] = wanted;
-      if (map.getLayer(inId)) {
-        map.setPaintProperty(inId, 'raster-opacity', 0);
-        map.setLayoutProperty(inId, 'visibility', 'visible');
-      }
       let cancelFadeIn: (() => void) | null = null;
       let cancelFadeOut: (() => void) | null = null;
-      const cancelWait = waitForSourceLoaded(map, inId, () => {
+      const cancelWait = preloadImage(wanted, () => {
+        ensureMember(map, p, inM, wanted, coords);
+        pr.url[inM] = wanted;
+        if (map.getLayer(inId)) {
+          map.setPaintProperty(inId, 'raster-opacity', 0);
+          map.setLayoutProperty(inId, 'visibility', 'visible');
+        }
         cancelFadeIn = animateOpacity(map, inId, 0, target, () => {
           pr.pending = null;
           setLayerVisibility(map, outId, false);
@@ -266,7 +262,7 @@ export const weatherLayers: LayerManager = {
       });
       pr.pending = {
         member: inM,
-        layerName: wanted,
+        url: wanted,
         cancel: () => {
           cancelWait();
           cancelFadeIn?.();

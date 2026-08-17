@@ -1,7 +1,8 @@
 name: Sync catalogs
 
-# Hourly: fire API + pyrecast capabilities -> catalog.json / pyrecast_runs.json /
-# weather_runs.json on B2. Odd minute to dodge the GH scheduler rush.
+# Hourly: fire API + pyrecast capabilities -> pre-rendered WMS frames +
+# catalog.json / pyrecast_runs.json / weather_runs.json on B2.
+# Odd minute to dodge the GH scheduler rush.
 on:
   schedule:
     - cron: "7 * * * *"
@@ -14,7 +15,7 @@ concurrency:
 jobs:
   sync-catalogs:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     defaults:
       run:
         working-directory: worker
@@ -36,4 +37,6 @@ jobs:
           B2_APP_KEY: ${{ secrets.B2_APP_KEY }}
           B2_BUCKET: responder-debrief-data
           B2_S3_ENDPOINT: ${{ vars.B2_S3_ENDPOINT }}
+          # per-sync cap on pre-rendered frame images (default 3000)
+          FRAME_BUDGET: ${{ vars.FRAME_BUDGET || '3000' }}
         run: uv run python -m responder_worker.cli sync-catalogs

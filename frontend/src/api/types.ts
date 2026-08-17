@@ -126,17 +126,20 @@ export interface MasterCatalog {
   schema_version: number;
   version: number;
   generated_at: string;
-  wms_proxy: { gs01: string; gs02: string };
   fires: CatalogFire[];
   counts: Record<string, number>;
   /**
-   * Latest qualified layer names for national gs01 overlays whose upstream
-   * names are rotating timestamped snapshots (no stable alias exists) —
-   * e.g. fire-detections_current-year-perimeters:current-year-perimeters_{ts}.
+   * Pre-rendered national overlay snapshots (worker-produced static frames on
+   * B2). `image` is root-relative to DATA_BASE_URL and MUTABLE (the worker
+   * overwrites it every sync) — cache-bust with `as_of`.
    * Optional: layers hide gracefully when absent.
    */
   national_layers?: {
-    current_year_perimeters?: { layer: string; as_of: string };
+    current_year_perimeters?: {
+      image: string;
+      bounds: [number, number, number, number]; // [w, s, e, n] EPSG:4326
+      as_of: string;
+    };
   };
 }
 
@@ -150,6 +153,24 @@ export type SpreadProduct =
 
 export type Percentile = 10 | 30 | 50 | 70 | 90;
 
+/**
+ * Pre-rendered spread-forecast frames on B2 (worker `frames.py`). Templates
+ * are root-relative to DATA_BASE_URL; `{epoch_ms}` = Date.parse of a VERBATIM
+ * instant from `instants`. Frames are run-stamped and immutable.
+ */
+export interface SpreadFrames {
+  /** Only these percentiles are pre-rendered (v1: [50, 90]). */
+  percentiles: Percentile[];
+  /** Thinned VERBATIM ISO subset of time_instants — the scrubber uses THESE. */
+  instants: string[];
+  /** e.g. "/frames/spread/{ws}/{pct}/{product}/{epoch_ms}.png" */
+  timed_template: string;
+  /** e.g. "/frames/spread/{ws}/{pct}/{product}/static.png" */
+  static_template: string;
+  /** false while the worker's per-sync image budget cut this run short. */
+  complete: boolean;
+}
+
 export interface PyrecastRun {
   workspace: string;
   run_time: string;
@@ -161,15 +182,21 @@ export interface PyrecastRun {
   products: Partial<
     Record<
       SpreadProduct,
-      { timed: boolean; layer_template: string; legend_url: string; vector?: boolean }
+      {
+        timed: boolean;
+        vector?: boolean;
+        /** Root-relative legend image, e.g. "/frames/legends/spread-{product}.png". */
+        legend?: string;
+      }
     >
   >;
+  /** Static-frame block — absent only on catalogs older than the frames worker. */
+  frames?: SpreadFrames;
 }
 
 export interface PyrecastRunsCatalog {
   schema_version: number;
   generated_at: string;
-  wms_proxy_path: string;
   fires: Record<string, { pyrecast_slug: string; runs: PyrecastRun[] }>;
   unmatched_workspaces: { workspace: string; slug: string; run_time: string; bbox: number[] }[];
 }
@@ -188,22 +215,59 @@ export type WeatherProduct =
   | 'apcp01'
   | 'apcptot';
 
+/**
+ * The 8 fire-critical products the frames worker actually pre-renders (v1).
+ * The WeatherProduct union stays broad for old catalogs/state, but the UI and
+ * layers only offer this intersection.
+ */
+export const RENDERED_WEATHER_PRODUCTS = [
+  'tmpf',
+  'rh',
+  'ws',
+  'wg',
+  'wd',
+  'ffwi',
+  'smoke',
+  'apcp01',
+] as const satisfies readonly WeatherProduct[];
+
+export type RenderedWeatherProduct = (typeof RENDERED_WEATHER_PRODUCTS)[number];
+
+/**
+ * Pre-rendered CONUS weather frames on B2, one image per product per forecast
+ * hour. Template root-relative to DATA_BASE_URL; `{epoch_ms}` = Date.parse of
+ * an ISO hour from `hours`. Immutable run-stamped keys.
+ */
+export interface WeatherFrames {
+  bounds: [number, number, number, number]; // [w, s, e, n] EPSG:4326 (CONUS)
+  /** e.g. "/frames/weather/{ws}/{product}/{epoch_ms}.png" */
+  image_template: string;
+  /** ISO hours actually rendered — the scrubber uses THESE. */
+  hours: string[];
+  /** false while the worker's per-sync image budget cut this run short. */
+  complete: boolean;
+}
+
 export interface WeatherRun {
   workspace: string;
   run_time: string;
   hours: string[]; // ISO, hourly
-  layer_template: string; // "{ws}:{product}_{YYYYMMDD}_{HHMMSS}"
-  default_layer_template: string; // "{ws}:{product}"
-  legend_url_template: string;
+  /** Static-frame block — absent only on catalogs older than the frames worker. */
+  frames?: WeatherFrames;
 }
 
 export interface WeatherRunsCatalog {
   schema_version: number;
   generated_at: string;
-  wms_proxy_path: string;
   models: Record<
     string,
-    { label: string; products: Partial<Record<WeatherProduct, { label: string }>>; runs: WeatherRun[] }
+    {
+      label: string;
+      products: Partial<Record<WeatherProduct, { label: string }>>;
+      runs: WeatherRun[];
+      /** Root-relative legend template, e.g. "/frames/legends/weather-{product}.png". */
+      legend_template?: string;
+    }
   >;
 }
 

@@ -16,6 +16,8 @@ def empty_state() -> dict:
         "updated_at": None,
         "incidents": {},
         "tiled": {},
+        # pre-rendered WMS frames: {workspace: {"done": bool, "fetched": N}}
+        "frames": {},
         "pyrecast": {"gs02_update_sequence": None, "gs01_probed_runs": []},
         "prune": {"inactive_since": {}},
         "catalog_version": 0,

@@ -1,15 +1,16 @@
 /**
- * FramePrefetcher — strictly sequential loader for spread-forecast frame
- * images (GeoServer flow control is real: concurrency 1 to gs02). Decoded
- * Images live in an LRU Map so playback/scrubbing swaps are atomic; the
- * browser HTTP cache backs everything else up.
+ * FramePrefetcher — bounded-concurrency loader for spread-forecast frame
+ * images (immutable static PNGs on B2 — no upstream flow control, so up to
+ * PREFETCH_CONCURRENCY in flight). Decoded Images live in an LRU Map so
+ * playback/scrubbing swaps are atomic; the browser HTTP cache backs
+ * everything else up.
  *
  * `enqueue(urls)` REPLACES the queue — priority is simply the given order
  * (callers pass playhead-forward then backward). Cached and duplicate urls
- * are skipped. The in-flight request is never aborted; the new queue takes
+ * are skipped. In-flight requests are never aborted; the new queue takes
  * effect at the next dequeue.
  */
-import { FRAME_CACHE_MAX_ENTRIES } from '../app/config';
+import { FRAME_CACHE_MAX_ENTRIES, PREFETCH_CONCURRENCY } from '../app/config';
 
 export type PrefetchEvent = 'loaded' | 'error';
 type Listener = (url: string) => void;
@@ -18,7 +19,7 @@ export class FramePrefetcher {
   /** Insertion-ordered Map doubles as the LRU (oldest = first key). */
   private cache = new Map<string, HTMLImageElement>();
   private queue: string[] = [];
-  private pumping = false;
+  private inFlight = 0;
   private listeners: Record<PrefetchEvent, Set<Listener>> = {
     loaded: new Set(),
     error: new Set(),
@@ -54,7 +55,7 @@ export class FramePrefetcher {
       next.push(url);
     }
     this.queue = next;
-    void this.pump();
+    this.pump();
   }
 
   clear(): void {
@@ -70,29 +71,31 @@ export class FramePrefetcher {
     for (const cb of [...this.listeners[event]]) cb(url);
   }
 
-  /** Sequential worker: one uncached GetMap in flight at a time. */
-  private async pump(): Promise<void> {
-    if (this.pumping) return;
-    this.pumping = true;
+  /** Start loads until the concurrency cap or the queue is exhausted. */
+  private pump(): void {
+    while (this.inFlight < PREFETCH_CONCURRENCY) {
+      const url = this.queue.shift();
+      if (url === undefined) return;
+      if (this.cache.has(url)) continue;
+      this.inFlight++;
+      void this.load(url).finally(() => {
+        this.inFlight--;
+        this.pump();
+      });
+    }
+  }
+
+  private async load(url: string): Promise<void> {
     try {
-      for (;;) {
-        const url = this.queue.shift();
-        if (url === undefined) break;
-        if (this.cache.has(url)) continue;
-        try {
-          const img = new Image();
-          img.decoding = 'async';
-          img.src = url;
-          await img.decode(); // resolves decoded; rejects on 404/network/decode error
-          this.put(url, img);
-          this.emit('loaded', url);
-        } catch {
-          this.onError?.(url);
-          this.emit('error', url);
-        }
-      }
-    } finally {
-      this.pumping = false;
+      const img = new Image();
+      img.decoding = 'async';
+      img.src = url;
+      await img.decode(); // resolves decoded; rejects on 404/network/decode error
+      this.put(url, img);
+      this.emit('loaded', url);
+    } catch {
+      this.onError?.(url);
+      this.emit('error', url);
     }
   }
 

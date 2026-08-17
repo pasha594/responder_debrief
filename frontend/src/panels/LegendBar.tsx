@@ -11,11 +11,14 @@ import {
   usePyrecastRuns,
   useWeatherRuns,
 } from '../api/queries';
-import { legendUrl, proxyRelative, WMS01 } from '../api/wmsUrls';
-import type { SpreadProduct, WeatherProduct, WeatherRun } from '../api/types';
+import { spreadLegendUrl, weatherLegendUrl } from '../api/wmsUrls';
+import {
+  RENDERED_WEATHER_PRODUCTS,
+  type SpreadProduct,
+  type WeatherProduct,
+} from '../api/types';
 import { useStore, type WeatherLayerState } from '../state/store';
 import { SPREAD_PRODUCT_LABELS } from './tabs/ForecastTab';
-import { weatherDefaultLayer } from './tabs/WeatherTab';
 
 interface WeatherLegendRow {
   product: WeatherProduct;
@@ -47,40 +50,44 @@ export function LegendBar() {
     legendKey && legendKey.startsWith('spread:')
       ? (legendKey.slice('spread:'.length) as SpreadProduct)
       : null;
-  const spreadLegendRel =
-    spreadVisible && spreadProduct ? (run?.products[spreadProduct]?.legend_url ?? null) : null;
+  const spreadLegendSrc =
+    spreadVisible && spreadProduct && run ? spreadLegendUrl(spreadProduct, run) : null;
 
   const weatherRows = useMemo<WeatherLegendRow[]>(() => {
     const visible = Object.entries(weatherState).filter(
-      (e): e is [WeatherProduct, WeatherLayerState] => !!e[1]?.visible,
+      (e): e is [WeatherProduct, WeatherLayerState] =>
+        !!e[1]?.visible &&
+        (RENDERED_WEATHER_PRODUCTS as readonly string[]).includes(e[0]),
     );
     if (!visible.length || !weatherRuns) return [];
     const rows: WeatherLegendRow[] = [];
     for (const [product] of visible) {
       let label: string = product;
-      let latest: WeatherRun | null = null;
+      let legendTemplate: string | undefined;
+      let found = false;
       for (const model of Object.values(weatherRuns.models)) {
         const meta = model.products[product];
         if (meta && model.runs.length) {
           label = meta.label;
-          latest = model.runs[0];
+          legendTemplate = model.legend_template;
+          found = true;
           break;
         }
       }
-      if (!latest) continue;
-      rows.push({ product, label, url: legendUrl(WMS01, weatherDefaultLayer(latest, product)) });
+      if (!found) continue;
+      rows.push({ product, label, url: weatherLegendUrl(product, legendTemplate) });
     }
     return rows;
   }, [weatherState, weatherRuns]);
 
-  if (!spreadLegendRel && weatherRows.length === 0) return null;
+  if (!spreadLegendSrc && weatherRows.length === 0) return null;
 
   return (
     <div className="rd-legendbar">
-      {spreadLegendRel && spreadProduct && (
+      {spreadLegendSrc && spreadProduct && (
         <div className="rd-legendbar-spread">
           <div className="rd-legendbar-caption">{SPREAD_PRODUCT_LABELS[spreadProduct]}</div>
-          <img src={proxyRelative(spreadLegendRel)} alt="Forecast legend" loading="lazy" />
+          <img src={spreadLegendSrc} alt="Forecast legend" loading="lazy" />
         </div>
       )}
       {weatherRows.map((row) => (

@@ -1,47 +1,48 @@
 /**
- * National current-year perimeters raster (gs01). The upstream layer name is a
- * rotating timestamped snapshot, so the qualified name comes from
- * catalog.national_layers at runtime; the source is recreated when it rotates.
+ * National current-year perimeters: a single pre-rendered CONUS snapshot
+ * image from B2 (catalog.national_layers). The image path is MUTABLE (the
+ * worker overwrites it every sync), so the resolved URL carries a ?t={as_of}
+ * cache-buster; the source is recreated when as_of rotates.
  */
-import { nationalPerimetersTileTemplate } from '../../api/wmsUrls';
+import { nationalPerimetersImage } from '../../api/wmsUrls';
 import { beforeIdFor } from '../zOrder';
 import type { LayerManager } from '../layerTypes';
 
 const SRC = 'rd-national-perimeters';
 const LYR = 'rd-national-perimeters';
 
-let lastLayerName: string | null = null;
+let lastUrl: string | null = null;
 let lastVisible: boolean | null = null;
 
 function removeAll(map: Parameters<LayerManager['mount']>[0]): void {
   if (map.getLayer(LYR)) map.removeLayer(LYR);
   if (map.getSource(SRC)) map.removeSource(SRC);
-  lastLayerName = null;
+  lastUrl = null;
   lastVisible = null;
 }
 
 export const nationalPerimetersLayer: LayerManager = {
   mount() {
-    lastLayerName = null;
+    lastUrl = null;
     lastVisible = null;
-    // Source/layer are created lazily once the catalog provides a layer name.
+    // Source/layer are created lazily once the catalog provides the image.
   },
 
   update(map, ctx) {
-    const qualified = ctx.catalog?.national_layers?.current_year_perimeters?.layer ?? null;
-    if (!qualified) {
-      removeAll(map); // hide gracefully when the catalog lacks the layer
+    const img = nationalPerimetersImage(ctx.catalog);
+    if (!img) {
+      removeAll(map); // hide gracefully when the catalog lacks the block
       return;
     }
 
-    if (qualified !== lastLayerName || !map.getSource(SRC)) {
+    if (img.url !== lastUrl || !map.getSource(SRC)) {
       removeAll(map);
       map.addSource(SRC, {
-        type: 'raster',
-        tiles: [nationalPerimetersTileTemplate(qualified)],
-        tileSize: 512,
+        type: 'image',
+        url: img.url,
+        coordinates: img.coords,
       });
-      lastLayerName = qualified;
+      lastUrl = img.url;
     }
     if (!map.getLayer(LYR)) {
       map.addLayer(

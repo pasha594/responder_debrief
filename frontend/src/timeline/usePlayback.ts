@@ -5,7 +5,7 @@
  * model-time gap it covers (1000/speed ms per model-hour, floor 120 ms).
  *
  * Spread frames gate on the prefetcher (single-image swaps must be atomic);
- * weather tiles do NOT gate — the A/B crossfade masks tile loading.
+ * weather frames do NOT gate — the A/B crossfade masks image loading.
  */
 import { useEffect, useMemo, useRef } from 'react';
 import { useStore } from '../state/store';
@@ -19,7 +19,7 @@ import {
   useWeatherRuns,
 } from '../api/queries';
 import { spreadFrameUrl } from '../api/wmsUrls';
-import { buildFrameTimes, resolveSpreadFrame } from './framePlan';
+import { buildFrameTimes, resolveSpreadFrame, spreadInstants } from './framePlan';
 import { framePrefetcher } from './prefetch';
 
 const MIN_STEP_MS = 120;
@@ -84,7 +84,7 @@ export function usePlayback(): void {
   useEffect(() => {
     if (!spreadActive || !spreadRun) return;
     const t = useStore.getState().time.currentTime;
-    const instants = spreadRun.time_instants.map((s) => ({ s, ts: Date.parse(s) }));
+    const instants = spreadInstants(spreadRun).map((s) => ({ s, ts: Date.parse(s) }));
     const forward = instants.filter((p) => p.ts >= t);
     const backward = instants.filter((p) => p.ts < t).reverse();
     const urls = [...forward, ...backward].map((p) =>

@@ -7,13 +7,14 @@ key layout, state at ./out/state/state.json.
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 import tempfile
 from collections import Counter
 from pathlib import Path
 
 from . import catalogs as cat
-from . import config, geopdf, ir_vectors, pyrecast, state as state_mod
+from . import config, frames, geopdf, ir_vectors, pyrecast, state as state_mod
 from .b2 import make_storage
 from .fires import fetch_active_fires
 from .ftp_index import list_dir
@@ -41,6 +42,13 @@ def log(msg: str) -> None:
 def cmd_sync_catalogs(args) -> int:
     storage = make_storage(args.dry_run, args.out)
     state = state_mod.load_state(storage)
+    frames_state = state.setdefault("frames", {})
+
+    frame_budget = int(os.environ.get("FRAME_BUDGET", config.FRAME_BUDGET_DEFAULT))
+    fires_filter = (set(s for s in args.frames_fires.split(",") if s)
+                    if args.frames_fires else None)
+    products_filter = (set(s for s in args.frames_products.split(",") if s)
+                       if args.frames_products else None)
 
     with make_client() as client:
         log("[catalogs] fetching active fires ...")
@@ -60,19 +68,40 @@ def cmd_sync_catalogs(args) -> int:
         log(f"[catalogs] gs01 hrrr workspaces found: {sorted(gs01_runs)}")
 
         log("[catalogs] probing gs01 national detection layers ...")
-        national_layers = pyrecast.probe_gs01_national_layers(client)
-        if national_layers:
-            log(f"[catalogs] national perimeters layer: {national_layers['current_year_perimeters']['layer']}")
+        national_probe = pyrecast.probe_gs01_national_layers(client)
+        if national_probe:
+            log(f"[catalogs] national perimeters layer: {national_probe['current_year_perimeters']['layer']}")
         else:
             log("[catalogs] national perimeters layer unavailable (frontend hides it)")
 
-    if gs02_runs is None:
-        # updatesequence short-circuit: keep the previously published runs catalog
-        pyre = storage.get_json("catalogs/pyrecast_runs.json") or cat.build_pyrecast_runs(fires, {})
-        gs02_runs = {}
-    else:
-        pyre = cat.build_pyrecast_runs(fires, gs02_runs)
-    weather = cat.build_weather_runs(gs01_runs)
+        if gs02_runs is None:
+            # updatesequence short-circuit: keep the previously published runs
+            # catalog (frames blocks are re-annotated/updated by the sync below)
+            pyre = (storage.get_json("catalogs/pyrecast_runs.json")
+                    or cat.build_pyrecast_runs(fires, {}, frames_state))
+            gs02_runs = {}
+        else:
+            pyre = cat.build_pyrecast_runs(fires, gs02_runs, frames_state)
+        weather = cat.build_weather_runs(gs01_runs, frames_state)
+
+        # ---- pre-render WMS frames BEFORE uploading the manifests that
+        # reference them (upload ordering = atomicity) ----------------------
+        log(f"[frames] budget={frame_budget} images"
+            + (f" fires_filter={sorted(fires_filter)}" if fires_filter else "")
+            + (f" hours_limit={args.frames_hours}" if args.frames_hours else "")
+            + (f" products_filter={sorted(products_filter)}" if products_filter else ""))
+        budget_left = frames.sync_spread_frames(
+            client, storage, state, pyre,
+            budget=frame_budget, fires_filter=fires_filter, log=log)
+        budget_left = frames.sync_weather_frames(
+            client, storage, state, weather,
+            budget=budget_left, hours_limit=args.frames_hours,
+            products_filter=products_filter, log=log)
+        national_layers = frames.sync_national_frame(
+            client, storage, national_probe, log=log)
+        frames.sync_legends(client, storage, pyre, weather,
+                            products_filter=products_filter, log=log)
+        log(f"[frames] images fetched this sync: {frame_budget - budget_left}")
 
     spread_index = {
         slug: entry["runs"][0]["run_time"]
@@ -503,8 +532,16 @@ def build_parser() -> argparse.ArgumentParser:
         sp.add_argument("--force", action="store_true",
                         help="ignore change-detection state")
 
-    sp = sub.add_parser("sync-catalogs", help="fire API + pyrecast caps -> catalogs")
+    sp = sub.add_parser("sync-catalogs",
+                        help="fire API + pyrecast caps -> frames + catalogs")
     common(sp)
+    sp.add_argument("--frames-fires",
+                    help="CSV of fire_slugs: limit spread frames to these fires "
+                         "(dry-run politeness)")
+    sp.add_argument("--frames-hours", type=int, default=None,
+                    help="limit weather frames to the first N forecast hours")
+    sp.add_argument("--frames-products",
+                    help="CSV of weather products to render (e.g. smoke,ws,rh)")
     sp.set_defaults(func=cmd_sync_catalogs)
 
     def incidents_args(sp):

@@ -101,7 +101,7 @@ class TestPyrecastRunsContract:
 
         assert doc["schema_version"] == 1
         assert doc["source"] == "geoserver02"
-        assert doc["wms_proxy_path"] == "/wms02"
+        assert "wms_proxy_path" not in doc  # proxy removed (static frames)
         assert "generated_at" in doc
 
         assert "paradise" in doc["fires"]
@@ -109,7 +109,7 @@ class TestPyrecastRunsContract:
         assert entry["pyrecast_slug"] == "or-paradise"
         run = entry["runs"][0]
         for field in ("workspace", "run_time", "bbox", "native_crs",
-                      "percentiles", "time_instants", "products"):
+                      "percentiles", "time_instants", "products", "frames"):
             assert field in run
         w, s, e, n = run["bbox"]
         assert w < e and s < n
@@ -117,7 +117,27 @@ class TestPyrecastRunsContract:
         assert run["time_instants"][0] == "2026-08-17T11:25:00.000Z"
         assert all(isinstance(t, str) and t.endswith("Z") for t in run["time_instants"])
         for name, p in run["products"].items():
-            assert "timed" in p and "layer_template" in p and "legend_url" in p
+            assert "timed" in p and "layer_template" in p
+            assert "legend_url" not in p  # proxy-era field dropped
+            assert p["legend"] == f"/frames/legends/spread-{name}.png"
+
+        # frames block per spec-frames.md
+        fr = run["frames"]
+        assert fr["percentiles"] == [10, 50]
+        assert fr["timed_template"] == "/frames/spread/{ws}/{pct}/{product}/{epoch_ms}.png"
+        assert fr["static_template"] == "/frames/spread/{ws}/{pct}/{product}/static.png"
+        assert fr["complete"] is False  # nothing fetched yet
+        # thinned instants: verbatim subset, first (minute-precision) kept
+        assert fr["instants"][0] == run["time_instants"][0]
+        assert set(fr["instants"]) <= set(run["time_instants"])
+
+    def test_frames_complete_from_state(self, fixtures):
+        _, gs02 = parse_gs02_caps((fixtures / "gs02_caps_excerpt.xml").read_bytes())
+        ws = next(r["workspace"] for r in gs02.values() if r["slug"] == "or-paradise")
+        doc = build_pyrecast_runs(_fires(), gs02,
+                                  frames_state={ws: {"done": True, "fetched": 456}})
+        run = doc["fires"]["paradise"]["runs"][0]
+        assert run["frames"]["complete"] is True
 
     def test_unmatched_workspaces_surfaced(self, fixtures):
         _, gs02 = parse_gs02_caps((fixtures / "gs02_caps_excerpt.xml").read_bytes())
@@ -141,15 +161,32 @@ class TestWeatherRunsContract:
         hrrr = doc["models"]["hrrr"]
         assert hrrr["label"] == "HRRR"
         assert "tmpf" in hrrr["products"] and "label" in hrrr["products"]["tmpf"]
+        # trimmed to the 8 fire-critical pre-rendered products
+        assert set(hrrr["products"]) == {
+            "tmpf", "rh", "ws", "wg", "wd", "ffwi", "smoke", "apcp01"}
+        assert "tcdc" not in hrrr["products"]
+        assert hrrr["legend_template"] == "/frames/legends/weather-{product}.png"
         assert len(hrrr["runs"]) == 2  # newest complete + one previous
         newest = hrrr["runs"][0]
         assert newest["workspace"] == "fire-weather-forecast_hrrr_20260817_12"
         assert newest["run_time"] == "2026-08-17T12:00:00Z"
         assert newest["hours"][0] == "2026-08-17T12:00:00Z"
         assert len(newest["hours"]) == 49
-        assert newest["layer_template"] == "{ws}:{product}_{YYYYMMDD}_{HHMMSS}"
-        assert newest["default_layer_template"] == "{ws}:{product}"
-        assert newest["legend_url_template"].startswith("/wms01?")
+        assert "tcdc" not in newest["products"]
+        assert "legend_url_template" not in newest  # proxy-era field dropped
+        # frames block per spec-frames.md
+        fr = newest["frames"]
+        assert fr["bounds"] == [-125.0, 24.5, -66.5, 49.5]
+        assert fr["image_template"] == "/frames/weather/{ws}/{product}/{epoch_ms}.png"
+        assert fr["hours"] == [] and fr["complete"] is False  # nothing fetched yet
+
+    def test_frames_complete_from_state(self, fixtures):
+        gs01 = parse_gs01_caps((fixtures / "gs01_hrrr_caps_excerpt.xml").read_bytes())
+        doc = build_weather_runs(gs01, frames_state={
+            "fire-weather-forecast_hrrr_20260817_12": {"done": True, "fetched": 392}})
+        newest = doc["models"]["hrrr"]["runs"][0]
+        assert newest["frames"]["complete"] is True
+        assert newest["frames"]["hours"] == newest["hours"]
 
 
 # ---------------------------------------------------------------------------
@@ -168,10 +205,19 @@ class TestCatalogContract:
             "synced_at": "2026-08-17T12:00:00Z",
         }}
         doc = build_catalog(_fires(), version=7,
-                            incident_matches=matches, spread_index=spread_index)
+                            incident_matches=matches, spread_index=spread_index,
+                            national_layers={
+                                "current_year_perimeters": {
+                                    "image": "/frames/national/current-year-perimeters.png",
+                                    "bounds": [-125.0, 24.5, -66.5, 49.5],
+                                    "as_of": "2026-08-17T17:50:00Z",
+                                }})
 
         assert doc["schema_version"] == 1 and doc["version"] == 7
-        assert doc["wms_proxy"] == {"gs01": "/wms01", "gs02": "/wms02"}
+        assert "wms_proxy" not in doc  # proxy removed (static frames)
+        perims = doc["national_layers"]["current_year_perimeters"]
+        assert perims["image"] == "/frames/national/current-year-perimeters.png"
+        assert perims["bounds"] == [-125.0, 24.5, -66.5, 49.5]
         assert doc["counts"]["active_fires"] == 2
         assert doc["counts"]["matched_incident_dirs"] == 1
         assert doc["counts"]["spread_forecast_fires"] == 1

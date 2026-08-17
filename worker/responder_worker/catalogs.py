@@ -10,7 +10,7 @@ from __future__ import annotations
 import re
 from datetime import datetime, timezone
 
-from . import config
+from . import config, frames
 from .matching import UNIT_TOKEN_RE, match_pyrecast_slug
 
 SCHEMA_VERSION = 1
@@ -113,7 +113,9 @@ def tiling_priority(parsed: dict) -> int:
 # pyrecast_runs.json
 # ---------------------------------------------------------------------------
 
-def build_pyrecast_runs(fires: list[dict], gs02_runs: dict[str, dict]) -> dict:
+def build_pyrecast_runs(fires: list[dict], gs02_runs: dict[str, dict],
+                        frames_state: dict | None = None) -> dict:
+    frames_state = frames_state or {}
     by_slug: dict[str, list[dict]] = {}
     for run in gs02_runs.values():
         by_slug.setdefault(run["slug"], []).append(run)
@@ -142,21 +144,27 @@ def build_pyrecast_runs(fires: list[dict], gs02_runs: dict[str, dict]) -> dict:
             "runs": [],
         })
         for r in runs:
-            entry["runs"].append({
+            run_out = {
                 "workspace": r["workspace"],
                 "run_time": r["run_time"],
                 "bbox": r["bbox"],
                 "native_crs": r["native_crs"],
                 "percentiles": r["percentiles"],
                 "time_instants": r["time_instants"] or [],
-                "products": r["products"],
-            })
+                # legend_url (proxy-era) dropped: frames.annotate_spread_run
+                # adds the static B2 "legend" path per product instead.
+                "products": {
+                    name: {k: v for k, v in p.items() if k != "legend_url"}
+                    for name, p in r["products"].items()
+                },
+            }
+            frames.annotate_spread_run(run_out, frames_state)
+            entry["runs"].append(run_out)
 
     return {
         "schema_version": SCHEMA_VERSION,
         "generated_at": now_iso(),
         "source": "geoserver02",
-        "wms_proxy_path": config.WMS_PROXY["gs02"],
         "fires": fires_out,
         "unmatched_workspaces": unmatched,
     }
@@ -166,7 +174,9 @@ def build_pyrecast_runs(fires: list[dict], gs02_runs: dict[str, dict]) -> dict:
 # weather_runs.json
 # ---------------------------------------------------------------------------
 
-def build_weather_runs(gs01_runs: dict[str, dict]) -> dict:
+def build_weather_runs(gs01_runs: dict[str, dict],
+                       frames_state: dict | None = None) -> dict:
+    frames_state = frames_state or {}
     complete = [r for r in gs01_runs.values() if r["hours"]]
     complete.sort(key=lambda r: r["run_time"] or "", reverse=True)
     picked = complete[:2]  # newest complete + one previous
@@ -174,28 +184,27 @@ def build_weather_runs(gs01_runs: dict[str, dict]) -> dict:
     runs_out = []
     for r in picked:
         ws = r["workspace"]
-        runs_out.append({
+        run_out = {
             "workspace": ws,
             "run_time": r["run_time"],
             "hours": r["hours"],
-            "products": [p for p in r["products"] if p in config.WEATHER_PRODUCTS],
-            "layer_template": "{ws}:{product}_{YYYYMMDD}_{HHMMSS}",
-            "default_layer_template": "{ws}:{product}",
-            "legend_url_template": (
-                f"{config.WMS_PROXY['gs01']}?service=WMS&version=1.3.0"
-                "&request=GetLegendGraphic&format=image/png&layer={ws}%3A{product}"
-            ),
-        })
+            "products": [p for p in r["products"]
+                         if p in config.WEATHER_FRAME_PRODUCTS],
+        }
+        frames.annotate_weather_run(run_out, frames_state)
+        runs_out.append(run_out)
 
     return {
         "schema_version": SCHEMA_VERSION,
         "generated_at": now_iso(),
         "source": "geoserver01",
-        "wms_proxy_path": config.WMS_PROXY["gs01"],
         "models": {
             "hrrr": {
                 "label": "HRRR",
-                "products": config.WEATHER_PRODUCTS,
+                # trimmed to the 8 fire-critical pre-rendered products
+                "products": {k: dict(v) for k, v in config.WEATHER_PRODUCTS.items()
+                             if k in config.WEATHER_FRAME_PRODUCTS},
+                "legend_template": frames.WEATHER_LEGEND_TEMPLATE,
                 "runs": runs_out,
             }
         },
@@ -212,7 +221,7 @@ def build_catalog(
     version: int,
     incident_matches: dict[str, dict] | None = None,   # fire_slug -> {method, confidence, dir_url, synced_at}
     spread_index: dict[str, str] | None = None,        # fire_slug -> latest run_time
-    national_layers: dict | None = None,               # {"current_year_perimeters": {"layer", "as_of"}}
+    national_layers: dict | None = None,               # {"current_year_perimeters": {"image", "bounds", "as_of"}}
 ) -> dict:
     incident_matches = incident_matches or {}
     spread_index = spread_index or {}
@@ -247,7 +256,6 @@ def build_catalog(
         "schema_version": SCHEMA_VERSION,
         "version": version,
         "generated_at": now_iso(),
-        "wms_proxy": dict(config.WMS_PROXY),
         "fires": fires_out,
         "counts": {
             "active_fires": len(fires_out),
