@@ -86,6 +86,8 @@ def cmd_sync_catalogs(args) -> int:
 
         # ---- pre-render WMS frames BEFORE uploading the manifests that
         # reference them (upload ordering = atomicity) ----------------------
+        frames.start_deadline()  # FRAMES_MAX_SECONDS (default 720): the job
+        # must always reach the manifest/catalog uploads below.
         log(f"[frames] budget={frame_budget} images"
             + (f" fires_filter={sorted(fires_filter)}" if fires_filter else "")
             + (f" hours_limit={args.frames_hours}" if args.frames_hours else "")

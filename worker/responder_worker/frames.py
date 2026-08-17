@@ -14,6 +14,8 @@ image budget (FRAME_BUDGET, default 3000).
 from __future__ import annotations
 
 import math
+import os
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta, timezone
 from urllib.parse import urlencode
@@ -23,6 +25,28 @@ import httpx
 from . import config
 from .b2 import Storage
 from .http import get
+
+# ---------------------------------------------------------------------------
+# Wall-clock deadline: the frames phase must never push the CI job into its
+# timeout — a killed job publishes no manifests/catalog at all. When the
+# deadline passes, remaining fetches defer to the next hourly sync exactly
+# like budget exhaustion (frames marked complete=False). Frames already on B2
+# are never refetched (storage.exists), so progress accrues run over run.
+# ---------------------------------------------------------------------------
+
+_DEADLINE: float | None = None
+
+
+def start_deadline(seconds: int | None = None) -> None:
+    """Arm the frames wall-clock. FRAMES_MAX_SECONDS env (default 720); <=0 disables."""
+    global _DEADLINE
+    if seconds is None:
+        seconds = int(os.environ.get("FRAMES_MAX_SECONDS", "720"))
+    _DEADLINE = (time.monotonic() + seconds) if seconds > 0 else None
+
+
+def deadline_passed() -> bool:
+    return _DEADLINE is not None and time.monotonic() > _DEADLINE
 
 # ---------------------------------------------------------------------------
 # Manifest path templates (contract with the frontend)
@@ -235,27 +259,36 @@ def _run_jobs(client: httpx.Client, storage: Storage, ws_state: dict,
     missing = [(k, u) for k, u in jobs if not storage.exists(k)]
     if not missing:
         return budget, True
-    if budget <= 0:
+    if budget <= 0 or deadline_passed():
         return budget, False
     batch = missing[:budget]
     fetched = 0
+    attempted = 0
+    # Chunked so the wall-clock deadline is honored mid-workspace, not only
+    # between workspaces.
     with ThreadPoolExecutor(max_workers=config.FRAMES_CONCURRENCY) as ex:
-        futures = {ex.submit(_fetch_image, client, url): key for key, url in batch}
-        for fut in as_completed(futures):
-            key = futures[fut]
-            try:
-                data = fut.result()
-            except Exception as exc:  # tenacity already retried
-                log(f"[frames] FAILED {key}: {exc}")
-                continue
-            storage.put_bytes(key, data, content_type="image/png")
-            fetched += 1
+        for i in range(0, len(batch), 50):
+            if deadline_passed():
+                break
+            chunk = batch[i : i + 50]
+            attempted += len(chunk)
+            futures = {ex.submit(_fetch_image, client, url): key for key, url in chunk}
+            for fut in as_completed(futures):
+                key = futures[fut]
+                try:
+                    data = fut.result()
+                except Exception as exc:  # tenacity already retried
+                    log(f"[frames] FAILED {key}: {exc}")
+                    continue
+                storage.put_bytes(key, data, content_type="image/png")
+                fetched += 1
     ws_state["fetched"] = int(ws_state.get("fetched", 0)) + fetched
-    budget -= len(batch)
-    if fetched or len(batch) < len(missing):
+    budget -= attempted
+    deferred = len(missing) - attempted
+    if fetched or deferred:
+        reason = "deadline" if deadline_passed() else "budget"
         log(f"[frames] {label}: +{fetched} images"
-            + (f" ({len(missing) - len(batch)} deferred by budget)"
-               if len(batch) < len(missing) else ""))
+            + (f" ({deferred} deferred by {reason})" if deferred else ""))
     return budget, fetched == len(missing)
 
 
