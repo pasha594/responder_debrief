@@ -234,3 +234,8 @@ export const useStore = create<AppState>((set, get) => ({
 export const useActions = () => useStore((s) => s.actions);
 export const useView = () => useStore((s) => s.view);
 export const useCurrentTime = () => useStore((s) => s.time.currentTime);
+
+// DEV diagnostics: expose the store for browser-automation testing.
+if (import.meta.env.DEV) {
+  (window as unknown as { __rdStore: typeof useStore }).__rdStore = useStore;
+}

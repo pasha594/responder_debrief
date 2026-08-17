@@ -85,6 +85,10 @@ function preloadImage(url: string, cb: () => void): () => void {
   };
   const timer = setTimeout(finish, LOAD_TIMEOUT_MS);
   const img = new Image();
+  // CRITICAL: the preload must be a CORS request. A bare Image() caches the
+  // response without ACAO headers, and MapLibre's cors-mode fetch of the SAME
+  // URL then fails on the poisoned cache entry ("Failed to fetch (0)").
+  img.crossOrigin = 'anonymous';
   img.decoding = 'async';
   img.src = url;
   img.decode().then(finish, finish);

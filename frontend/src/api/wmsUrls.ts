@@ -112,7 +112,10 @@ export function weatherImageUrl(run: WeatherRun, product: string, hourIso: strin
     .replace('{ws}', run.workspace)
     .replace('{product}', product)
     .replace('{epoch_ms}', String(Date.parse(hourIso)));
-  return dataUrl(rel);
+  // cv=2: one-time cache-bust. Early builds preloaded these frames without
+  // crossOrigin, poisoning browser caches (no-ACAO entries under an immutable
+  // 1y max-age) so MapLibre's CORS fetch failed. New URLs start clean.
+  return `${dataUrl(rel)}?cv=2`;
 }
 
 /**
