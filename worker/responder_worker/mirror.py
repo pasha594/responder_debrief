@@ -21,7 +21,27 @@ from .ftp_index import Entry, list_dir
 from .http import get
 from .state import now_iso
 
-_DAILY_RE = re.compile(r"^\d{8}$")
+_DAILY_YMD_RE = re.compile(r"^(?P<y>\d{4})(?P<m>\d{2})(?P<d>\d{2})$")
+_DAILY_MDY_RE = re.compile(r"^(?P<m>\d{2})(?P<d>\d{2})(?P<y>\d{4})$")
+
+MAX_NAMED_SUBDIRS = 4  # politeness cap on the extra listing level
+
+
+def _daily_key(name: str) -> str | None:
+    """Sortable YYYYMMDD key for a dated dir name, else None.
+
+    Accepts both YYYYMMDD (`20260730`) and MMDDYYYY (`07282026`) — real
+    incidents mix them inside one folder. Month validity disambiguates: for
+    `07282026` the YYYYMMDD read gives month 20, so it falls through to MMDDYYYY.
+    """
+    for rx in (_DAILY_YMD_RE, _DAILY_MDY_RE):
+        m = rx.match(name)
+        if not m:
+            continue
+        mm, dd = int(m.group("m")), int(m.group("d"))
+        if 1 <= mm <= 12 and 1 <= dd <= 31:
+            return f"{m.group('y')}{m.group('m')}{m.group('d')}"
+    return None
 
 
 def _safe_name(name: str) -> str:
@@ -144,15 +164,56 @@ class IncidentMirror:
 
     def _sync_products(self, child: Entry, inc_state: dict, fire_slug: str,
                        res: MirrorResult) -> None:
+        """Products/GIS trees are GISS-operator-shaped and vary a lot.
+
+        Observed layouts (all handled):
+          Products/20260817/…                      daily dirs at the top
+          Products/ops_….pdf                       files loose at the top
+          Products/Current Maps/ops_….pdf          named subfolder of current maps
+          Products/Daily Products/07282026/…       named subfolder of daily dirs,
+                                                   with MMDDYYYY as well as YYYYMMDD
+        Coleman Creek is the second+third+fourth case at once, and the
+        daily-dirs-only crawler silently mirrored nothing for it.
+        """
         entries = list_dir(self.client, child.url)
         res.listings += 1
-        dailies = [e for e in entries if e.is_dir and _DAILY_RE.match(e.name)]
-        if self.since:
-            dailies = [e for e in dailies if e.name >= self.since]
-        dailies.sort(key=lambda e: e.name, reverse=True)
-        for daily in dailies[: self.products_keep]:
-            rel_dir = f"products/{daily.name}"
-            self._sync_flat(daily, inc_state, fire_slug, rel_dir, "product", res)
+
+        # (a) files sitting directly in Products/
+        for e in entries:
+            if not e.is_dir:
+                self._file(e, inc_state, fire_slug, "products/current", "product", res)
+
+        # (b) daily dirs directly in Products/
+        self._sync_dailies(entries, inc_state, fire_slug, res)
+
+        # (c) one level of named subfolders ("Current Maps", "Daily Products", …)
+        named = [e for e in entries if e.is_dir and _daily_key(e.name) is None]
+        for sub in named[:MAX_NAMED_SUBDIRS]:
+            if frames.deadline_passed():
+                break
+            sub_entries = list_dir(self.client, sub.url)
+            res.listings += 1
+            rel = f"products/{_safe_name(sub.name).lower()}"
+            for e in sub_entries:
+                if not e.is_dir:
+                    self._file(e, inc_state, fire_slug, rel, "product", res)
+            self._sync_dailies(sub_entries, inc_state, fire_slug, res)
+
+    def _sync_dailies(self, entries: list[Entry], inc_state: dict, fire_slug: str,
+                      res: MirrorResult) -> None:
+        """Newest N dated dirs from `entries`, keyed by normalized YYYYMMDD."""
+        dailies: list[tuple[str, Entry]] = []
+        for e in entries:
+            if not e.is_dir:
+                continue
+            key = _daily_key(e.name)
+            if key and (not self.since or key >= self.since):
+                dailies.append((key, e))
+        dailies.sort(key=lambda ke: ke[0], reverse=True)
+        for key, daily in dailies[: self.products_keep]:
+            # B2 path uses the NORMALIZED key so 07282026 and 20260728 land in
+            # one place and manifest op_date parsing stays uniform.
+            self._sync_flat(daily, inc_state, fire_slug, f"products/{key}", "product", res)
 
     def _sync_ir(self, child: Entry, inc_state: dict, fire_slug: str,
                  res: MirrorResult) -> None:

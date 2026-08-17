@@ -37,8 +37,10 @@ RETRY_ATTEMPTS = 3
 
 FRAMES_CONCURRENCY = 2   # max concurrent GetMap requests per geoserver
 FRAME_BUDGET_DEFAULT = 3000  # images per sync (env FRAME_BUDGET overrides)
-MIRROR_MAX_SECONDS_DEFAULT = 1500  # mirror phase wall-clock (env MIRROR_MAX_SECONDS);
-# leaves ~20 min of the 45-min CI timeout for tiling + manifests + catalog
+MIRROR_MAX_SECONDS_DEFAULT = 1200  # crawl+download phase (env MIRROR_MAX_SECONDS)
+TILE_MAX_SECONDS_DEFAULT = 900     # GeoPDF tiling phase (env TILE_MAX_SECONDS)
+# 20 + 15 min leaves ~10 min of the 45-min CI timeout for manifests + catalog.
+# Both phases defer their remainder to the next scheduled run; nothing is lost.
 
 PRODUCTS_DAILY_KEEP = 3  # newest N Products|GIS/YYYYMMDD dirs
 IR_KEEP = 7              # newest N IR/ entries
@@ -117,6 +119,7 @@ PRODUCT_LABELS = {
     "owner": "Land Ownership Map",
     "suprep": "Suppression Repair Map",
     "suppression_repair": "Suppression Repair Map",
+    "repair": "Suppression Repair Map",
     "mobile": "Avenza Mobile Map",
     "other": "Map",
 }

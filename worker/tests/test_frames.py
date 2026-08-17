@@ -2,7 +2,7 @@
 CONUS dims, and the national-layers catalog form. (Spread frame annotation
 and dims are gone — spread is client-rendered from the public archive.)"""
 
-from responder_worker import config
+from responder_worker import config, frames
 from responder_worker.frames import (
     bounds4326_to_3857,
     dims_for_width,
@@ -104,3 +104,41 @@ class TestHelpers:
         assert perims["bounds"] == [-125.0, 24.5, -66.5, 49.5]
         assert perims["as_of"] == "2026-08-17T17:50:00Z"
         assert national_layers_image_form({}) == {}
+
+
+# ---------------------------------------------------------------------------
+# Wall-clock deadline (shared by the frames, mirror, and tiling phases).
+# Regression: the first full mirror run was killed by the CI timeout mid-tiling
+# and published nothing — every phase that can run long must be time-bounded.
+# ---------------------------------------------------------------------------
+
+def test_deadline_disabled_when_non_positive():
+    frames.start_deadline(0)
+    assert not frames.deadline_passed()
+    frames.start_deadline(-5)
+    assert not frames.deadline_passed()
+
+
+def test_deadline_fires_after_elapsed(monkeypatch):
+    clock = {"t": 1000.0}
+    monkeypatch.setattr(frames.time, "monotonic", lambda: clock["t"])
+    frames.start_deadline(60)
+    assert not frames.deadline_passed()
+    clock["t"] = 1059.0
+    assert not frames.deadline_passed()
+    clock["t"] = 1061.0
+    assert frames.deadline_passed()
+
+
+def test_deadline_is_rearmable(monkeypatch):
+    """The tiling phase re-arms the clock after the download phase spends it."""
+    clock = {"t": 0.0}
+    monkeypatch.setattr(frames.time, "monotonic", lambda: clock["t"])
+    frames.start_deadline(10)
+    clock["t"] = 20.0
+    assert frames.deadline_passed()
+    frames.start_deadline(30)          # tiling phase gets its own budget
+    assert not frames.deadline_passed()
+    clock["t"] = 51.0
+    assert frames.deadline_passed()
+    frames.start_deadline(0)           # leave global state disabled for others

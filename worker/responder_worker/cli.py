@@ -209,12 +209,24 @@ def _tile_and_manifest(args, storage, state, fires_by_slug, mirrors) -> None:
     if not gdal_ok:
         log("[incidents] GDAL not available — skipping tiling (degrades to raw PDFs)")
 
+    # Re-arm the wall-clock for the tiling phase: a single arch-E sheet can
+    # take minutes, so the 40-sheet count budget alone let this phase blow past
+    # the CI timeout (killing the job before ANY manifest was published).
+    # Sheets past the deadline are flagged tiling_pending and picked up next run.
+    frames.start_deadline(int(os.environ.get(
+        "TILE_MAX_SECONDS", str(config.TILE_MAX_SECONDS_DEFAULT))))
+    tiles_deferred = 0
+
     for inc_key, bundle in mirrors.items():
         fire = bundle["fire"]
         fire_slug = fire["fire_slug"]
         res = bundle["result"]
         maps: list[dict] = []
         ir_by_flight: dict[str, dict] = {}
+        # The same sheet is often published in two places (e.g. "Current Maps/"
+        # AND "Daily Products/{date}/"). Tiles are content-addressed so the work
+        # dedupes itself, but the manifest must list each sheet once.
+        seen_sha: set[str] = set()
 
         for mf in res.files:
             if mf.kind == "ir":
@@ -223,6 +235,10 @@ def _tile_and_manifest(args, storage, state, fires_by_slug, mirrors) -> None:
                 continue
             if not mf.filename.lower().endswith(".pdf"):
                 continue
+            if mf.sha16:
+                if mf.sha16 in seen_sha:
+                    continue
+                seen_sha.add(mf.sha16)
             parsed = cat.parse_product_filename(mf.filename)
             sha_id = mf.sha16 or "unknown"
             geo: dict = {"georeferenced": False, "preview": False}
@@ -234,7 +250,7 @@ def _tile_and_manifest(args, storage, state, fires_by_slug, mirrors) -> None:
             if mf.kind != "mobile" and gdal_ok and mf.local_path is not None:
                 if already_tiled:
                     geo = tiled_state.get("geo", geo)
-                elif tile_budget > 0:
+                elif tile_budget > 0 and not frames.deadline_passed():
                     log(f"[geopdf] processing {mf.filename} ...")
                     with tempfile.TemporaryDirectory() as td:
                         tiles_dir = Path(td) / "tiles"
@@ -273,6 +289,7 @@ def _tile_and_manifest(args, storage, state, fires_by_slug, mirrors) -> None:
                     }
                 else:
                     pending = True
+                    tiles_deferred += 1
             elif already_tiled:
                 geo = tiled_state.get("geo", geo)
 
@@ -296,6 +313,10 @@ def _tile_and_manifest(args, storage, state, fires_by_slug, mirrors) -> None:
         storage.put_json(f"catalogs/incidents/{fire_slug}.json", manifest)
         log(f"[incidents] manifest written: catalogs/incidents/{fire_slug}.json "
             f"(maps={len(maps)}, ir_flights={len(ir_flights)})")
+
+    if tiles_deferred:
+        log(f"[geopdf] {tiles_deferred} sheets deferred (tile budget/deadline) — "
+            "flagged tiling_pending, picked up next run")
 
 
 def _ir_flights(args, storage, fire, ir_by_flight: dict[str, dict]) -> list[dict]:
@@ -432,11 +453,17 @@ def cmd_sync_incidents(args) -> int:
             mirrors[cand.key] = {
                 "fire": fire, "candidate": cand, "match": m, "result": res,
             }
+            # Checkpoint per incident: files are already on B2, so if this run
+            # dies the next one must not re-download them. (The first full run
+            # was killed mid-tiling and lost every download record.)
+            if res.downloads:
+                state_mod.save_state(storage, state)
 
         if deferred:
-            log(f"[incidents] deadline reached — {deferred} candidate dirs deferred "
-                "to the next scheduled run")
+            log(f"[incidents] download deadline reached — {deferred} candidate dirs "
+                "deferred to the next scheduled run")
         _tile_and_manifest(args, storage, state, fires_by_slug, mirrors)
+        state_mod.save_state(storage, state)  # tiling records before manifests
 
         # master catalog rebuild (catalog.json LAST)
         incident_matches = {}
