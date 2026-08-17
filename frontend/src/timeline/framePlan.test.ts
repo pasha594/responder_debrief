@@ -182,3 +182,39 @@ describe('buildFrameTimes', () => {
     ]);
   });
 });
+
+// Regression: a stale v1 catalog run (no `toa`) crashed ForecastTab on the
+// live site — latestRun must reject non-v2 shapes so tabs show empty state.
+import { latestRun } from '../api/queries';
+
+describe('latestRun v1-catalog tolerance', () => {
+  it('rejects runs without a toa block', () => {
+    const v1 = {
+      fires: {
+        sinlahekin: {
+          runs: [
+            {
+              workspace: 'fire-spread-forecast_wa-sinlahekin_20260817_112500',
+              time_instants: ['2026-08-17T11:25:00.000Z'],
+              products: { 'spread-rate': { timed: true } },
+              frames: { percentiles: [10, 50], instants: [] },
+            },
+          ],
+        },
+      },
+    } as never;
+    expect(latestRun(v1, 'sinlahekin')).toBeNull();
+  });
+  it('accepts v2 runs with toa.percentiles', () => {
+    const v2 = {
+      fires: {
+        sinlahekin: {
+          runs: [
+            { workspace: 'wa-sinlahekin_20260817_100500', toa: { percentiles: [10, 50], url_template: 'x' } },
+          ],
+        },
+      },
+    } as never;
+    expect(latestRun(v2, 'sinlahekin')?.workspace).toBe('wa-sinlahekin_20260817_100500');
+  });
+});

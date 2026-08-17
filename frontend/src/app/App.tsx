@@ -6,6 +6,7 @@ import { useStore } from '../state/store';
 import { Sidebar } from '../panels/Sidebar';
 import { Timeline } from '../timeline/Timeline';
 import { LegendBar } from '../panels/LegendBar';
+import { ErrorBoundary } from '../utils/ErrorBoundary';
 import { useTimelineDomain } from '../timeline/useTimelineDomain';
 
 function MapLayerBridge() {
@@ -81,9 +82,15 @@ export function App() {
         <MapLayerBridge />
         <HashSync />
         <NowSampler />
-        <Sidebar />
-        <LegendBar />
-        <Timeline />
+        <ErrorBoundary label="Fire panel">
+          <Sidebar />
+        </ErrorBoundary>
+        <ErrorBoundary label="Legend">
+          <LegendBar />
+        </ErrorBoundary>
+        <ErrorBoundary label="Timeline">
+          <Timeline />
+        </ErrorBoundary>
         <Toast />
       </MapRoot>
     </div>

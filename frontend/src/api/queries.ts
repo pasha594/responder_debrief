@@ -116,7 +116,11 @@ export function latestRun(
   if (!runsCatalog || !fireSlug) return null;
   const entry = runsCatalog.fires[fireSlug];
   if (!entry?.runs?.length) return null;
-  return entry.runs[0];
+  // Only schema-v2 (archive) runs are renderable: they carry `toa`. A stale
+  // v1 catalog (CDN-cached during a deploy overlap) must degrade to the
+  // "no spread forecast" empty state, never crash the tab.
+  const run = entry.runs[0];
+  return run && run.toa && Array.isArray(run.toa.percentiles) ? run : null;
 }
 
 /** Newest weather run for a model, or null. */
