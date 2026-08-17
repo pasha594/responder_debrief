@@ -109,9 +109,13 @@ class B2Storage(Storage):
 
         s = settings or config.b2_settings_from_env()
         self.bucket = s["B2_BUCKET"]
+        # Tolerate a scheme-less endpoint (boto3 requires a full URL).
+        endpoint = s["B2_S3_ENDPOINT"].strip()
+        if endpoint and "://" not in endpoint:
+            endpoint = f"https://{endpoint}"
         self.client = boto3.client(
             "s3",
-            endpoint_url=s["B2_S3_ENDPOINT"],
+            endpoint_url=endpoint,
             aws_access_key_id=s["B2_KEY_ID"],
             aws_secret_access_key=s["B2_APP_KEY"],
         )
