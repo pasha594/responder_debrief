@@ -2,7 +2,7 @@
 import { useMemo } from 'react';
 import { useFire, useMasterCatalog } from '../api/queries';
 import { useStore, type AppState } from '../state/store';
-import { formatAcres, formatPct } from '../utils/format';
+import { formatAcresValue, formatPct } from '../utils/format';
 import { OverviewTab } from './tabs/OverviewTab';
 import { ForecastTab } from './tabs/ForecastTab';
 import { IncidentMapsTab } from './tabs/IncidentMapsTab';
@@ -62,8 +62,8 @@ export function FirePanel({ corneaId }: { corneaId: string }) {
 
         <div className="rd-stats-strip">
           <div className="rd-stat">
-            <span className="rd-stat-value">{formatAcres(fire?.acres)}</span>
-            <span className="rd-stat-label">Size</span>
+            <span className="rd-stat-value">{formatAcresValue(fire?.acres)}</span>
+            <span className="rd-stat-label">Acres</span>
           </div>
           <div className="rd-stat">
             <span className="rd-stat-value">{formatPct(fire?.containment)}</span>

@@ -22,7 +22,7 @@
 .rd-sidebar-collapse {
   position: absolute;
   top: 8px;
-  left: 8px;
+  right: 8px;
   z-index: 2;
   width: 28px;
   height: 28px;
@@ -39,8 +39,8 @@
   background: var(--color-hover-bg);
 }
 .rd-sidebar--collapsed .rd-sidebar-collapse {
-  left: 50%;
-  transform: translateX(-50%);
+  right: 50%;
+  transform: translateX(50%);
 }
 
 .rd-sidebar-content {
@@ -195,7 +195,8 @@
 /* ---------- Fire panel header ---------- */
 
 .rd-fp-header {
-  padding: 12px 16px 0 44px;
+  /* right padding clears the collapse button in the corner */
+  padding: 12px 44px 0 16px;
   border-bottom: 1px solid var(--color-border);
 }
 
@@ -229,8 +230,9 @@
 
 .rd-stats-strip {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 8px;
+  /* each box at least fits its own label; leftover space shared */
+  grid-template-columns: repeat(4, minmax(min-content, 1fr));
+  gap: 6px;
   margin: 12px 0 10px;
 }
 
@@ -259,6 +261,7 @@
   letter-spacing: 0.05em;
   text-transform: uppercase;
   color: var(--color-text-muted);
+  white-space: nowrap;
 }
 
 /* tab bar */

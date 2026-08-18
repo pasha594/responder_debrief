@@ -342,8 +342,10 @@
     --timeline-wx-h: 0px;
   }
 
-  /* Swipe-up on the dock reveals the weather lane (swipe-down tucks it);
-     the height vars ripple to the map inset and panel offsets. */
+  /* Swipe-up on the dock reveals the weather lane (swipe-down tucks it).
+     Mid-drag the lane height follows the finger via inline vars on the
+     dock; the settled state re-asserts the tokens so the map inset and
+     panel offsets ripple along. */
   :root:has(.rd-timeline--wx-open) {
     --timeline-h: 94px;
     --timeline-wx-h: 46px;
@@ -351,6 +353,13 @@
 
   .rd-timeline--wx-open .rd-wx-row {
     display: block;
+    overflow: hidden;
+  }
+
+  /* Ease the settle after release — never during the live drag. */
+  .rd-timeline--wx-anim,
+  .rd-timeline--wx-anim .rd-wx-row {
+    transition: height 0.16s ease-out;
   }
 
   .rd-timeline {

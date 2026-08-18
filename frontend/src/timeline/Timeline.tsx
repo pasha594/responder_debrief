@@ -14,6 +14,8 @@ import './timeline.css';
 
 /** The scroll viewport always shows this many days of timeline. */
 const WINDOW_DAYS = 10;
+/** Mobile weather lane height (matches --timeline-wx-h's desktop value). */
+const WX_LANE_PX = 46;
 
 function PlayIcon() {
   return (
@@ -89,11 +91,15 @@ export function Timeline() {
   // the dial; vertical (mobile) swipes the weather lane open or closed.
   const isDesktop = useIsDesktop();
   const [wxOpen, setWxOpen] = useState(false);
+  // While a vertical drag is live, the lane height follows the finger:
+  // 0 = tucked, 1 = fully out. Null when no vertical drag is in flight.
+  const [wxDrag, setWxDrag] = useState<number | null>(null);
   const [dragging, setDragging] = useState(false);
   const gesture = useRef<{
     startX: number;
     startY: number;
     startTime: number;
+    startReveal: number;
     axis: 'h' | 'v' | null;
   } | null>(null);
 
@@ -101,7 +107,13 @@ export function Timeline() {
     if (e.button !== 0 && e.pointerType === 'mouse') return;
     if (useStore.getState().time.playing) actions.pause();
     viewportRef.current?.setPointerCapture(e.pointerId);
-    gesture.current = { startX: e.clientX, startY: e.clientY, startTime: currentTime, axis: null };
+    gesture.current = {
+      startX: e.clientX,
+      startY: e.clientY,
+      startTime: currentTime,
+      startReveal: wxOpen ? 1 : 0,
+      axis: null,
+    };
     setDragging(true);
   };
   const onPointerMove = (e: React.PointerEvent) => {
@@ -114,6 +126,10 @@ export function Timeline() {
     }
     // Dragging the dial left tunes forward in time, like spinning it.
     if (g.axis === 'h') actions.setTime(g.startTime - dx * msPerPx);
+    // Vertical (mobile): the weather lane peeks out under the finger.
+    if (g.axis === 'v' && !isDesktop) {
+      setWxDrag(Math.min(1, Math.max(0, g.startReveal - dy / WX_LANE_PX)));
+    }
   };
   const endGesture = (e: React.PointerEvent) => {
     const g = gesture.current;
@@ -122,9 +138,11 @@ export function Timeline() {
     setDragging(false);
     viewportRef.current?.releasePointerCapture(e.pointerId);
     if (g.axis === 'v' && !isDesktop) {
+      // Settle to whichever side the lane is closer to.
       const dy = e.clientY - g.startY;
-      if (dy < -20) setWxOpen(true);
-      else if (dy > 20) setWxOpen(false);
+      const reveal = Math.min(1, Math.max(0, g.startReveal - dy / WX_LANE_PX));
+      setWxOpen(reveal > 0.5);
+      setWxDrag(null);
       return;
     }
     if (!g.axis && viewportRef.current) {
@@ -134,13 +152,28 @@ export function Timeline() {
       actions.setTime(scale.xToTime(contentX));
     }
   };
+
+  // Live reveal fraction: follows the finger mid-drag, snaps with wxOpen.
+  const wxReveal = wxDrag ?? (wxOpen ? 1 : 0);
+  const dockStyle: React.CSSProperties | undefined =
+    !isDesktop && wxReveal > 0
+      ? ({
+          '--timeline-wx-h': `${Math.round(wxReveal * WX_LANE_PX)}px`,
+          '--timeline-h': `${48 + Math.round(wxReveal * WX_LANE_PX)}px`,
+        } as React.CSSProperties)
+      : undefined;
   const onWheel = (e: React.WheelEvent) => {
     const d = Math.abs(e.deltaX) >= Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
     if (d) actions.setTime(useStore.getState().time.currentTime + d * msPerPx);
   };
 
   return (
-    <div className={`rd-timeline${wxOpen ? ' rd-timeline--wx-open' : ''}`}>
+    <div
+      className={`rd-timeline${wxReveal > 0 ? ' rd-timeline--wx-open' : ''}${
+        wxDrag === null ? ' rd-timeline--wx-anim' : ''
+      }`}
+      style={dockStyle}
+    >
       <button
         type="button"
         className="rd-play-btn"
@@ -165,7 +198,7 @@ export function Timeline() {
         >
           <TimelineTrack />
           <div className="rd-wx-row">
-            {(isDesktop || wxOpen) && <WeatherStrip />}
+            {(isDesktop || wxReveal > 0) && <WeatherStrip />}
           </div>
         </div>
         <div className="rd-dial-playhead" aria-hidden="true">

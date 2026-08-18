@@ -1,7 +1,7 @@
 /** Fire overview: stats, detail rows, AI summary, structure exposure. */
 import { useFire } from '../../api/queries';
 import type { StructureExposureBuffer } from '../../api/types';
-import { formatAcres, formatPct, formatRelative } from '../../utils/format';
+import { formatAcresValue, formatPct, formatRelative } from '../../utils/format';
 import { Markdown } from '../../utils/markdown';
 
 function formatCount(n: number | null | undefined): string {
@@ -67,8 +67,8 @@ export function OverviewTab({ corneaId }: { corneaId: string }) {
     <div className="rd-tab-body">
       <div className="rd-stat-grid">
         <div className="rd-stat">
-          <span className="rd-stat-value">{formatAcres(fire.acres)}</span>
-          <span className="rd-stat-label">Size</span>
+          <span className="rd-stat-value">{formatAcresValue(fire.acres)}</span>
+          <span className="rd-stat-label">Acres</span>
         </div>
         <div className="rd-stat">
           <span className="rd-stat-value">{formatPct(fire.containment)}</span>

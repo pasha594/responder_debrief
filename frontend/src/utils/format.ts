@@ -19,6 +19,12 @@ export function formatAcres(n: number | null | undefined): string {
   return `${v} ac`;
 }
 
+/** formatAcres without the unit — for stat boxes whose label says Acres. */
+export function formatAcresValue(n: number | null | undefined): string {
+  const s = formatAcres(n);
+  return s.endsWith(' ac') ? s.slice(0, -3) : s;
+}
+
 /** "71%" — rounded; null/invalid → "—". */
 export function formatPct(n: number | null | undefined): string {
   if (n == null || !Number.isFinite(n)) return EMDASH;
