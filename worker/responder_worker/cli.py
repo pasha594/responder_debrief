@@ -15,6 +15,8 @@ from collections import Counter
 from datetime import datetime
 from pathlib import Path
 
+import httpx
+
 from . import archives, catalogs as cat
 from . import config, frames, geopdf, hrrr, ir_vectors, pyrecast, state as state_mod
 from .b2 import make_storage
@@ -647,10 +649,17 @@ def cmd_sync_incidents(args) -> int:
             )
             match_record = {"method": m.method, "confidence": m.confidence,
                             "token": m.token, "dir_url": cand.dir_url}
-            res = mirror.sync_incident(
-                incident_key=cand.key, fire_slug=m.fire_slug,
-                dir_url=cand.dir_url, match=match_record, dir_mtime=cand.dir_mtime,
-            )
+            try:
+                res = mirror.sync_incident(
+                    incident_key=cand.key, fire_slug=m.fire_slug,
+                    dir_url=cand.dir_url, match=match_record, dir_mtime=cand.dir_mtime,
+                )
+            except httpx.HTTPError as exc:
+                # One incident's FTP flaking (retries exhausted) must not kill
+                # the run — its checkpoint state is intact, next run resumes.
+                log(f"[incidents] {cand.key}: FAILED mid-mirror ({exc}) — "
+                    "skipping; will resume next run")
+                continue
             state["incidents"][cand.key]["dir_url"] = cand.dir_url
             log(f"[incidents] {cand.key}: listings={res.listings} "
                 f"downloads={res.downloads} ({res.bytes_downloaded/1e6:.1f} MB) "
