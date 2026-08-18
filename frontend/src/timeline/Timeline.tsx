@@ -17,6 +17,23 @@ const WINDOW_DAYS = 10;
 /** Mobile weather lane height (matches --timeline-wx-h's desktop value). */
 const WX_LANE_PX = 46;
 
+/**
+ * Drive the height tokens at the ROOT while a reveal drag is live (inline
+ * beats the stylesheet), so everything laid out against --timeline-h — map
+ * inset, sheet, legend — follows the finger. Null restores the stylesheet.
+ */
+function setRootLaneVars(reveal: number | null): void {
+  const st = document.documentElement.style;
+  if (reveal === null) {
+    st.removeProperty('--timeline-h');
+    st.removeProperty('--timeline-wx-h');
+    return;
+  }
+  const lane = Math.round(reveal * WX_LANE_PX);
+  st.setProperty('--timeline-h', `${48 + lane}px`);
+  st.setProperty('--timeline-wx-h', `${lane}px`);
+}
+
 function PlayIcon() {
   return (
     <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
@@ -126,9 +143,13 @@ export function Timeline() {
     }
     // Dragging the dial left tunes forward in time, like spinning it.
     if (g.axis === 'h') actions.setTime(g.startTime - dx * msPerPx);
-    // Vertical (mobile): the weather lane peeks out under the finger.
+    // Vertical (mobile): the weather lane peeks out under the finger, and
+    // the ROOT height token tracks it live so the map and sheet above are
+    // pushed smoothly instead of jumping when the reveal class lands.
     if (g.axis === 'v' && !isDesktop) {
-      setWxDrag(Math.min(1, Math.max(0, g.startReveal - dy / WX_LANE_PX)));
+      const r = Math.min(1, Math.max(0, g.startReveal - dy / WX_LANE_PX));
+      setWxDrag(r);
+      setRootLaneVars(r);
     }
   };
   const endGesture = (e: React.PointerEvent) => {
@@ -138,11 +159,13 @@ export function Timeline() {
     setDragging(false);
     viewportRef.current?.releasePointerCapture(e.pointerId);
     if (g.axis === 'v' && !isDesktop) {
-      // Settle to whichever side the lane is closer to.
+      // Settle to whichever side the lane is closer to; the tokens take
+      // back over from the live inline vars.
       const dy = e.clientY - g.startY;
       const reveal = Math.min(1, Math.max(0, g.startReveal - dy / WX_LANE_PX));
       setWxOpen(reveal > 0.5);
       setWxDrag(null);
+      setRootLaneVars(null);
       return;
     }
     if (!g.axis && viewportRef.current) {
@@ -155,13 +178,8 @@ export function Timeline() {
 
   // Live reveal fraction: follows the finger mid-drag, snaps with wxOpen.
   const wxReveal = wxDrag ?? (wxOpen ? 1 : 0);
-  const dockStyle: React.CSSProperties | undefined =
-    !isDesktop && wxReveal > 0
-      ? ({
-          '--timeline-wx-h': `${Math.round(wxReveal * WX_LANE_PX)}px`,
-          '--timeline-h': `${48 + Math.round(wxReveal * WX_LANE_PX)}px`,
-        } as React.CSSProperties)
-      : undefined;
+  // Clear any live vars if the dock unmounts mid-gesture.
+  useEffect(() => () => setRootLaneVars(null), []);
   const onWheel = (e: React.WheelEvent) => {
     const d = Math.abs(e.deltaX) >= Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
     if (d) actions.setTime(useStore.getState().time.currentTime + d * msPerPx);
@@ -172,7 +190,6 @@ export function Timeline() {
       className={`rd-timeline${wxReveal > 0 ? ' rd-timeline--wx-open' : ''}${
         wxDrag === null ? ' rd-timeline--wx-anim' : ''
       }`}
-      style={dockStyle}
     >
       <button
         type="button"

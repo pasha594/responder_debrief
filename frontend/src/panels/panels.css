@@ -269,13 +269,15 @@
 .rd-tabbar {
   display: flex;
   gap: 2px;
-  margin: 0 -16px 0 -44px;
-  padding: 0 16px 0 44px;
+  /* header padding flipped (collapse btn on the right); breathing room
+     above so the tab row reads as its own band */
+  margin: 6px -44px 0 -16px;
+  padding: 0 44px 0 16px;
 }
 
 .rd-tab {
-  padding: 8px 10px;
-  font-size: 13px;
+  padding: 9px 11px;
+  font-size: 14px;
   color: var(--color-text-muted);
   border-bottom: 2px solid transparent;
   margin-bottom: -1px;

@@ -1,7 +1,7 @@
 /** Fire overview: stats, detail rows, AI summary, structure exposure. */
 import { useFire } from '../../api/queries';
 import type { StructureExposureBuffer } from '../../api/types';
-import { formatAcresValue, formatPct, formatRelative } from '../../utils/format';
+import { formatRelative } from '../../utils/format';
 import { Markdown } from '../../utils/markdown';
 
 function formatCount(n: number | null | undefined): string {
@@ -23,7 +23,7 @@ function ExposureTable({ buffers }: { buffers: StructureExposureBuffer[] }) {
   if (!buffers.length) return null;
   return (
     <section className="rd-section">
-      <h3 className="rd-section-title">Structure exposure</h3>
+      <h3 className="rd-section-title">Structure Exposure</h3>
       <div className="rd-table-wrap">
         <table className="rd-exposure-table">
           <thead>
@@ -57,33 +57,8 @@ export function OverviewTab({ corneaId }: { corneaId: string }) {
     return <div className="rd-empty">{isLoading ? 'Loading…' : 'Fire not found.'}</div>;
   }
 
-  const days = fire.days != null && Number.isFinite(fire.days) ? String(fire.days) : '—';
-  const personnel =
-    fire.personnel != null && Number.isFinite(fire.personnel)
-      ? fire.personnel.toLocaleString('en-US')
-      : '—';
-
   return (
     <div className="rd-tab-body">
-      <div className="rd-stat-grid">
-        <div className="rd-stat">
-          <span className="rd-stat-value">{formatAcresValue(fire.acres)}</span>
-          <span className="rd-stat-label">Acres</span>
-        </div>
-        <div className="rd-stat">
-          <span className="rd-stat-value">{formatPct(fire.containment)}</span>
-          <span className="rd-stat-label">Contained</span>
-        </div>
-        <div className="rd-stat">
-          <span className="rd-stat-value">{personnel}</span>
-          <span className="rd-stat-label">Personnel</span>
-        </div>
-        <div className="rd-stat">
-          <span className="rd-stat-value">{days}</span>
-          <span className="rd-stat-label">Days</span>
-        </div>
-      </div>
-
       <div className="rd-kv-list">
         <KvRow label="Cause" value={fire.cause ?? fire.general_cause} />
         <KvRow label="Fuel" value={fire.primary_fuel_group} />
