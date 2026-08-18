@@ -89,7 +89,8 @@
   --font-sans: 'Public Sans', -apple-system, system-ui, sans-serif;
   --radius: 4px;
   --sidebar-w: 380px;
-  --timeline-h: 64px;
+  --timeline-wx-h: 46px; /* weather strip lane above the track */
+  --timeline-h: 110px;
 }
 
 :root[data-theme='dark'] {

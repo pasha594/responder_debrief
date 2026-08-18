@@ -112,8 +112,15 @@ export function WeatherSection() {
         });
         const hasArrows = !!run.frames?.wind_uv_template;
         return (
-          <section key={modelId} className="rd-section">
-            {usable.length > 1 && <h3 className="rd-section-title">{model.label}</h3>}
+          <div key={modelId}>
+            <h3 className="rd-section-title">
+              {usable.length > 1 ? model.label : 'Weather'}
+              <span className="rd-title-meta">
+                {stale
+                  ? `Run ${formatDateTime(run.run_time, 'UTC')} — refreshing hourly`
+                  : `Run ${formatRelative(run.run_time)}`}
+              </span>
+            </h3>
             {products.map(([p, meta]) => (
               <WeatherRow
                 key={p}
@@ -123,12 +130,7 @@ export function WeatherSection() {
                 arrowNote={hasArrows && (p === 'ws' || p === 'wg')}
               />
             ))}
-            <div className="rd-runinfo">
-              {stale
-                ? `Run ${formatDateTime(run.run_time, 'UTC')} — refreshing hourly`
-                : `Run ${formatRelative(run.run_time)}`}
-            </div>
-          </section>
+          </div>
         );
       })}
     </>

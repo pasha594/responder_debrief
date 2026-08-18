@@ -5,6 +5,7 @@
 import { useStore } from '../state/store';
 import { useFire } from '../api/queries';
 import { TimelineTrack, formatDateTime, tzAbbreviation } from './TimelineTrack';
+import { WeatherStrip } from './WeatherStrip';
 import { usePlayback } from './usePlayback';
 import './timeline.css';
 
@@ -53,6 +54,9 @@ export function Timeline() {
 
   return (
     <div className="rd-timeline">
+      <div className="rd-wx-row">
+        <WeatherStrip />
+      </div>
       <button
         type="button"
         className="rd-play-btn"

@@ -321,7 +321,6 @@ export function ForecastTab({ corneaId }: { corneaId: string }) {
   return (
     <div className="rd-tab-body">
       <section className="rd-section">
-        <h3 className="rd-section-title">Weather</h3>
         <WeatherSection />
       </section>
       <section className="rd-section">

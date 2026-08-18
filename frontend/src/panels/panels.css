@@ -1221,3 +1221,12 @@
     min-height: 32px;
   }
 }
+
+/* Muted inline annotation beside a section title (e.g. "Run 1 h ago"). */
+.rd-title-meta {
+  font-family: var(--font-sans);
+  font-size: 11.5px;
+  font-weight: 400;
+  color: var(--color-text-muted);
+  margin-left: 8px;
+}

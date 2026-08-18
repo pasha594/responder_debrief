@@ -70,7 +70,7 @@ export function formatDateTime(t: number, tz: string | null | undefined): string
  * "8/17" day label in the fire's tz — no leading zeros, no year (the readout
  * and tooltips carry the full stamp; the track only needs the calendar rhythm).
  */
-function formatDayLabel(t: number, tz: string | null | undefined): string {
+export function formatDayLabel(t: number, tz: string | null | undefined): string {
   return getFormat('mdlabel', tz, { month: 'numeric', day: 'numeric' }).format(t);
 }
 

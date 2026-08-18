@@ -11,16 +11,76 @@
   z-index: 30;
   display: grid;
   grid-template-columns: auto 1fr auto;
+  /* weather strip row + controls row */
+  grid-template-rows: var(--timeline-wx-h) 1fr;
   align-items: center;
-  gap: 10px;
+  gap: 0 10px;
   padding: 0 12px;
   user-select: none;
   -webkit-user-select: none;
 }
 
+/* ---- weather strip (Open-Meteo point weather at the fire origin) ---- */
+
+.rd-wx-row {
+  grid-column: 2;
+  grid-row: 1;
+  position: relative;
+  height: 100%;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.rd-wx-strip {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.rd-wx-col {
+  position: absolute;
+  top: 3px;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  pointer-events: auto;
+  cursor: default;
+}
+
+.rd-wx-icon {
+  font-size: 13px;
+  line-height: 1.1;
+}
+
+.rd-wx-temp {
+  font-size: 10.5px;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text);
+}
+
+.rd-wx-wind {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  font-size: 9.5px;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-muted);
+}
+
+.rd-wx-arrow {
+  display: inline-block;
+  font-size: 10px;
+}
+
 /* ---- play button ---- */
 
 .rd-play-btn {
+  grid-column: 1;
+  grid-row: 2;
   width: 36px;
   height: 36px;
   border-radius: 50%;
@@ -54,6 +114,8 @@
 /* ---- track ---- */
 
 .rd-track {
+  grid-column: 2;
+  grid-row: 2;
   position: relative;
   height: 100%;
   /* no overflow:hidden — the drag tooltip floats above the dock */
@@ -268,6 +330,8 @@
 /* ---- readout ---- */
 
 .rd-time-readout {
+  grid-column: 3;
+  grid-row: 2;
   min-width: 130px;
   font-size: 12px;
   font-variant-numeric: tabular-nums;
@@ -281,12 +345,23 @@
 @media (max-width: 767px) {
   :root {
     --timeline-h: 48px;
+    --timeline-wx-h: 0px;
   }
 
   .rd-timeline {
     grid-template-columns: auto 1fr;
+    grid-template-rows: 1fr;
     gap: 8px;
     padding: 0 8px;
+  }
+
+  .rd-wx-row {
+    display: none;
+  }
+
+  .rd-play-btn,
+  .rd-track {
+    grid-row: 1;
   }
 
   .rd-time-readout {
