@@ -37,7 +37,17 @@ jobs:
 
       # HRRR weather frames need CLI GDAL (gdalwarp/gdaldem/gdal_calc.py)
       - name: Install GDAL
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends gdal-bin python3-gdal
+        timeout-minutes: 6
+        run: |
+          # A stalled Ubuntu mirror once hung this step for 30 min and the job
+          # was killed before doing any work. Bound it, retry, and let apt
+          # retry its own fetches.
+          for attempt in 1 2 3; do
+            sudo apt-get update -o Acquire::Retries=3 && break
+            echo "apt-get update failed (attempt $attempt) — retrying"
+            sleep 5
+          done
+          sudo apt-get install -y --no-install-recommends -o Acquire::Retries=3 gdal-bin python3-gdal
 
       - name: Sync catalogs
         env:

@@ -40,9 +40,17 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install GDAL CLI tools
+        timeout-minutes: 6
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends gdal-bin
+          # A stalled Ubuntu mirror once hung this step for 30 min and the job
+          # was killed before doing any work. Bound it, retry, and let apt
+          # retry its own fetches.
+          for attempt in 1 2 3; do
+            sudo apt-get update -o Acquire::Retries=3 && break
+            echo "apt-get update failed (attempt $attempt) — retrying"
+            sleep 5
+          done
+          sudo apt-get install -y --no-install-recommends -o Acquire::Retries=3 gdal-bin python3-gdal
 
       - uses: astral-sh/setup-uv@v5
         with:
