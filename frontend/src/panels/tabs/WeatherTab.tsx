@@ -11,7 +11,6 @@ import {
 import { useStore } from '../../state/store';
 import { formatDateTime, formatRelative } from '../../utils/format';
 import { GradientLegend } from '../../utils/GradientLegend';
-import { CompassLegend } from '../../utils/CompassLegend';
 
 const STALE_MS = 7 * 3600_000;
 
@@ -19,10 +18,13 @@ function WeatherRow({
   product,
   meta,
   legendTemplate,
+  arrowNote,
 }: {
   product: WeatherProduct;
   meta: WeatherProductMeta;
   legendTemplate: string | undefined;
+  /** True on wind rows when the run carries U/V grids (arrows will render). */
+  arrowNote?: boolean;
 }) {
   const label = meta.label;
   const state = useStore((s) => s.layers.weather[product]);
@@ -52,6 +54,11 @@ function WeatherRow({
           {legendOpen ? 'Legend ▾' : 'Legend ▸'}
         </button>
       </div>
+      {visible && arrowNote && (
+        <div style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>
+          arrows show wind direction
+        </div>
+      )}
       {visible && (
         <input
           type="range"
@@ -66,11 +73,7 @@ function WeatherRow({
       )}
       {legendOpen && (
         <div className="rd-mini-legend">
-          {meta.legend_stops && product === 'wd' ? (
-            // Circular ramp: "0° from → 360° from" reads as a range when it is
-            // really one bearing twice. Label the compass instead.
-            <CompassLegend stops={meta.legend_stops} />
-          ) : meta.legend_stops ? (
+          {meta.legend_stops ? (
             <GradientLegend stops={meta.legend_stops} units={meta.units} />
           ) : (
             <LegendImg src={weatherLegendUrl(product, legendTemplate)} alt={`${label} legend`} />
@@ -104,11 +107,18 @@ export function WeatherTab() {
           const meta = model.products[p];
           return meta ? ([[p, meta]] as [WeatherProduct, WeatherProductMeta][]) : [];
         });
+        const hasArrows = !!run.frames?.wind_uv_template;
         return (
           <section key={modelId} className="rd-section">
             {usable.length > 1 && <h3 className="rd-section-title">{model.label}</h3>}
             {products.map(([p, meta]) => (
-              <WeatherRow key={p} product={p} meta={meta} legendTemplate={model.legend_template} />
+              <WeatherRow
+                key={p}
+                product={p}
+                meta={meta}
+                legendTemplate={model.legend_template}
+                arrowNote={hasArrows && (p === 'ws' || p === 'wg')}
+              />
             ))}
             <div className="rd-runinfo">
               {stale

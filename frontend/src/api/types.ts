@@ -251,16 +251,16 @@ export type WeatherProduct =
   | 'apcptot';
 
 /**
- * The 8 fire-critical products the frames worker actually pre-renders (v1).
- * The WeatherProduct union stays broad for old catalogs/state, but the UI and
- * layers only offer this intersection.
+ * The fire-critical products the frames worker actually pre-renders. The
+ * WeatherProduct union stays broad for old catalogs/state, but the UI and
+ * layers only offer this intersection. ('wd' retired: wind direction is now
+ * the per-hour U/V grid rendered as arrows, not a raster.)
  */
 export const RENDERED_WEATHER_PRODUCTS = [
   'tmpf',
   'rh',
   'ws',
   'wg',
-  'wd',
   'ffwi',
   'smoke',
   'apcp01',
@@ -277,6 +277,12 @@ export interface WeatherFrames {
   bounds: [number, number, number, number]; // [w, s, e, n] EPSG:4326 (CONUS)
   /** e.g. "/frames/weather/{ws}/{product}/{epoch_ms}.png" */
   image_template: string;
+  /**
+   * Per-hour wind U/V grid JSONs for the arrow overlay, e.g.
+   * "/frames/weather/{ws}/wind_uv/{epoch_ms}.json". Absent on manifests
+   * older than the arrows worker — degrade to no arrows.
+   */
+  wind_uv_template?: string;
   /** ISO hours actually rendered — the scrubber uses THESE. */
   hours: string[];
   /** false while the worker's per-sync image budget cut this run short. */

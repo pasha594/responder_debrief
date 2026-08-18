@@ -119,6 +119,20 @@ export function weatherImageUrl(run: WeatherRun, product: string, hourIso: strin
 }
 
 /**
+ * Per-hour wind U/V grid JSON for the arrow overlay. Null when the run's
+ * manifest predates the arrows worker (no wind_uv_template) — callers must
+ * degrade to no arrows. `hourIso` must come from run.frames.hours.
+ */
+export function windUvUrl(run: WeatherRun, hourIso: string): string | null {
+  const tpl = run.frames?.wind_uv_template;
+  if (!tpl) return null;
+  const rel = tpl
+    .replace('{ws}', run.workspace)
+    .replace('{epoch_ms}', String(Date.parse(hourIso)));
+  return dataUrl(rel);
+}
+
+/**
  * Spread legend image. Prefers the per-product manifest field
  * (run.products[product].legend), falling back to the spec key scheme.
  */

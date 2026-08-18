@@ -11,6 +11,7 @@ export const PIN_PRESCRIBED = 'rd-pin-prescribed';
 export const PIN_WILDFIRE_SELECTED = 'rd-pin-wildfire-selected';
 export const PIN_PRESCRIBED_SELECTED = 'rd-pin-prescribed-selected';
 export const HEX_IMAGE = 'rd-hex';
+export const WIND_ARROW_IMAGE = 'rd-wind-arrow';
 
 const PIXEL_RATIO = 2;
 
@@ -125,6 +126,74 @@ function drawHexSdf(): RawImage {
   return { data: img, pixelRatio: PIXEL_RATIO };
 }
 
+/** Signed distance (px, + outside) to an axis-aligned box of half-extents (bx, by). */
+function boxDist(px: number, py: number, bx: number, by: number): number {
+  const dx = Math.abs(px) - bx;
+  const dy = Math.abs(py) - by;
+  const ox = Math.max(dx, 0);
+  const oy = Math.max(dy, 0);
+  return Math.sqrt(ox * ox + oy * oy) + Math.min(Math.max(dx, dy), 0);
+}
+
+/** Signed distance to an isoceles triangle: apex up at (0, -h/2), base at +h/2. */
+function triDist(px: number, py: number, halfBase: number, h: number): number {
+  // Vertices: apex A(0, -h/2), base B(-halfBase, h/2), C(halfBase, h/2).
+  const x = Math.abs(px); // symmetric about the vertical axis
+  const ax = 0;
+  const ay = -h / 2;
+  const cx = halfBase;
+  const cy = h / 2;
+  // Distance to the two edges that matter on the right half: A→C and base C→C'.
+  const segDist = (x1: number, y1: number, x2: number, y2: number): number => {
+    const vx = x2 - x1;
+    const vy = y2 - y1;
+    const wx = x - x1;
+    const wy = py - y1;
+    const t = Math.max(0, Math.min(1, (wx * vx + wy * vy) / (vx * vx + vy * vy)));
+    const dx = wx - t * vx;
+    const dy = wy - t * vy;
+    return Math.sqrt(dx * dx + dy * dy);
+  };
+  const d = Math.min(segDist(ax, ay, cx, cy), segDist(cx, cy, 0, cy));
+  // Inside test (right half): below edge A→C and above the base.
+  const cross = (cx - ax) * (py - ay) - (cy - ay) * (x - ax);
+  const inside = cross >= 0 && py <= cy;
+  return inside ? -d : d;
+}
+
+/**
+ * Slender wind arrow as an SDF (tinted via icon-color, haloed via icon-halo).
+ * Points UP in icon space; icon-rotate turns it to the flow bearing. 48 px
+ * canvas at 2x (24 CSS px icon): triangular head over a thin shaft.
+ */
+function drawArrowSdf(): RawImage {
+  const size = 48;
+  const sdfRadius = 6;
+  const cutoff = 0.25;
+  const img = new ImageData(size, size);
+  const cx = (size - 1) / 2;
+  // Geometry (canvas px, y down): head apex y=6 → base y=20; shaft to y=42.
+  const headH = 14;
+  const headHalfBase = 8;
+  const headCy = 6 + headH / 2;
+  const shaftHalfW = 2;
+  const shaftTop = 18; // tucked slightly under the head base
+  const shaftBottom = 42;
+  const shaftCy = (shaftTop + shaftBottom) / 2;
+  const shaftHalfH = (shaftBottom - shaftTop) / 2;
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const dist = Math.min(
+        triDist(x - cx, y - headCy, headHalfBase, headH),
+        boxDist(x - cx, y - shaftCy, shaftHalfW, shaftHalfH),
+      );
+      const a = Math.round(255 - 255 * (dist / sdfRadius + cutoff));
+      img.data[(y * size + x) * 4 + 3] = Math.max(0, Math.min(255, a));
+    }
+  }
+  return { data: img, pixelRatio: PIXEL_RATIO };
+}
+
 function makeImage(id: string): RawImage | null {
   switch (id) {
     case PIN_WILDFIRE:
@@ -137,6 +206,8 @@ function makeImage(id: string): RawImage | null {
       return drawPin(tokenColor('--pin-prescribed', '#C3B392'), true);
     case HEX_IMAGE:
       return drawHexSdf();
+    case WIND_ARROW_IMAGE:
+      return drawArrowSdf();
     default:
       return null;
   }
@@ -148,6 +219,7 @@ const ALL_IDS = [
   PIN_PRESCRIBED,
   PIN_PRESCRIBED_SELECTED,
   HEX_IMAGE,
+  WIND_ARROW_IMAGE,
 ];
 
 function addIfMissing(map: MlMap, id: string): void {
@@ -156,7 +228,7 @@ function addIfMissing(map: MlMap, id: string): void {
   if (!img) return;
   map.addImage(id, img.data, {
     pixelRatio: img.pixelRatio,
-    sdf: id === HEX_IMAGE,
+    sdf: id === HEX_IMAGE || id === WIND_ARROW_IMAGE,
   });
 }
 

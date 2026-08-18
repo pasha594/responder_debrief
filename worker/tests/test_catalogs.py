@@ -118,9 +118,9 @@ class TestWeatherRunsContract:
         assert doc["source"] == "noaa-hrrr"
         hrrr = doc["models"]["hrrr"]
         assert hrrr["label"] == "HRRR (NOAA)"
-        # v1 products (no wd/ffwi — deferred per spec-hrrr.md)
+        # no wd/ffwi rasters (direction ships as wind_uv arrow grids)
         assert set(hrrr["products"]) == {
-            "ws", "wg", "tmpf", "rh", "smoke", "wd", "apcp01"}
+            "ws", "wg", "tmpf", "rh", "smoke", "apcp01"}
         for name, p in hrrr["products"].items():
             assert p["label"] and p["units"]
             stops = p["legend_stops"]

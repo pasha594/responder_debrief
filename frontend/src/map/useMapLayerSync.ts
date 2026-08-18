@@ -36,6 +36,7 @@ import { perimeterLayer } from './layers/perimeterLayer';
 import { hotspotLayer } from './layers/hotspotLayer';
 import { spreadForecastLayer } from './layers/spreadForecastLayer';
 import { weatherLayers } from './layers/weatherLayers';
+import { windArrowsLayer } from './layers/windArrowsLayer';
 import { incidentMapLayer } from './layers/incidentMapLayer';
 import { irHeatLayer } from './layers/irHeatLayer';
 
@@ -45,6 +46,7 @@ const MANAGERS: LayerManager[] = [
   weatherLayers,
   incidentMapLayer,
   spreadForecastLayer,
+  windArrowsLayer,
   irHeatLayer,
   perimeterLayer,
   hotspotLayer,

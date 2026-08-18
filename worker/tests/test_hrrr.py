@@ -5,6 +5,7 @@ hrrr.20260817/conus/hrrr.t12z.wrfsfcf02.grib2 (173 messages), captured
 2026-08-17 — includes the APCP run-total/hourly-window pair (messages 84/90).
 """
 
+import json
 import math
 from datetime import datetime, timezone
 
@@ -14,6 +15,7 @@ from responder_worker import frames
 from responder_worker.hrrr import (
     PRODUCTS,
     RAMPS,
+    WIND_UV_TEMPLATE,
     apcp_window_fcst,
     annotate_run,
     byte_range,
@@ -24,9 +26,12 @@ from responder_worker.hrrr import (
     manifest_products,
     parse_idx,
     parse_listing_fhours,
+    parse_xyz_values,
     ramp_file_text,
     run_from_cycle,
     select_records,
+    sync_weather,
+    wind_uv_key,
     workspace_name,
 )
 
@@ -151,19 +156,15 @@ class TestRamps:
 
     def test_manifest_products_shape(self):
         mp = manifest_products()
-        assert set(mp) == {"ws", "wg", "tmpf", "rh", "smoke", "wd", "apcp01"}
+        assert set(mp) == {"ws", "wg", "tmpf", "rh", "smoke", "apcp01"}
         assert mp["ws"]["units"] == "mph"
         assert mp["ws"]["legend_stops"][0] == [0, "#78b4dc"]
         assert mp["ws"]["legend_stops"][-1] == [70, "#6e1450"]
         assert mp["wg"]["legend_stops"] == mp["ws"]["legend_stops"]
         assert mp["apcp01"]["legend_stops"][1] == [0.05, "#627cae"]
-        # no wd/ffwi in v1 (deferred per spec)
-        # wd IS rendered (cyclic ramp, added on request); ffwi still is not.
+        # no wd raster (direction ships as wind_uv arrow grids) and no ffwi
+        assert "wd" not in mp
         assert "ffwi" not in mp
-        wd = mp["wd"]["legend_stops"]
-        # Circular quantity: the ramp must close on itself or north seams.
-        assert wd[0][0] == 0 and wd[-1][0] == 360
-        assert wd[0][1] == wd[-1][1]
 
 
 # ---------------------------------------------------------------------------
@@ -268,6 +269,149 @@ class TestDiscovery:
         assert runs[0]["hours"][0] == "2026-08-17T12:00:00Z"
         assert runs[0]["hours"][-1] == "2026-08-19T12:00:00Z"
         assert len(runs[1]["hours"]) == 19
+
+
+# ---------------------------------------------------------------------------
+# wind_uv: XYZ text parsing, keys, sync emission + manifest annotation
+# ---------------------------------------------------------------------------
+
+class TestWindUvParsing:
+    # 3 wide x 2 tall grid as `gdal_translate -of XYZ` writes it: one
+    # 'x y z' line per pixel, natural raster order (row 0 = NORTH edge),
+    # including a nodata (nan) cell.
+    _XYZ_3X2 = (
+        "-124.5 49.0 3.14159\n"
+        "-123.5 49.0 -2.04\n"
+        "-122.5 49.0 nan\n"
+        "-124.5 48.0 0.06\n"
+        "-123.5 48.0 12.34\n"
+        "-122.5 48.0 -0.26\n"
+    )
+
+    def test_row_major_north_first_rounded_nulls(self):
+        ny, vals = parse_xyz_values(self._XYZ_3X2, 3)
+        assert ny == 2
+        # index = row*nx + col; rounded to 0.1; nan -> None (JSON null)
+        assert vals == [3.1, -2.0, None, 0.1, 12.3, -0.3]
+
+    def test_not_a_multiple_of_nx_raises(self):
+        with pytest.raises(RuntimeError):
+            parse_xyz_values(self._XYZ_3X2, 4)
+
+    def test_empty_raises(self):
+        with pytest.raises(RuntimeError):
+            parse_xyz_values("", 72)
+
+    def test_wind_uv_key_and_template(self):
+        key = wind_uv_key("hrrr_20260818_00", "2026-08-18T02:00:00Z")
+        assert key == \
+            "frames/weather/hrrr_20260818_00/wind_uv/1787018400000.json"
+        assert WIND_UV_TEMPLATE == \
+            "/frames/weather/{ws}/wind_uv/{epoch_ms}.json"
+
+
+class _FakeStorage:
+    def __init__(self, existing=()):
+        self.store: dict[str, bytes] = {k: b"" for k in existing}
+        self.puts: list[str] = []
+
+    def exists(self, key):
+        return key in self.store
+
+    def put_bytes(self, key, data, *, content_type=None, cache_control=None):
+        self.store[key] = data
+        self.puts.append(key)
+
+
+def _uv_stub():
+    return {"nx": 72, "ny": 37, "bounds": [-125.0, 24.5, -66.5, 49.5],
+            "u": [1.0] * (72 * 37), "v": [None] * (72 * 37)}
+
+
+@pytest.fixture
+def hrrr_sync_env(monkeypatch, fixtures):
+    """sync_weather with GDAL + network stubbed out (real idx fixture)."""
+    from responder_worker import hrrr as hrrr_mod
+
+    idx_text = (fixtures / "hrrr_t12z_wrfsfcf02.grib2.idx").read_text()
+
+    class _Resp:
+        text = idx_text
+        content = b"GRIB-bytes"
+
+    monkeypatch.setattr(hrrr_mod.shutil, "which",
+                        lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr(hrrr_mod, "get",
+                        lambda client, url, headers=None: _Resp())
+    monkeypatch.setattr(hrrr_mod, "warp_to_conus",
+                        lambda grib, td: td / "warped.tif")
+    monkeypatch.setattr(hrrr_mod, "render_warped_to_png",
+                        lambda warped, product, ramp, td: b"PNG")
+    monkeypatch.setattr(hrrr_mod, "wind_uv_grid",
+                        lambda warped, td, nx=72: _uv_stub())
+    return hrrr_mod
+
+
+def _weather_doc(n_hours):
+    cycle = datetime(2026, 8, 17, 12, tzinfo=timezone.utc)
+    run = run_from_cycle(cycle, list(range(n_hours)))
+    return {"models": {"hrrr": {"runs": [run]}}}, run
+
+
+class TestSyncWindUv:
+    def test_uv_json_emitted_and_annotated(self, hrrr_sync_env):
+        weather, run = _weather_doc(2)
+        storage = _FakeStorage()
+        left = hrrr_sync_env.sync_weather(
+            None, storage, {}, weather, budget=100,
+            hours_limit=2, products_filter={"ws"}, log=lambda *a: None)
+        for hour in run["hours"]:
+            assert storage.exists(image_key(run["workspace"], "ws", hour))
+            grid = json.loads(storage.store[wind_uv_key(run["workspace"], hour)])
+            assert grid["nx"] == 72 and grid["ny"] == 37
+            assert grid["bounds"] == [-125.0, 24.5, -66.5, 49.5]
+            assert len(grid["u"]) == len(grid["v"]) == 72 * 37
+            assert grid["v"][0] is None                      # null survives JSON
+        # the U/V grid counts against the image budget: 2 x (ws png + uv json)
+        assert left == 100 - 4
+        assert run["frames"]["wind_uv_template"] == WIND_UV_TEMPLATE
+
+    def test_exists_skip_no_refetch(self, hrrr_sync_env, monkeypatch):
+        weather, run = _weather_doc(1)
+        ws, hour = run["workspace"], run["hours"][0]
+        storage = _FakeStorage(existing=[
+            image_key(ws, "ws", hour), wind_uv_key(ws, hour)])
+
+        def _boom(*a, **k):
+            raise AssertionError("network hit despite exists-skip")
+        monkeypatch.setattr(hrrr_sync_env, "get", _boom)
+
+        left = hrrr_sync_env.sync_weather(
+            None, storage, {}, weather, budget=100,
+            hours_limit=1, products_filter={"ws"}, log=lambda *a: None)
+        assert left == 100 and storage.puts == []
+        # the already-existing grid is still advertised in the manifest
+        assert run["frames"]["wind_uv_template"] == WIND_UV_TEMPLATE
+
+    def test_uv_backfilled_when_only_png_exists(self, hrrr_sync_env):
+        weather, run = _weather_doc(1)
+        ws, hour = run["workspace"], run["hours"][0]
+        storage = _FakeStorage(existing=[image_key(ws, "ws", hour)])
+        left = hrrr_sync_env.sync_weather(
+            None, storage, {}, weather, budget=100,
+            hours_limit=1, products_filter={"ws"}, log=lambda *a: None)
+        assert storage.puts == [wind_uv_key(ws, hour)]
+        assert left == 99
+        assert run["frames"]["wind_uv_template"] == WIND_UV_TEMPLATE
+
+    def test_no_uv_without_ws_product(self, hrrr_sync_env):
+        weather, run = _weather_doc(1)
+        storage = _FakeStorage()
+        hrrr_sync_env.sync_weather(
+            None, storage, {}, weather, budget=100,
+            hours_limit=1, products_filter={"tmpf"}, log=lambda *a: None)
+        assert "wind_uv_template" not in run["frames"]
+        assert not any("wind_uv" in k for k in storage.puts)
 
 
 class TestAnnotate:

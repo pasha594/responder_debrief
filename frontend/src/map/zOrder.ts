@@ -25,6 +25,7 @@ export const RD_LAYER_ORDER = [
   'rd-national-perimeters',
   // ── basemap symbol layers sit here ──
   // vectors above labels
+  'rd-wind-arrows', // over the weather rasters + labels, under perimeters/pins
   'rd-ir-heat-fill',
   'rd-ir-heat-line',
   'rd-perimeter-fill',
