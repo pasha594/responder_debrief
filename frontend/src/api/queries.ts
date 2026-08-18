@@ -9,6 +9,7 @@ import {
   type HotspotQuery,
 } from './fireApi';
 import {
+  fetchImsr,
   fetchIncidentManifest,
   fetchMasterCatalog,
   fetchPyrecastRuns,
@@ -65,6 +66,15 @@ export const useMasterCatalog = () =>
     queryKey: ['catalog'],
     queryFn: fetchMasterCatalog,
     staleTime: 300_000,
+    retry: 1,
+  });
+
+/** Daily NIFC sit-report resources (may 404 until first published). */
+export const useImsr = () =>
+  useQuery({
+    queryKey: ['imsr'],
+    queryFn: fetchImsr,
+    staleTime: 30 * 60_000,
     retry: 1,
   });
 

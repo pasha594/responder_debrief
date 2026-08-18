@@ -378,3 +378,35 @@ export interface IncidentManifest {
   maps: IncidentMapEntry[];
   ir_flights: IrFlight[];
 }
+
+
+// ---------- catalogs/imsr.json (NIFC daily sit report, per-fire) ----------
+
+export interface ImsrEntry {
+  name: string;
+  unit: string;
+  acres: number | null;
+  acres_change: number | null;
+  contained_pct: number | null;
+  /** 'Ctn' (containment) or 'Comp' (completion, full-suppression alt). */
+  containment_kind: string;
+  /** "M/D" or null when unknown. */
+  est_containment: string | null;
+  personnel: number | null;
+  personnel_change: number | null;
+  crews: number | null;
+  engines: number | null;
+  helicopters: number | null;
+  structures_lost: number | null;
+  /** e.g. "56.2M" — as printed in the report. */
+  cost_to_date: string | null;
+  owner: string;
+  narrative: string | null;
+}
+
+export interface ImsrCatalog {
+  schema_version: number;
+  generated_at: string;
+  source_url: string;
+  fires: Record<string, ImsrEntry>;
+}

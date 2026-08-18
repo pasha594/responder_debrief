@@ -17,7 +17,7 @@ from pathlib import Path
 
 import httpx
 
-from . import archives, catalogs as cat
+from . import archives, catalogs as cat, imsr
 from . import config, frames, geopdf, hrrr, ir_vectors, pyrecast, state as state_mod
 from .b2 import make_storage
 from .fires import fetch_active_fires
@@ -93,6 +93,7 @@ def cmd_sync_catalogs(args) -> int:
             products_filter=products_filter, log=log)
         national_layers = frames.sync_national_frame(
             client, storage, national_probe, log=log)
+        imsr_catalog = imsr.build_imsr_catalog(client, fires, log=log)
         log(f"[frames] images fetched this sync: {frame_budget - budget_left}")
         if cat.retain_drawable_run(
                 weather, storage.get_json("catalogs/weather_runs.json")):
@@ -148,6 +149,8 @@ def cmd_sync_catalogs(args) -> int:
     )
 
     # upload order: runs catalogs -> catalog.json LAST
+    if imsr_catalog:
+        storage.put_json("catalogs/imsr.json", imsr_catalog)
     storage.put_json("catalogs/pyrecast_runs.json", pyre)
     storage.put_json("catalogs/weather_runs.json", weather)
     storage.put_json(f"catalogs/versions/catalog.{version}.json", catalog)

@@ -2,6 +2,7 @@
 import { DATA_BASE_URL } from '../app/config';
 import type {
   IncidentManifest,
+  ImsrCatalog,
   MasterCatalog,
   PyrecastRunsCatalog,
   WeatherRunsCatalog,
@@ -14,6 +15,7 @@ async function getJson<T>(path: string): Promise<T> {
 }
 
 export const fetchMasterCatalog = () => getJson<MasterCatalog>('/catalogs/catalog.json');
+export const fetchImsr = () => getJson<ImsrCatalog>('/catalogs/imsr.json');
 export const fetchPyrecastRuns = () => getJson<PyrecastRunsCatalog>('/catalogs/pyrecast_runs.json');
 export const fetchWeatherRuns = () => getJson<WeatherRunsCatalog>('/catalogs/weather_runs.json');
 

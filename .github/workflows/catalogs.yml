@@ -54,7 +54,7 @@ jobs:
                 /etc/apt/sources.list /etc/apt/sources.list.d/* 2>/dev/null || true
             fi
             if sudo apt-get update -o Acquire::Retries=3 \
-               && sudo apt-get install -y --no-install-recommends -o Acquire::Retries=3 gdal-bin python3-gdal; then
+               && sudo apt-get install -y --no-install-recommends -o Acquire::Retries=3 gdal-bin python3-gdal poppler-utils; then
               break
             fi
             echo "apt attempt $attempt failed — retrying"
