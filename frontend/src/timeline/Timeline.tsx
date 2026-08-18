@@ -2,12 +2,16 @@
  * Bottom timeline dock: play/pause (with buffering spinner), scrubbable
  * track, and a fire-local-time readout. Hosts the playback engine.
  */
+import { useEffect, useRef } from 'react';
 import { useStore } from '../state/store';
 import { useFire } from '../api/queries';
 import { TimelineTrack, formatDateTime, tzAbbreviation } from './TimelineTrack';
 import { WeatherStrip } from './WeatherStrip';
 import { usePlayback } from './usePlayback';
 import './timeline.css';
+
+/** The scroll viewport always shows this many days of timeline. */
+const WINDOW_DAYS = 10;
 
 function PlayIcon() {
   return (
@@ -52,11 +56,37 @@ export function Timeline() {
     actions.play();
   };
 
+  const domain = useStore((s) => s.time.domain);
+
+  // Fixed 10-day window: the scroll viewport always spans WINDOW_DAYS, the
+  // content stretches to the whole domain at that constant px/day, and the
+  // dock opens scrolled to the right end (NOW + the forecast).
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const scrolledFor = useRef<string | null>(null);
+  const spanDays = Math.max(1, (domain[1] - domain[0]) / 86_400_000);
+  const contentPct = Math.max(100, (spanDays / WINDOW_DAYS) * 100);
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const key = `${corneaId}|${domain[0]}`;
+    if (scrolledFor.current === key) return;
+    // The dock can mount before layout settles (scrollWidth ~0) — retry on
+    // frames until the content is real, THEN snap to the right end once.
+    let raf = 0;
+    const tryScroll = () => {
+      if (el.clientWidth > 0 && el.scrollWidth > el.clientWidth + 1) {
+        el.scrollLeft = el.scrollWidth;
+        scrolledFor.current = key;
+        return;
+      }
+      raf = requestAnimationFrame(tryScroll);
+    };
+    tryScroll();
+    return () => cancelAnimationFrame(raf);
+  }, [corneaId, domain, contentPct]);
+
   return (
     <div className="rd-timeline">
-      <div className="rd-wx-row">
-        <WeatherStrip />
-      </div>
       <button
         type="button"
         className="rd-play-btn"
@@ -66,7 +96,14 @@ export function Timeline() {
       >
         {buffering ? <span className="rd-play-spinner" /> : playing ? <PauseIcon /> : <PlayIcon />}
       </button>
-      <TimelineTrack />
+      <div className="rd-tl-scroll" ref={scrollRef}>
+        <div className="rd-tl-content" style={{ width: `${contentPct}%` }}>
+          <TimelineTrack />
+          <div className="rd-wx-row">
+            <WeatherStrip />
+          </div>
+        </div>
+      </div>
       <div className="rd-time-readout">
         {formatDateTime(currentTime, tz)} {tzAbbreviation(currentTime, tz)}
       </div>

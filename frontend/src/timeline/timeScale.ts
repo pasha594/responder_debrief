@@ -61,3 +61,25 @@ export function makeScale(domain: [number, number], now: number, width: number):
     seamX,
   };
 }
+
+
+/**
+ * Plain linear scale — the scrolling track's mapping. Day widths are
+ * constant (the dock windows 10 days and scrolls), so past/future
+ * compression is gone; the piecewise makeScale remains for callers that
+ * still want a fixed-width seam layout.
+ */
+export function makeLinearScale(domain: [number, number], width: number): TimeScale {
+  const [d0, d1] = domain;
+  const span = d1 - d0;
+  if (!(width > 0) || !(span > 0)) {
+    return { timeToX: () => 0, xToTime: () => d0, seamX: null };
+  }
+  const clampT = (t: number) => Math.min(d1, Math.max(d0, t));
+  const clampX = (x: number) => Math.min(width, Math.max(0, x));
+  return {
+    timeToX: (t) => ((clampT(t) - d0) / span) * width,
+    xToTime: (x) => d0 + (clampX(x) / width) * span,
+    seamX: null,
+  };
+}

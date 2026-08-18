@@ -92,6 +92,8 @@ export function OverviewTab({ corneaId }: { corneaId: string }) {
         <KvRow label="Complexity" value={fire.complexity_type} />
       </div>
 
+      {fire.structure_exposure && <ExposureTable buffers={fire.structure_exposure.buffers} />}
+
       {fire.latest_summary && (
         <section className="rd-ai-card">
           <div className="rd-ai-head">
@@ -101,8 +103,6 @@ export function OverviewTab({ corneaId }: { corneaId: string }) {
           <div className="rd-disclaimer">AI-generated from official sources</div>
         </section>
       )}
-
-      {fire.structure_exposure && <ExposureTable buffers={fire.structure_exposure.buffers} />}
 
       {fire.inciweb?.incident_url && (
         <a

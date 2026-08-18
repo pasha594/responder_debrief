@@ -9,7 +9,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useStore } from '../state/store';
 import { useOriginWeather } from '../api/openMeteo';
 import { useIsDesktop } from '../utils/useMediaQuery';
-import { makeScale } from './timeScale';
+import { makeLinearScale } from './timeScale';
 import { buildWeatherSlots } from './weatherStripModel';
 import { formatDateTime, formatDayLabel, tzAbbreviation } from './TimelineTrack';
 import { useFire } from '../api/queries';
@@ -44,7 +44,7 @@ export function WeatherStrip() {
 
   const slots = useMemo(() => {
     if (!hours?.length || width <= 0) return [];
-    const scale = makeScale(domain, now, width);
+    const scale = makeLinearScale(domain, width);
     return buildWeatherSlots(hours, domain, now, scale.timeToX).filter(
       (s) => s.x >= EDGE_PX && s.x <= width - EDGE_PX,
     );

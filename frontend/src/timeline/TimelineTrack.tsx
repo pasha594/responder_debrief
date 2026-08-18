@@ -12,7 +12,7 @@ import { useStore } from '../state/store';
 import { latestRun, useFire, useMasterCatalog, usePerimeterIndex, usePyrecastRuns } from '../api/queries';
 import { useFireHotspots } from '../api/useFireHotspots';
 import { useIsDesktop } from '../utils/useMediaQuery';
-import { makeScale } from './timeScale';
+import { makeLinearScale, type TimeScale } from './timeScale';
 import { activitySamples, hotspotActivity, sparklinePath } from './hotspotActivity';
 import { dayLabelStride, markPlacement } from './trackMarks';
 
@@ -91,7 +91,7 @@ interface HourTick {
 
 function buildTicks(
   domain: [number, number],
-  scale: ReturnType<typeof makeScale>,
+  scale: TimeScale,
   tz: string | null | undefined,
 ): { days: DayTick[]; hours: HourTick[] } {
   const days: DayTick[] = [];
@@ -155,7 +155,7 @@ export function TimelineTrack() {
     return () => ro.disconnect();
   }, []);
 
-  const scale = useMemo(() => makeScale(domain, now, width), [domain, now, width]);
+  const scale = useMemo(() => makeLinearScale(domain, width), [domain, width]);
 
   const ticks = useMemo(() => buildTicks(domain, scale, tz), [domain, scale, tz]);
 

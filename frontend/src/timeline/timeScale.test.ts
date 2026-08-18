@@ -104,3 +104,26 @@ describe('makeScale (degenerate domains)', () => {
     }
   });
 });
+
+describe('makeLinearScale', () => {
+  it('maps time to x proportionally with exact inverses', async () => {
+    const { makeLinearScale } = await import('./timeScale');
+    const d: [number, number] = [0, 10 * 86_400_000];
+    const s = makeLinearScale(d, 1000);
+    expect(s.seamX).toBeNull();
+    expect(s.timeToX(0)).toBe(0);
+    expect(s.timeToX(d[1])).toBe(1000);
+    expect(s.timeToX(d[1] / 2)).toBe(500);
+    expect(s.xToTime(s.timeToX(3.7 * 86_400_000))).toBeCloseTo(3.7 * 86_400_000, 6);
+  });
+
+  it('keeps day widths constant across the domain', async () => {
+    const { makeLinearScale } = await import('./timeScale');
+    const DAY = 86_400_000;
+    const s = makeLinearScale([0, 30 * DAY], 3000);
+    const w1 = s.timeToX(1 * DAY) - s.timeToX(0);
+    const w2 = s.timeToX(29 * DAY) - s.timeToX(28 * DAY);
+    expect(w1).toBeCloseTo(w2, 9);
+    expect(w1).toBeCloseTo(100, 9);
+  });
+});
