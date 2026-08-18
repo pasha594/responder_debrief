@@ -67,11 +67,30 @@ export function fireLocalDayKey(t: number, tz: string | null | undefined): strin
   return `${p.year}-${p.month}-${p.day}`;
 }
 
-/** Epoch ms of fire-local midnight opening the day that contains t. */
-export function fireLocalDayStart(t: number, tz: string | null | undefined): number {
+/** Milliseconds elapsed since fire-local midnight at t. */
+function msIntoLocalDay(t: number, tz: string | null | undefined): number {
   const p = localParts(t, tz);
-  const intoDay = (p.hour * 3600 + p.minute * 60 + p.second) * 1000 + (((t % 1000) + 1000) % 1000);
-  return t - intoDay;
+  return (p.hour * 3600 + p.minute * 60 + p.second) * 1000 + (((t % 1000) + 1000) % 1000);
+}
+
+const DAY_MS = 24 * HOUR_MS;
+
+/**
+ * Epoch ms of fire-local midnight opening the day that contains t.
+ *
+ * Subtracting the local time-of-day is only right when the UTC offset is the
+ * same at both ends — on a DST day it lands an hour off (into the previous day
+ * in spring, an hour late in autumn), so we re-measure and correct.
+ */
+export function fireLocalDayStart(t: number, tz: string | null | undefined): number {
+  let candidate = t - msIntoLocalDay(t, tz);
+  for (let i = 0; i < 2; i++) {
+    const r = msIntoLocalDay(candidate, tz);
+    if (r === 0) break;
+    // r near a full day ⇒ we overshot into yesterday; otherwise we undershot.
+    candidate += r > DAY_MS / 2 ? DAY_MS - r : -r;
+  }
+  return candidate;
 }
 
 export interface DayCell {
@@ -163,6 +182,22 @@ export function hotspotActivity(
     count: raw[i],
     value: norm[i],
   }));
+}
+
+/**
+ * Day samples in time-space, ending exactly at `to` (the NOW seam). Samples
+ * sit at day centers; today's is still mid-day, so its value is held flat to
+ * the seam rather than leaving the throughline dangling short of it.
+ */
+export function activitySamples(
+  days: ActivityDay[],
+  to: number,
+): { t: number; value: number }[] {
+  if (!days.length) return [];
+  const pts = days.map((d) => ({ t: d.center, value: d.value }));
+  const last = pts[pts.length - 1];
+  if (last.t < to) pts.push({ t: to, value: last.value });
+  return pts;
 }
 
 // ---------- geometry ----------

@@ -72,9 +72,10 @@
 
 .rd-tick-day-label {
   position: absolute;
-  top: 4px;
-  font-size: 11px;
+  top: 3px;
+  font-size: 10px;
   line-height: 1;
+  font-variant-numeric: tabular-nums;
   color: var(--timeline-date-label);
   white-space: nowrap;
   pointer-events: none;
@@ -82,8 +83,8 @@
 
 .rd-tick-hour {
   position: absolute;
-  top: 20px;
-  height: 35%;
+  top: 14px;
+  height: 8px;
   width: 1px;
   background: var(--color-tick);
   opacity: 0.6;
@@ -112,15 +113,68 @@
   pointer-events: none;
 }
 
-/* ---- perimeter-version dots ---- */
+/* ---- hotspot activity throughline (background of the lower lane) ---- */
+
+.rd-spark {
+  position: absolute;
+  left: 0;
+  right: 0;
+  width: 100%;
+  pointer-events: none;
+  z-index: 0;
+  shape-rendering: geometricPrecision;
+}
+
+.rd-spark-area {
+  fill: var(--hotspot-circle);
+  fill-opacity: 0.22;
+}
+
+.rd-spark-line {
+  fill: none;
+  stroke: var(--hotspot-circle);
+  stroke-opacity: 0.55;
+  stroke-width: 1;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+}
+
+.rd-spark-caption {
+  position: absolute;
+  left: 2px;
+  bottom: 0;
+  font-size: 9px;
+  line-height: 1;
+  letter-spacing: 0.02em;
+  color: var(--color-text-muted);
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 1;
+}
+
+/* ---- spread-forecast publication mark ---- */
+
+.rd-forecast-mark {
+  position: absolute;
+  width: 11px;
+  margin-left: -5.5px;
+  display: block;
+  line-height: 0;
+  z-index: 2;
+}
+
+.rd-forecast-mark-clamped {
+  opacity: 0.5;
+}
+
+/* ---- perimeter-publication diamonds ---- */
 
 .rd-perim-dot {
   position: absolute;
-  bottom: 6px;
-  width: 13px;
-  height: 13px;
-  margin-left: -6.5px;
-  border-radius: 50%;
+  bottom: 8px;
+  width: 16px;
+  height: 16px;
+  margin-left: -8px;
   background: transparent;
   display: flex;
   align-items: center;
@@ -130,14 +184,15 @@
 
 .rd-perim-dot::after {
   content: '';
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  background: var(--hotspot-circle);
+  width: 7px;
+  height: 7px;
+  background: var(--perimeter);
+  border: 1px solid rgba(0, 0, 0, 0.6);
+  transform: rotate(45deg);
 }
 
 .rd-perim-dot:hover::after {
-  transform: scale(1.5);
+  transform: rotate(45deg) scale(1.35);
 }
 
 /* ---- cover (dims the future side of the playhead) ---- */
@@ -249,7 +304,28 @@
   }
 
   .rd-tick-hour {
-    top: 16px;
-    height: 30%;
+    top: 11px;
+    height: 6px;
+  }
+
+  .rd-tick-day-label {
+    top: 1px;
+    font-size: 9px;
+  }
+
+  .rd-perim-dot {
+    bottom: 4px;
+    width: 14px;
+    height: 14px;
+    margin-left: -7px;
+  }
+
+  .rd-perim-dot::after {
+    width: 6px;
+    height: 6px;
+  }
+
+  .rd-now-label {
+    bottom: 2px;
   }
 }

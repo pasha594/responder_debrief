@@ -161,3 +161,47 @@ def test_daily_key_rejects_named_folders():
     from responder_worker.mirror import _daily_key
     for name in ("Current Maps", "DAILY IAP", "Daily Products", "2026", "99999999"):
         assert _daily_key(name) is None, name
+
+
+# ---------------------------------------------------------------------------
+# Mirror retention: current operational period forward, never a backfill.
+# ---------------------------------------------------------------------------
+
+def _pairs(*keys):
+    return [(k, f"dir-{k}") for k in keys]
+
+
+def test_retention_keeps_today_and_skips_history():
+    from responder_worker.mirror import select_current_period
+    got = select_current_period(
+        _pairs("20260815", "20260816", "20260817"), floor="20260817", cap=3)
+    assert [k for k, _ in got] == ["20260817"]
+
+
+def test_retention_keeps_future_dated_folders():
+    """An evening publish for tomorrow's period is what a responder needs."""
+    from responder_worker.mirror import select_current_period
+    got = select_current_period(
+        _pairs("20260816", "20260817", "20260818"), floor="20260817", cap=3)
+    assert [k for k, _ in got] == ["20260818", "20260817"]
+
+
+def test_retention_caps_qualifying_folders():
+    from responder_worker.mirror import select_current_period
+    got = select_current_period(
+        _pairs("20260817", "20260818", "20260819", "20260820"),
+        floor="20260817", cap=2)
+    assert [k for k, _ in got] == ["20260820", "20260819"]
+
+
+def test_retention_falls_back_to_newest_when_nothing_current():
+    """A quiet fire still shows its most recent maps — one folder, not history."""
+    from responder_worker.mirror import select_current_period
+    got = select_current_period(
+        _pairs("20260810", "20260812", "20260811"), floor="20260817", cap=3)
+    assert [k for k, _ in got] == ["20260812"]
+
+
+def test_retention_handles_empty_input():
+    from responder_worker.mirror import select_current_period
+    assert select_current_period([], floor="20260817", cap=3) == []

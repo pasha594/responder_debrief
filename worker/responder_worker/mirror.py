@@ -12,6 +12,7 @@ import hashlib
 import re
 import tempfile
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 
 import httpx
@@ -42,6 +43,17 @@ def _daily_key(name: str) -> str | None:
         if 1 <= mm <= 12 and 1 <= dd <= 31:
             return f"{m.group('y')}{m.group('m')}{m.group('d')}"
     return None
+
+
+def select_current_period(dated: list, floor: str, cap: int) -> list:
+    """Pure retention rule: (date_key, item) pairs -> the current period's.
+
+    Keeps keys >= floor (today by default), newest first, capped. When nothing
+    qualifies, returns the single newest so a fire with maps is never empty.
+    """
+    ordered = sorted(dated, key=lambda ke: ke[0], reverse=True)
+    current = [ke for ke in ordered if ke[0] >= floor]
+    return current[:cap] if current else ordered[:1]
 
 
 def _safe_name(name: str) -> str:
@@ -214,18 +226,31 @@ class IncidentMirror:
                     self._file(e, inc_state, fire_slug, rel, "product", res)
             self._sync_dailies(sub_entries, inc_state, fire_slug, res)
 
+    def _dated_floor(self) -> str:
+        """Oldest dated folder worth mirroring: today, unless --since overrides."""
+        return self.since or datetime.now(timezone.utc).strftime("%Y%m%d")
+
+    def _select_current(self, dated: list[tuple[str, Entry]], cap: int
+                        ) -> list[tuple[str, Entry]]:
+        """Dated entries at or after the floor, newest first, capped.
+
+        Everything older is skipped — history is not backfilled. Folders dated
+        in the FUTURE qualify: an evening publish for tomorrow's operational
+        period is precisely what a responder deploying tomorrow needs.
+        Fallback: if NOTHING is dated today-or-later (a quiet fire, or a period
+        that has not published yet) take the single newest, so an incident with
+        maps never presents an empty list. That is one folder, not a backfill.
+        """
+        return select_current_period(dated, self._dated_floor(), cap)
+
+    def _select_dated(self, entries: list[Entry], cap: int) -> list[tuple[str, Entry]]:
+        keyed = [(_daily_key(e.name), e) for e in entries if e.is_dir]
+        return self._select_current([(k, e) for k, e in keyed if k], cap)
+
     def _sync_dailies(self, entries: list[Entry], inc_state: dict, fire_slug: str,
                       res: MirrorResult) -> None:
-        """Newest N dated dirs from `entries`, keyed by normalized YYYYMMDD."""
-        dailies: list[tuple[str, Entry]] = []
-        for e in entries:
-            if not e.is_dir:
-                continue
-            key = _daily_key(e.name)
-            if key and (not self.since or key >= self.since):
-                dailies.append((key, e))
-        dailies.sort(key=lambda ke: ke[0], reverse=True)
-        for key, daily in dailies[: self.products_keep]:
+        """Current-period dated dirs, keyed by normalized YYYYMMDD."""
+        for key, daily in self._select_dated(entries, self.products_keep):
             # B2 path uses the NORMALIZED key so 07282026 and 20260728 land in
             # one place and manifest op_date parsing stays uniform.
             self._sync_flat(daily, inc_state, fire_slug, f"products/{key}", "product", res)
@@ -234,11 +259,13 @@ class IncidentMirror:
                  res: MirrorResult) -> None:
         entries = list_dir(self.client, child.url)
         res.listings += 1
-        dirs = [e for e in entries if e.is_dir]
-        dirs.sort(key=lambda e: e.name, reverse=True)
-        for sub in dirs[: self.ir_keep]:
+        # IR flight dirs carry suffixes (20260817_UTF_Weather), so key on the
+        # leading date rather than the whole name.
+        keyed = [(_daily_key(e.name[:8]), e) for e in entries if e.is_dir]
+        for _, sub in self._select_current(
+                [(k, e) for k, e in keyed if k], self.ir_keep):
             self._sync_flat(sub, inc_state, fire_slug, f"ir/{sub.name}", "ir", res)
-        if not dirs:
+        if not any(e.is_dir for e in entries):
             # some incidents keep flight files directly under IR/
             for e in entries:
                 if not e.is_dir:

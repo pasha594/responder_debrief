@@ -28,7 +28,7 @@ from .matching import (
     match_candidate,
     normalize_name,
 )
-from .mirror import IncidentMirror
+from .mirror import IncidentMirror, MirroredFile
 
 DEFAULT_OUT = Path(__file__).resolve().parent.parent / "out"
 
@@ -289,7 +289,31 @@ def _tile_and_manifest(args, storage, state, fires_by_slug, mirrors) -> None:
         # dedupes itself, but the manifest must list each sheet once.
         seen_sha: set[str] = set()
 
-        for mf in res.files:
+        # Retention is "current period forward", but files already mirrored are
+        # kept forever (user policy) — so the manifest replays every file this
+        # incident has EVER mirrored, not just the ones this run touched.
+        # Otherwise a fire's older sheets would silently vanish from the UI the
+        # first time its folder changed.
+        inc_files = (state["incidents"].get(inc_key) or {}).get("files", {})
+        seen_rel = {f"{mf.rel_dir}/{mf.filename}" for mf in res.files}
+        replayed = [
+            MirroredFile(
+                kind=meta.get("kind", "product"),
+                filename=rel.rpartition("/")[2],
+                key=f"raw/incidents/{fire_slug}/{rel}",
+                url=meta.get("url", ""),
+                size=meta.get("size"),
+                sha16=meta.get("sha16"),
+                rev=meta.get("rev", 1),
+                local_path=None,          # never re-tiled; geo comes from state
+                changed=False,
+                rel_dir=rel.rpartition("/")[0],
+            )
+            for rel, meta in inc_files.items()
+            if rel not in seen_rel
+        ]
+
+        for mf in [*res.files, *replayed]:
             if mf.kind == "ir":
                 d = ir_by_flight.setdefault(mf.rel_dir, {"files": []})
                 d["files"].append(mf)

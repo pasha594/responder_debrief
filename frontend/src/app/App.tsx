@@ -3,7 +3,7 @@
  *   ''            → the fire directory (no map is mounted)
  *   '#/fire/{id}' → the full-screen map shell, scoped to that one fire
  */
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { MapRoot } from '../map/MapRoot';
 import { useMapLayerSync } from '../map/useMapLayerSync';
 import { useStore } from '../state/store';
@@ -52,7 +52,17 @@ function HashSync() {
   }, [actions]);
 
   // store → hash (row clicks, map pin clicks, back button)
+  //
+  // Both effects run on mount, and this one sees the INITIAL view (directory)
+  // in that first pass — so on a cold load of a #/fire/{id} deep link it used
+  // to strip the hash before the hash → store effect could apply it, dumping
+  // the visitor on the directory. Skip until the hash has been read once.
+  const hydrated = useRef(false);
   useEffect(() => {
+    if (!hydrated.current) {
+      hydrated.current = true;
+      if (parseHash()) return; // a deep link is being applied — do not clobber it
+    }
     const want = view.mode === 'fire' ? `#/fire/${encodeURIComponent(view.corneaId)}` : '';
     const cur = window.location.hash;
     if (want && cur !== want) {

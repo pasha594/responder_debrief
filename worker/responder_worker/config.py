@@ -42,8 +42,14 @@ TILE_MAX_SECONDS_DEFAULT = 900     # GeoPDF tiling phase (env TILE_MAX_SECONDS)
 # 20 + 15 min leaves ~10 min of the 45-min CI timeout for manifests + catalog.
 # Both phases defer their remainder to the next scheduled run; nothing is lost.
 
-PRODUCTS_DAILY_KEEP = 3  # newest N Products|GIS/YYYYMMDD dirs
-IR_KEEP = 7              # newest N IR/ entries
+# Retention: mirror the CURRENT operational period forward, not history.
+# Dated folders older than today are skipped entirely (a season of arch-E
+# sheets is tens of GB and responders brief off the current period). Folders
+# dated in the FUTURE are kept — an evening publish for tomorrow's period is
+# exactly what someone deploying tomorrow needs. `--since YYYYMMDD` overrides
+# for a deliberate backfill.
+PRODUCTS_DAILY_KEEP = 3  # cap on qualifying (today-or-later) Products dirs
+IR_KEEP = 2              # cap on qualifying IR flights
 MOBILE_CAP_MB = 40       # Avenza mobile PDFs above this are skipped
 TILE_BUDGET = 40         # GeoPDF sheets tiled per run
 TILER_VERSION = 1

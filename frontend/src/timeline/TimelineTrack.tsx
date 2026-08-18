@@ -1,16 +1,34 @@
 /**
- * The scrubbable track: day/hour ticks, NOW seam, perimeter-version dots,
- * playhead + cover, drag tooltip. All positions come from timeScale; all
- * seek logic emits time-space values via actions.setTime.
+ * The scrubbable track. Lanes, top to bottom:
+ *   day labels (m/d) → hour ticks → activity lane (hotspot sparkline behind,
+ *   perimeter diamonds + the spread-forecast mark on top).
+ * The NOW seam, playhead and drag tooltip sit above everything.
+ *
+ * All positions come from timeScale; all seek logic emits time-space values
+ * via actions.setTime.
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useStore } from '../state/store';
-import { useFire, usePerimeterIndex } from '../api/queries';
+import { latestRun, useFire, useMasterCatalog, usePerimeterIndex, usePyrecastRuns } from '../api/queries';
+import { useFireHotspots } from '../api/useFireHotspots';
+import { useIsDesktop } from '../utils/useMediaQuery';
 import { makeScale } from './timeScale';
+import { activitySamples, hotspotActivity, sparklinePath } from './hotspotActivity';
+import { dayLabelStride, markPlacement } from './trackMarks';
 
 const HOUR = 3600_000;
 /** Minimum px per hour before hourly ticks render. */
 const HOUR_TICK_MIN_PX = 3;
+/** Widest an "8/17" label gets, plus breathing room. */
+const DAY_LABEL_MIN_GAP_PX = 34;
+/** Below this track width the sparkline caption would crowd the lane. */
+const CAPTION_MIN_TRACK_PX = 300;
+
+/** Activity-lane geometry (px insets inside the track), per breakpoint. */
+const LANE = {
+  desktop: { top: 24, bottom: 10 },
+  mobile: { top: 18, bottom: 3 },
+};
 
 // ---------- fire-local time formatting (shared with Timeline readout) -------
 
@@ -48,9 +66,12 @@ export function formatDateTime(t: number, tz: string | null | undefined): string
   }).format(t);
 }
 
-/** "Mon 18" day label in the fire's tz. */
+/**
+ * "8/17" day label in the fire's tz — no leading zeros, no year (the readout
+ * and tooltips carry the full stamp; the track only needs the calendar rhythm).
+ */
 function formatDayLabel(t: number, tz: string | null | undefined): string {
-  return getFormat('day', tz, { weekday: 'short', day: 'numeric' }).format(t);
+  return getFormat('mdlabel', tz, { month: 'numeric', day: 'numeric' }).format(t);
 }
 
 /** "2026-08-18" — day identity in the fire's tz, for boundary detection. */
@@ -106,24 +127,31 @@ export function TimelineTrack() {
   const currentTime = useStore((s) => s.time.currentTime);
   const actions = useStore((s) => s.actions);
   const view = useStore((s) => s.view);
+  const isDesktop = useIsDesktop();
 
   const corneaId = view.mode === 'fire' ? view.corneaId : null;
   const { data: fire } = useFire(corneaId);
   const tz = view.mode === 'fire' ? (fire?.timezone ?? null) : null;
   const { data: perimeterIndex } = usePerimeterIndex(corneaId);
+  const { data: catalog } = useMasterCatalog();
+  const { data: pyrecastRuns } = usePyrecastRuns();
+  // Shared cache entry with useMapLayerSync — one fetch feeds map and track.
+  const { data: hotspots } = useFireHotspots(corneaId);
 
   const trackRef = useRef<HTMLDivElement>(null);
-  const [width, setWidth] = useState(0);
+  const [size, setSize] = useState({ width: 0, height: 0 });
   const [dragging, setDragging] = useState(false);
+  const { width, height } = size;
 
   useEffect(() => {
     const el = trackRef.current;
     if (!el) return;
     const ro = new ResizeObserver((entries) => {
-      for (const e of entries) setWidth(e.contentRect.width);
+      for (const e of entries) setSize({ width: e.contentRect.width, height: e.contentRect.height });
     });
     ro.observe(el);
-    setWidth(el.getBoundingClientRect().width);
+    const r = el.getBoundingClientRect();
+    setSize({ width: r.width, height: r.height });
     return () => ro.disconnect();
   }, []);
 
@@ -131,7 +159,13 @@ export function TimelineTrack() {
 
   const ticks = useMemo(() => buildTicks(domain, scale, tz), [domain, scale, tz]);
 
-  const versionDots = useMemo(() => {
+  /** Thin day labels until the tightest pair clears DAY_LABEL_MIN_GAP_PX. */
+  const labelStride = useMemo(
+    () => dayLabelStride(ticks.days.map((d) => d.x), DAY_LABEL_MIN_GAP_PX),
+    [ticks.days],
+  );
+
+  const versionMarks = useMemo(() => {
     if (!perimeterIndex?.length || width <= 0) return [];
     return perimeterIndex.map((item) => {
       const ts = Date.parse(item.date);
@@ -142,6 +176,41 @@ export function TimelineTrack() {
       };
     });
   }, [perimeterIndex, scale, width, tz]);
+
+  // ---- spread-forecast publication mark (resolved exactly as the map does) ----
+  const fireSlug =
+    catalog?.fires.find((f) => f.cornea_id === corneaId)?.fire_slug ?? fire?.unique_slug ?? null;
+  const spreadRun = useMemo(() => latestRun(pyrecastRuns, fireSlug), [pyrecastRuns, fireSlug]);
+
+  const forecastMark = useMemo(() => {
+    if (!spreadRun || width <= 0) return null;
+    const ts = Date.parse(spreadRun.run_time);
+    const placed = markPlacement(ts, domain, scale.timeToX);
+    if (!placed) return null;
+    return {
+      ...placed,
+      title: `Spread forecast published ${formatDateTime(ts, tz)} ${tzAbbreviation(ts, tz)}`,
+    };
+  }, [spreadRun, domain, scale, width, tz]);
+
+  // ---- hotspot activity throughline ----
+  const lane = isDesktop ? LANE.desktop : LANE.mobile;
+  const laneHeight = Math.max(0, height - lane.top - lane.bottom);
+
+  const sparkline = useMemo(() => {
+    if (width <= 0 || laneHeight <= 6) return null;
+    const to = Math.min(now, domain[1]);
+    const days = hotspotActivity(hotspots, domain[0], to, tz);
+    if (days.length < 1) return null;
+    // 2px of headroom keeps the busiest day off the lane's ceiling.
+    return sparklinePath(
+      activitySamples(days, to).map((p) => ({ x: scale.timeToX(p.t), value: p.value })),
+      laneHeight,
+      laneHeight - 2,
+    );
+  }, [hotspots, domain, now, tz, scale, width, laneHeight]);
+
+  const showCaption = !!sparkline && isDesktop && width >= CAPTION_MIN_TRACK_PX;
 
   // ---- seek / drag (pointer events + capture) ----
   const seekFromEvent = (e: React.PointerEvent) => {
@@ -187,10 +256,26 @@ export function TimelineTrack() {
       onPointerUp={endDrag}
       onPointerCancel={endDrag}
     >
+      {sparkline && (
+        <svg
+          className="rd-spark"
+          style={{ top: lane.top, height: laneHeight }}
+          width={width}
+          height={laneHeight}
+          viewBox={`0 0 ${Math.max(1, width)} ${laneHeight}`}
+          preserveAspectRatio="none"
+          aria-hidden="true"
+        >
+          <path className="rd-spark-area" d={sparkline.area} />
+          <path className="rd-spark-line" d={sparkline.line} />
+        </svg>
+      )}
+      {showCaption && <div className="rd-spark-caption">hotspot activity</div>}
+
       {ticks.days.map((d, i) => (
         <div key={`d${i}`}>
           <div className="rd-tick-day" style={{ left: d.x }} />
-          {d.x < width - 48 && (
+          {i % labelStride === 0 && d.x < width - 40 && (
             <div className="rd-tick-day-label" style={{ left: d.x + 4 }}>
               {d.label}
             </div>
@@ -210,7 +295,34 @@ export function TimelineTrack() {
         </>
       )}
 
-      {versionDots.map((v, i) => (
+      {forecastMark && (
+        <div
+          className={`rd-forecast-mark${forecastMark.clamped ? ' rd-forecast-mark-clamped' : ''}`}
+          style={{ left: forecastMark.x, top: lane.top, height: laneHeight }}
+          title={
+            forecastMark.clamped
+              ? `${forecastMark.title} (outside the visible range)`
+              : forecastMark.title
+          }
+          role="img"
+          aria-label={forecastMark.title}
+        >
+          <svg width="11" height={Math.max(8, laneHeight)} viewBox={`0 0 11 ${Math.max(8, laneHeight)}`}>
+            <line
+              x1="5.5"
+              y1="5"
+              x2="5.5"
+              y2={Math.max(8, laneHeight)}
+              stroke="var(--color-accent)"
+              strokeWidth="1"
+              opacity="0.55"
+            />
+            <path d="M5.5 0.5 10 7 1 7 Z" fill="var(--color-accent)" />
+          </svg>
+        </div>
+      )}
+
+      {versionMarks.map((v, i) => (
         <button
           key={`v${i}`}
           type="button"

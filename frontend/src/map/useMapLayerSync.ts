@@ -20,14 +20,10 @@ import {
   usePyrecastRuns,
   useWeatherRuns,
 } from '../api/queries';
-import {
-  HOTSPOT_BBOX_SNAP_DEG,
-  HOTSPOT_HISTORY_MAX_DAYS,
-  HOTSPOT_NATIONAL_MIN_ZOOM,
-} from '../app/config';
+import { useFireHotspotQuery } from '../api/useFireHotspots';
+import { HOTSPOT_BBOX_SNAP_DEG, HOTSPOT_NATIONAL_MIN_ZOOM } from '../app/config';
 import {
   boundsToLatFirst,
-  padBounds,
   parseFireCoordinates,
   snapBoundsOut,
   type Bounds4326,
@@ -85,10 +81,6 @@ function useViewportBounds(map: MlMap | null): { bounds: Bounds4326; zoom: numbe
   return vp;
 }
 
-function daysAgoIso(days: number): string {
-  return new Date(Date.now() - days * 864e5).toISOString().slice(0, 10);
-}
-
 /**
  * False once maplibre's `remove()` has run: the map object survives but its
  * style is gone, so every getLayer/removeSource call throws.
@@ -139,31 +131,17 @@ export function useMapLayerSync(): void {
   );
   const { data: perimeterFeature } = usePerimeterVersion(versionItem?.path ?? null);
 
-  // Hotspot query: fire mode = fixed bbox since discovery (capped). The map
-  // only mounts in fire mode now; the viewport fallback stays as a guard.
+  // Hotspot query: fire mode = fixed bbox since discovery (capped), built by
+  // the shared hook so the timeline's throughline reuses the SAME cache entry.
+  // The map only mounts in fire mode now; the viewport fallback stays a guard.
   const vp = useViewportBounds(map);
+  const fireHotspotQuery = useFireHotspotQuery(corneaId);
   const hotspotQuery = useMemo(() => {
     if (!layers.hotspots.visible) return null;
-    if (view.mode === 'fire') {
-      // run.bbox is back-filled client-side after the first tif decode (v2
-      // catalogs omit it); until then fall back to a centroid-padded box.
-      const center = spreadRun?.centroid ?? catalogFire?.coordinates ?? null;
-      const base: Bounds4326 | null =
-        spreadRun?.bbox ??
-        (center ? [center[0] - 0.5, center[1] - 0.4, center[0] + 0.5, center[1] + 0.4] : null);
-      if (!base) return null;
-      const created = selectedFire ? Date.parse(selectedFire.created_on) : NaN;
-      const sinceDays = Number.isFinite(created)
-        ? Math.min(HOTSPOT_HISTORY_MAX_DAYS, Math.ceil((Date.now() - created) / 864e5))
-        : 7;
-      return {
-        bbox: boundsToLatFirst(snapBoundsOut(padBounds(base, 0.2), HOTSPOT_BBOX_SNAP_DEG)),
-        since: daysAgoIso(sinceDays),
-      };
-    }
+    if (view.mode === 'fire') return fireHotspotQuery;
     if (!vp || vp.zoom < HOTSPOT_NATIONAL_MIN_ZOOM) return null;
     return { bbox: boundsToLatFirst(vp.bounds) };
-  }, [layers.hotspots.visible, view.mode, spreadRun, catalogFire, selectedFire, vp]);
+  }, [layers.hotspots.visible, view.mode, fireHotspotQuery, vp]);
 
   const { data: hotspots } = useHotspots(hotspotQuery);
 
