@@ -38,6 +38,7 @@ import { spreadForecastLayer } from './layers/spreadForecastLayer';
 import { weatherLayers } from './layers/weatherLayers';
 import { windArrowsLayer } from './layers/windArrowsLayer';
 import { incidentMapLayer } from './layers/incidentMapLayer';
+import { labelContrastLayer } from './layers/labelContrast';
 import { irHeatLayer } from './layers/irHeatLayer';
 
 // The directory pivot retired nationalPerimetersLayer: the map now only ever
@@ -51,6 +52,7 @@ const MANAGERS: LayerManager[] = [
   perimeterLayer,
   hotspotLayer,
   firePinsLayer,
+  labelContrastLayer, // paints no layers of its own — tunes basemap halos
 ];
 
 /** Track the viewport as a grid-snapped Bounds4326 (fallback hotspot query). */
