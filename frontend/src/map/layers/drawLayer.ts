@@ -18,6 +18,7 @@ import {
 import {
   DRAW_CIRCLE_IMAGE,
   DRAW_DIAMOND_IMAGE,
+  DRAW_HATCH_IMAGE,
   DRAW_SQUARE_IMAGE,
 } from './markerImages';
 
@@ -25,6 +26,7 @@ const SRC = 'rd-draw';
 const LINE_LYR = 'rd-draw-line';
 const LINE_DASH_LYR = 'rd-draw-line-dash';
 const LINE_DOTS_LYR = 'rd-draw-line-dots';
+const LINE_HATCH_LYR = 'rd-draw-line-hatch';
 const LINE_LETTER_LYR = 'rd-draw-line-letter';
 const PT_LYR = 'rd-draw-pt';
 const LABEL_LYR = 'rd-draw-label';
@@ -83,6 +85,27 @@ function ensureLayers(map: MlMap): void {
     [LINE_DASH_LYR, 'dash', [1.6, 1.2]],
     [LINE_DOTS_LYR, 'dots', [0.05, 2.2]],
   ];
+  if (!map.getLayer(LINE_HATCH_LYR)) {
+    // dozer line: cross-hatch pattern tiled along the stroke
+    map.addLayer(
+      {
+        id: LINE_HATCH_LYR,
+        type: 'line',
+        source: SRC,
+        filter: [
+          'all',
+          ['==', ['geometry-type'], 'LineString'],
+          ['==', ['coalesce', ['get', 'dash'], 'solid'], 'hatch'],
+        ],
+        layout: { 'line-join': 'round' },
+        paint: {
+          'line-pattern': DRAW_HATCH_IMAGE,
+          'line-width': 12,
+        },
+      },
+      beforeIdFor(map, LINE_HATCH_LYR),
+    );
+  }
   for (const [id, dash, dasharray] of lineLayers) {
     if (map.getLayer(id)) continue;
     map.addLayer(
@@ -153,7 +176,7 @@ function ensureLayers(map: MlMap): void {
             'diamond', DRAW_DIAMOND_IMAGE,
             DRAW_CIRCLE_IMAGE,
           ],
-          'icon-size': 0.85,
+          'icon-size': 1.9,
           'icon-allow-overlap': true,
         },
         paint: {
@@ -174,7 +197,7 @@ function ensureLayers(map: MlMap): void {
         filter: ['==', ['geometry-type'], 'Point'],
         layout: {
           'text-field': ['get', 'glyph'],
-          'text-size': ['coalesce', ['get', 'tsize'], 10],
+          'text-size': ['coalesce', ['get', 'tsize'], 11],
           'text-font': ['Noto Sans Bold'],
           'text-allow-overlap': true,
         },
@@ -251,7 +274,7 @@ function onClick(map: MlMap, e: MapMouseEvent): void {
         sym: sym.id,
         glyph: sym.glyph,
         shape: sym.shape,
-        tsize: sym.shape === 'none' ? 15 : sym.glyph.length > 1 ? 8.5 : 10,
+        tsize: sym.shape === 'none' ? 16 : sym.glyph.length > 1 ? 9.5 : 11,
         color: sym.color,
       },
     };
@@ -267,7 +290,7 @@ function onClick(map: MlMap, e: MapMouseEvent): void {
       ],
       {
         layers: [PT_LYR, LABEL_LYR, LINE_LYR, LINE_DASH_LYR, LINE_DOTS_LYR,
-                 LINE_LETTER_LYR].filter((l) => !!map.getLayer(l)),
+                 LINE_HATCH_LYR, LINE_LETTER_LYR].filter((l) => !!map.getLayer(l)),
       },
     );
     const hitFid = hits[0]?.properties?.fid as string | undefined;
@@ -386,8 +409,8 @@ export const drawLayer: LayerManager = {
       map.off('touchmove', h.tmove);
       map.off('touchend', h.mup);
     }
-    for (const l of [LABEL_LYR, PT_LYR, LINE_LETTER_LYR, LINE_DOTS_LYR,
-                     LINE_DASH_LYR, LINE_LYR]) {
+    for (const l of [LABEL_LYR, PT_LYR, LINE_LETTER_LYR, LINE_HATCH_LYR,
+                     LINE_DOTS_LYR, LINE_DASH_LYR, LINE_LYR]) {
       if (map.getLayer(l)) map.removeLayer(l);
     }
     if (map.getSource(SRC)) map.removeSource(SRC);

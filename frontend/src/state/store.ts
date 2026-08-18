@@ -110,8 +110,6 @@ export interface AppState {
   ui: {
     theme: 'dark' | 'light';
     sidebarTab: 'overview' | 'forecast' | 'maps' | 'draw';
-    /** 3D terrain (AWS terrarium DEM) on the fire map. */
-    terrain3d: boolean;
     sidebarCollapsed: boolean;
     sheetSnap: 'peek' | 'half' | 'full';
     /** which product's legend the LegendBar shows (qualified key, see LegendBar) */
@@ -153,7 +151,6 @@ export interface AppState {
     setTheme(theme: 'dark' | 'light'): void;
     setSidebarTab(tab: AppState['ui']['sidebarTab']): void;
     setSidebarCollapsed(collapsed: boolean): void;
-    setTerrain3d(on: boolean): void;
     setDrawTool(tool: DrawTool): void;
     /** Replace the feature set, pushing the previous onto the undo stack. */
     drawCommit(features: DrawFeature[]): void;
@@ -209,7 +206,6 @@ export const useStore = create<AppState>((set, get) => ({
   ui: {
     theme: (document.documentElement.dataset.theme as 'dark' | 'light') ?? 'dark',
     sidebarTab: 'overview',
-    terrain3d: false,
     sidebarCollapsed: false,
     sheetSnap: 'peek',
     legendKey: null,
@@ -331,7 +327,6 @@ export const useStore = create<AppState>((set, get) => ({
     },
     setSidebarTab: (sidebarTab) => set((s) => ({ ui: { ...s.ui, sidebarTab } })),
     setSidebarCollapsed: (sidebarCollapsed) => set((s) => ({ ui: { ...s.ui, sidebarCollapsed } })),
-    setTerrain3d: (terrain3d) => set((s) => ({ ui: { ...s.ui, terrain3d } })),
     setDrawTool: (tool) => set((s) => ({ draw: { ...s.draw, tool } })),
     drawCommit: (features) =>
       set((s) => ({

@@ -48,7 +48,7 @@ export const DRAW_SYMBOL_BY_ID: Record<string, DrawSymbol> = Object.fromEntries(
 
 // ---------- line styles ----------
 
-export type LineDash = 'solid' | 'dash' | 'dots';
+export type LineDash = 'solid' | 'dash' | 'dots' | 'hatch';
 
 export interface DrawLineStyle {
   id: string;
@@ -62,7 +62,7 @@ export interface DrawLineStyle {
 
 export const DRAW_LINES: DrawLineStyle[] = [
   { id: 'sketch', label: 'Sketch', color: '#ffbd5a', dash: 'solid' },
-  { id: 'dozer', label: 'Completed Dozer Line', color: GRAY, dash: 'dash' },
+  { id: 'dozer', label: 'Completed Dozer Line', color: GRAY, dash: 'hatch' },
   { id: 'fuelbreak', label: 'Completed Fuel Break', color: INK, dash: 'dash' },
   { id: 'handline', label: 'Completed Hand Line', color: INK, dash: 'solid', letter: 'H' },
   { id: 'mixedline', label: 'Completed Mixed Construction', color: INK, dash: 'solid', letter: 'M' },

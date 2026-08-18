@@ -36,7 +36,6 @@ function ToolButton({
 
 export function DrawTab() {
   const draw = useStore((s) => s.draw);
-  const terrain3d = useStore((s) => s.ui.terrain3d);
   const actions = useStore((s) => s.actions);
 
   const toggle = (tool: DrawTool) =>
@@ -110,12 +109,14 @@ export function DrawTab() {
                         background:
                           ls.dash === 'solid'
                             ? ls.color
-                            : `repeating-linear-gradient(90deg, ${ls.color} 0 ${
-                                ls.dash === 'dots' ? '3px' : '7px'
-                              }, transparent ${ls.dash === 'dots' ? '3px' : '7px'} ${
-                                ls.dash === 'dots' ? '8px' : '12px'
-                              })`,
-                        height: (ls.width ?? 3) - 0.5,
+                            : ls.dash === 'hatch'
+                              ? `repeating-linear-gradient(70deg, ${ls.color} 0 1.5px, transparent 1.5px 5px), repeating-linear-gradient(-70deg, ${ls.color} 0 1.5px, transparent 1.5px 5px)`
+                              : `repeating-linear-gradient(90deg, ${ls.color} 0 ${
+                                  ls.dash === 'dots' ? '3px' : '7px'
+                                }, transparent ${ls.dash === 'dots' ? '3px' : '7px'} ${
+                                  ls.dash === 'dots' ? '8px' : '12px'
+                                })`,
+                        height: ls.dash === 'hatch' ? 9 : (ls.width ?? 3) - 0.5,
                       }}
                     />
                   )}
@@ -155,21 +156,10 @@ export function DrawTab() {
         </div>
       </section>
 
-      <section className="rd-section">
-        <h3 className="rd-section-title">View</h3>
-        <label className="rd-field--row">
-          <input
-            type="checkbox"
-            checked={terrain3d}
-            onChange={(e) => actions.setTerrain3d(e.target.checked)}
-          />
-          <span>3D terrain</span>
-        </label>
-        <div className="rd-field-note">
-          Annotations stay on this device, saved per fire. {draw.features.length} mark
-          {draw.features.length === 1 ? '' : 's'} on the map.
-        </div>
-      </section>
+      <div className="rd-field-note">
+        Annotations stay on this device, saved per fire. {draw.features.length} mark
+        {draw.features.length === 1 ? '' : 's'} on the map.
+      </div>
     </div>
   );
 }

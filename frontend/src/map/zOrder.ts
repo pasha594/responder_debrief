@@ -36,6 +36,7 @@ export const RD_LAYER_ORDER = [
   'rd-draw-line',
   'rd-draw-line-dash',
   'rd-draw-line-dots',
+  'rd-draw-line-hatch',
   'rd-draw-line-letter',
   'rd-draw-pt',
   'rd-draw-label',

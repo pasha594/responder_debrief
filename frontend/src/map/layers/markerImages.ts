@@ -16,6 +16,8 @@ export const WIND_ARROW_IMAGE = 'rd-wind-arrow';
 export const DRAW_CIRCLE_IMAGE = 'rd-draw-circle';
 export const DRAW_SQUARE_IMAGE = 'rd-draw-square';
 export const DRAW_DIAMOND_IMAGE = 'rd-draw-diamond';
+/** Cross-hatch tile for dozer lines (line-pattern; color baked in). */
+export const DRAW_HATCH_IMAGE = 'rd-draw-hatch';
 
 const PIXEL_RATIO = 2;
 
@@ -221,6 +223,35 @@ function drawShapeSdf(shape: 'circle' | 'square' | 'diamond'): RawImage {
   return { data: img, pixelRatio: PIXEL_RATIO };
 }
 
+/** Cross-hatch line-pattern tile: two crossing diagonal strokes ("x"). */
+function drawHatchPattern(): RawImage | null {
+  const w = 20;
+  const h = 14;
+  const canvas = document.createElement('canvas');
+  canvas.width = w * PIXEL_RATIO;
+  canvas.height = h * PIXEL_RATIO;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return null;
+  ctx.scale(PIXEL_RATIO, PIXEL_RATIO);
+  ctx.strokeStyle = '#a89ea4';
+  ctx.lineWidth = 2;
+  ctx.lineCap = 'round';
+  for (const x0 of [1, 11]) {
+    ctx.beginPath();
+    ctx.moveTo(x0, h - 2);
+    ctx.lineTo(x0 + 8, 2);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(x0, 2);
+    ctx.lineTo(x0 + 8, h - 2);
+    ctx.stroke();
+  }
+  return {
+    data: ctx.getImageData(0, 0, w * PIXEL_RATIO, h * PIXEL_RATIO),
+    pixelRatio: PIXEL_RATIO,
+  };
+}
+
 function makeImage(id: string): RawImage | null {
   switch (id) {
     case PIN_WILDFIRE:
@@ -241,6 +272,8 @@ function makeImage(id: string): RawImage | null {
       return drawShapeSdf('square');
     case DRAW_DIAMOND_IMAGE:
       return drawShapeSdf('diamond');
+    case DRAW_HATCH_IMAGE:
+      return drawHatchPattern();
     default:
       return null;
   }
@@ -256,6 +289,7 @@ const ALL_IDS = [
   DRAW_CIRCLE_IMAGE,
   DRAW_SQUARE_IMAGE,
   DRAW_DIAMOND_IMAGE,
+  DRAW_HATCH_IMAGE,
 ];
 
 function addIfMissing(map: MlMap, id: string): void {
@@ -265,7 +299,8 @@ function addIfMissing(map: MlMap, id: string): void {
   map.addImage(id, img.data, {
     pixelRatio: img.pixelRatio,
     sdf: id !== PIN_WILDFIRE && id !== PIN_WILDFIRE_SELECTED
-      && id !== PIN_PRESCRIBED && id !== PIN_PRESCRIBED_SELECTED,
+      && id !== PIN_PRESCRIBED && id !== PIN_PRESCRIBED_SELECTED
+      && id !== DRAW_HATCH_IMAGE,
   });
 }
 

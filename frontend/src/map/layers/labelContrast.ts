@@ -1,77 +1,44 @@
 /**
- * Basemap label legibility under weather rasters. The dark style's labels
- * (light text, subtle dark halo) drown on a bright raster — cold-blue
- * temperature, pale smoke. While ANY weather layer is visible, every basemap
- * symbol layer gets a strong near-black halo; light text + dark halo reads on
- * any ground, so no per-product color guessing. Originals are saved on first
- * override and restored when the last weather layer turns off.
+ * Google-style basemap labels: dark ink with a white outline, applied to
+ * every basemap symbol layer. That single treatment reads on ANY ground —
+ * the dark basemap, bright weather rasters, incident-map sheets, satellite —
+ * so no per-layer or per-overlay switching is needed.
  */
 import type { Map as MlMap } from 'maplibre-gl';
-import type { LayerContext, LayerManager } from '../layerTypes';
+import type { LayerManager } from '../layerTypes';
 
-const HALO_COLOR = 'rgba(12, 9, 12, 0.9)';
-const HALO_WIDTH = 2;
+const TEXT_COLOR = '#1f1b1e';
+const HALO_COLOR = 'rgba(255, 255, 255, 0.92)';
+const HALO_WIDTH = 1.8;
 
-interface SavedHalo {
-  color: unknown;
-  width: unknown;
-}
-
-/** Layer id -> pre-override halo paint values (undefined = style default). */
-let saved: Map<string, SavedHalo> | null = null;
-
-function anyWeatherVisible(ctx: LayerContext): boolean {
-  return Object.values(ctx.layers.weather).some((l) => l?.visible);
-}
-
-function basemapSymbolIds(map: MlMap): string[] {
-  return (map.getStyle()?.layers ?? [])
-    .filter((l) => l.type === 'symbol' && !l.id.startsWith('rd-'))
-    .map((l) => l.id);
-}
+/** Ids already restyled (style reloads clear layers, so re-apply is safe). */
+let styled: Set<string> = new Set();
 
 function apply(map: MlMap): void {
-  if (saved) return; // already boosted
-  saved = new Map();
-  for (const id of basemapSymbolIds(map)) {
-    saved.set(id, {
-      color: map.getPaintProperty(id, 'text-halo-color'),
-      width: map.getPaintProperty(id, 'text-halo-width'),
-    });
-    map.setPaintProperty(id, 'text-halo-color', HALO_COLOR);
-    map.setPaintProperty(id, 'text-halo-width', HALO_WIDTH);
+  const layers = map.getStyle()?.layers ?? [];
+  for (const l of layers) {
+    if (l.type !== 'symbol' || l.id.startsWith('rd-') || styled.has(l.id)) continue;
+    map.setPaintProperty(l.id, 'text-color', TEXT_COLOR);
+    map.setPaintProperty(l.id, 'text-halo-color', HALO_COLOR);
+    map.setPaintProperty(l.id, 'text-halo-width', HALO_WIDTH);
+    styled.add(l.id);
   }
-}
-
-function restore(map: MlMap): void {
-  if (!saved) return;
-  for (const [id, halo] of saved) {
-    if (!map.getLayer(id)) continue; // style changed under us
-    map.setPaintProperty(id, 'text-halo-color', halo.color);
-    map.setPaintProperty(id, 'text-halo-width', halo.width);
-  }
-  saved = null;
 }
 
 export const labelContrastLayer: LayerManager = {
   mount() {
-    saved = null;
+    styled = new Set();
   },
 
-  update(map, ctx) {
+  update(map) {
     try {
-      if (anyWeatherVisible(ctx)) apply(map);
-      else restore(map);
+      apply(map);
     } catch {
       /* style mid-swap — the next update() re-applies */
     }
   },
 
-  unmount(map) {
-    try {
-      restore(map);
-    } catch {
-      /* style already gone */
-    }
+  unmount() {
+    styled = new Set();
   },
 };
