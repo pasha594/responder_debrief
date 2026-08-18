@@ -112,10 +112,9 @@ export function weatherImageUrl(run: WeatherRun, product: string, hourIso: strin
     .replace('{ws}', run.workspace)
     .replace('{product}', product)
     .replace('{epoch_ms}', String(Date.parse(hourIso)));
-  // cv=2: one-time cache-bust. Early builds preloaded these frames without
-  // crossOrigin, poisoning browser caches (no-ACAO entries under an immutable
-  // 1y max-age) so MapLibre's CORS fetch failed. New URLs start clean.
-  return `${dataUrl(rel)}?cv=2`;
+  // cv history: 2 = CORS cache poisoning (preload without crossOrigin);
+  // 3 = tmpf frames overwritten in place after the GRIB unit fix.
+  return `${dataUrl(rel)}?cv=3`;
 }
 
 /**

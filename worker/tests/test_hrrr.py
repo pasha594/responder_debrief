@@ -272,6 +272,25 @@ class TestDiscovery:
 
 
 # ---------------------------------------------------------------------------
+class TestWarpUnits:
+    def test_warp_command_pins_native_grib_units(self, monkeypatch, tmp_path):
+        """GDAL converts GRIB temperature K -> C unless told not to; the tmpf
+        calc assumes Kelvin, so the warp must pin native units (the uniform
+        20 F CONUS regression)."""
+        from responder_worker import hrrr as hrrr_mod
+
+        seen = {}
+
+        def fake_run(cmd):
+            seen["cmd"] = [str(c) for c in cmd]
+
+        monkeypatch.setattr(hrrr_mod, "_run", fake_run)
+        hrrr_mod.warp_to_conus(tmp_path / "msg.grib2", tmp_path)
+        cmd = seen["cmd"]
+        i = cmd.index("--config")
+        assert cmd[i + 1 : i + 3] == ["GRIB_NORMALIZE_UNITS", "NO"]
+
+
 # wind_uv: XYZ text parsing, keys, sync emission + manifest annotation
 # ---------------------------------------------------------------------------
 

@@ -330,11 +330,19 @@ def _run(cmd: list[str]) -> None:
 
 
 def warp_to_conus(grib_path: Path, workdir: Path) -> Path:
-    """Warp a message file to the EPSG:3857 CONUS frame grid (NaN nodata)."""
+    """Warp a message file to the EPSG:3857 CONUS frame grid (NaN nodata).
+
+    GRIB_NORMALIZE_UNITS=NO keeps the file's native units: GDAL otherwise
+    converts temperature bands K -> C on read, which silently broke the tmpf
+    calc (it assumes Kelvin; Celsius through it lands at -455..-375 F and the
+    whole CONUS painted the ramp's coldest stop). Every PRODUCTS calc is
+    written against native GRIB units."""
     merc = frames.bounds4326_to_3857(list(config.CONUS_BOUNDS))
     width, height = frames.dims_for_width(merc, config.WEATHER_FRAME_WIDTH)
     warped = workdir / "warped.tif"
-    _run([_tool("gdalwarp"), "-q", "-overwrite", "-t_srs", "EPSG:3857",
+    _run([_tool("gdalwarp"), "-q", "-overwrite",
+          "--config", "GRIB_NORMALIZE_UNITS", "NO",
+          "-t_srs", "EPSG:3857",
           "-te", *(repr(float(v)) for v in merc),
           "-ts", str(width), str(height), "-r", "bilinear",
           "-dstnodata", "nan", str(grib_path), str(warped)])
@@ -439,7 +447,8 @@ def _put_wind_uv(storage: Storage, ws: str, hour: str, warped: Path,
 
 def _render_hour(client: httpx.Client, storage: Storage, ws_state: dict,
                  run: dict, hour: str, products: list[str],
-                 ramps: dict[str, Path], budget: int, workdir: Path, log
+                 ramps: dict[str, Path], budget: int, workdir: Path, log,
+                 force: frozenset[str] = frozenset()
                  ) -> tuple[bool, bool, int]:
     """Render every missing product image (and, when ws is in scope, the
     coarse U/V grid JSON) for one forecast hour.
@@ -455,7 +464,8 @@ def _render_hour(client: httpx.Client, storage: Storage, ws_state: dict,
 
     uv_present = "ws" in products and storage.exists(wind_uv_key(ws, hour))
     need_uv = "ws" in products and not uv_present
-    missing = [p for p in products if not storage.exists(image_key(ws, p, hour))]
+    missing = [p for p in products
+               if p in force or not storage.exists(image_key(ws, p, hour))]
     if not missing and not need_uv:
         return True, uv_present, budget
 
@@ -546,6 +556,14 @@ def sync_weather(client: httpx.Client, storage: Storage, state: dict,
     model = weather.get("models", {}).get("hrrr", {})
     limited = bool(hours_limit or products_filter)
 
+    # One-time heal: tmpf frames rendered before the GRIB unit fix are a
+    # uniform cold color — overwrite them once, then clear the debt.
+    force: frozenset[str] = (
+        frozenset() if hrrr_state.get("tmpf_unit_fix") or limited
+        else frozenset({"tmpf"})
+    )
+    heal_ok = True
+
     # Weather rendering is the ONLY part of sync-catalogs that needs GDAL. When
     # the toolchain is missing (a slow apt mirror timed the install out), skip
     # it and still publish fires, forecasts, and incident catalogs — a stalled
@@ -562,7 +580,7 @@ def sync_weather(client: httpx.Client, storage: Storage, state: dict,
         if "frames" not in run:
             annotate_run(run, hrrr_state)
         ws_state = hrrr_state.setdefault(ws, {"done": False, "fetched": 0})
-        if ws_state.get("done"):
+        if ws_state.get("done") and not force:
             run["frames"]["hours"] = list(run.get("hours") or [])
             run["frames"]["complete"] = True
             done_hours = run.get("hours") or []
@@ -591,7 +609,7 @@ def sync_weather(client: httpx.Client, storage: Storage, state: dict,
                     break
                 hour_ok, uv_present, budget = _render_hour(
                     client, storage, ws_state, run, hour, products, ramps,
-                    budget, Path(td), log)
+                    budget, Path(td), log, force=force)
                 if hour_ok:
                     rendered.append(hour)
                 else:
@@ -609,4 +627,7 @@ def sync_weather(client: httpx.Client, storage: Storage, state: dict,
             # at least one U/V grid JSON exists for this run — advertise it
             # (same complete-semantics as `hours`)
             run["frames"]["wind_uv_template"] = WIND_UV_TEMPLATE
+        heal_ok = heal_ok and all_ok
+    if force and heal_ok:
+        hrrr_state["tmpf_unit_fix"] = True
     return budget
