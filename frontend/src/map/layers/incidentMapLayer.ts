@@ -49,6 +49,10 @@ export const incidentMapLayer: LayerManager = {
       map.addSource(SRC, {
         type: 'raster',
         tiles: [dataUrl(tiles.url_template)],
+        // gdal2tiles emits 256px tiles; MapLibre's default is 512, which
+        // fetches one zoom level coarser than the screen needs and stretches
+        // it 2x — declaring the real size recovers a full level of sharpness.
+        tileSize: 256,
         minzoom: tiles.minzoom,
         maxzoom: tiles.maxzoom,
         bounds: tiles.bounds,

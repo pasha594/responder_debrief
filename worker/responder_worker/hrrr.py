@@ -50,7 +50,9 @@ WEATHER_IMAGE_TEMPLATE = "/frames/weather/{ws}/{product}/{epoch_ms}.png"
 # 'wd' direction raster, which is retired (already-uploaded wd PNGs are
 # harmless orphans).
 WIND_UV_TEMPLATE = "/frames/weather/{ws}/wind_uv/{epoch_ms}.json"
-WIND_UV_NX = 72
+# 144 columns ~= 32 km cells: the frontend bilinearly densifies arrows when
+# zoomed in, so finer cells feed it real local variation (~100 KB/hour JSON).
+WIND_UV_NX = 144
 
 # ---------------------------------------------------------------------------
 # Products: EXACT idx record matching + gdal_calc conversion expressions.
