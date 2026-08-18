@@ -36,8 +36,12 @@ jobs:
         run: uv sync
 
       # HRRR weather frames need CLI GDAL (gdalwarp/gdaldem/gdal_calc.py)
+      # Non-fatal: only the HRRR weather frames need GDAL. If the Ubuntu
+      # mirror is crawling, skip it and still publish fire/forecast/incident
+      # catalogs — the next hourly run picks the weather back up.
       - name: Install GDAL
-        timeout-minutes: 6
+        continue-on-error: true
+        timeout-minutes: 8
         run: |
           # A stalled Ubuntu mirror once hung this step for 30 min and the job
           # was killed before doing any work. Bound it, retry, and let apt

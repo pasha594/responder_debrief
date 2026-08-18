@@ -447,6 +447,17 @@ def sync_weather(client: httpx.Client, storage: Storage, state: dict,
     model = weather.get("models", {}).get("hrrr", {})
     limited = bool(hours_limit or products_filter)
 
+    # Weather rendering is the ONLY part of sync-catalogs that needs GDAL. When
+    # the toolchain is missing (a slow apt mirror timed the install out), skip
+    # it and still publish fires, forecasts, and incident catalogs — a stalled
+    # Ubuntu mirror must not block the whole refresh.
+    missing = [t for t in ("gdalwarp", "gdaldem", "gdal_translate")
+               if shutil.which(t) is None]
+    if missing:
+        log(f"[hrrr] GDAL unavailable ({', '.join(missing)}) — skipping weather "
+            "frames this sync; catalogs still publish")
+        return budget
+
     for run in model.get("runs", []):
         ws = run["workspace"]
         if "frames" not in run:

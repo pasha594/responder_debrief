@@ -36,6 +36,10 @@ class Storage:
     def exists(self, key: str) -> bool:
         raise NotImplementedError
 
+    def get_file(self, key: str, dest: Path) -> bool:
+        """Download an object to `dest`. False when the key does not exist."""
+        raise NotImplementedError
+
     def delete_prefix(self, prefix: str) -> int:
         raise NotImplementedError
 
@@ -80,6 +84,14 @@ class DryRunStorage(Storage):
 
     def exists(self, key):
         return (self.out_dir / key).exists()
+
+    def get_file(self, key, dest):
+        p = self.out_dir / key
+        if not p.exists():
+            return False
+        Path(dest).parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(p, dest)
+        return True
 
     def delete_prefix(self, prefix):
         root = self.out_dir / prefix
@@ -157,6 +169,18 @@ class B2Storage(Storage):
             return True
         except botocore.exceptions.ClientError:
             return False
+
+    def get_file(self, key, dest):
+        import botocore.exceptions
+
+        Path(dest).parent.mkdir(parents=True, exist_ok=True)
+        try:
+            self.client.download_file(self.bucket, key, str(dest))
+            return True
+        except botocore.exceptions.ClientError as exc:
+            if exc.response["Error"]["Code"] in ("NoSuchKey", "404"):
+                return False
+            raise
 
     def delete_prefix(self, prefix):
         n = 0

@@ -506,6 +506,70 @@ def _ir_flights(args, storage, fire, ir_by_flight: dict[str, dict]) -> list[dict
     return out
 
 
+def _probe_backlog(storage, state, log, *, cap: int = 15) -> set[str]:
+    """Classify already-mirrored PDFs that predate georeference detection.
+
+    Sheets mirrored by early runs (or replayed by retention) have no
+    state["tiled"] record, so manifests could only guess georeferenced=False —
+    Big Grass showed 45 real map sheets as "flat". Retention means they will
+    never be re-fetched from the FTP, but the bytes are in OUR bucket: download
+    up to `cap` per run, gdalinfo-probe + preview them, and return the incident
+    keys that gained classifications (their manifests need a rebuild).
+    Bounded by cap and the shared wall clock; converges in a few runs.
+    """
+    if not geopdf.gdal_available():
+        return set()
+    touched: set[str] = set()
+    probed = 0
+    for inc_key, inc in state.get("incidents", {}).items():
+        if probed >= cap or frames.deadline_passed():
+            break
+        fire_slug = inc.get("fire_slug")
+        if not fire_slug:
+            continue
+        for rel, meta in (inc.get("files") or {}).items():
+            if probed >= cap or frames.deadline_passed():
+                break
+            sha = meta.get("sha16")
+            if (not sha or sha in state["tiled"]
+                    or not rel.lower().endswith(".pdf")
+                    or meta.get("kind") == "mobile"):
+                continue
+            key = f"raw/incidents/{fire_slug}/{rel}"
+            with tempfile.TemporaryDirectory(prefix="probe_") as td:
+                local = Path(td) / "sheet.pdf"
+                if not storage.get_file(key, local):
+                    continue  # raw object missing — nothing to classify
+                probe = geopdf.probe_pdf(local)
+                geo = {
+                    "georeferenced": probe["georeferenced"],
+                    "projection": probe.get("projection"),
+                    "tiles": None,
+                    "preview": False,
+                }
+                try:
+                    preview = Path(td) / "preview.png"
+                    geopdf.render_preview(local, preview)
+                    storage.put_file(
+                        f"previews/incidents/{fire_slug}/{sha}.png", preview)
+                    geo["preview"] = True
+                except Exception as exc:
+                    log(f"[probe] preview failed for {rel}: {exc}")
+                state["tiled"][sha] = {
+                    # georeferenced sheets keep tiler_version None -> the
+                    # normal tiling budget picks them up from B2 next runs
+                    "tiler_version": None if probe["georeferenced"] else config.TILER_VERSION,
+                    "at": state_mod.now_iso(),
+                    "geo": geo,
+                }
+                probed += 1
+                touched.add(inc_key)
+    if probed:
+        log(f"[probe] classified {probed} previously-unprobed sheets "
+            f"across {len(touched)} incidents")
+    return touched
+
+
 def cmd_sync_incidents(args) -> int:
     storage = make_storage(args.dry_run, args.out)
     state = state_mod.load_state(storage)
@@ -516,6 +580,15 @@ def cmd_sync_incidents(args) -> int:
         fires = fetch_active_fires(client)
         fires_by_slug = {f["fire_slug"]: f for f in fires}
         log(f"[incidents] active wildfires: {len(fires)}")
+
+        # Classify legacy sheets from B2 before crawling, so this run's
+        # manifests already reflect the corrections.
+        frames.start_deadline(int(os.environ.get(
+            "MIRROR_MAX_SECONDS", str(config.MIRROR_MAX_SECONDS_DEFAULT))))
+        for inc_key in _probe_backlog(storage, state, log):
+            # cleared mtime => the crawl re-syncs it (files replay from cache,
+            # zero downloads) and rebuilds its manifest with the new geo state
+            state["incidents"][inc_key]["dir_mtime"] = None
 
         log("[incidents] crawling FTP year roots for candidate dirs ...")
         cands = _collect_candidates(client, args, fires)
