@@ -4,7 +4,7 @@
  */
 import { LegendImg } from '../../utils/LegendImg';
 import { useState } from 'react';
-import { useWeatherRuns } from '../../api/queries';
+import { isRenderableWeatherRun, useWeatherRuns } from '../../api/queries';
 import { weatherLegendUrl } from '../../api/wmsUrls';
 import {
   RENDERED_WEATHER_PRODUCTS,
@@ -103,7 +103,7 @@ export function WeatherSection() {
   return (
     <>
       {usable.map(([modelId, model]) => {
-        const run = model.runs[0];
+        const run = model.runs.find(isRenderableWeatherRun) ?? model.runs[0];
         const stale = Date.now() - Date.parse(run.run_time) > STALE_MS;
         // Only products that are BOTH in the manifest and pre-rendered.
         const products = RENDERED_WEATHER_PRODUCTS.flatMap((p) => {

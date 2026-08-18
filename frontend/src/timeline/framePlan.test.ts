@@ -134,6 +134,26 @@ describe('resolveWeatherFrame with frames.hours', () => {
   });
 });
 
+describe('weatherHours with an empty frames block', () => {
+  it('returns [] rather than guessing unrendered hours (404s otherwise)', async () => {
+    const { weatherHours } = await import('./framePlan');
+    const run: WeatherRun = {
+      workspace: 'hrrr_20260818_17',
+      run_time: '2026-08-18T17:00:00Z',
+      hours: ['2026-08-18T17:00:00Z', '2026-08-18T18:00:00Z'],
+      frames: {
+        bounds: [-125, 24.5, -66.5, 49.5],
+        image_template: '/frames/weather/{ws}/{product}/{epoch_ms}.png',
+        hours: [], // GDAL-skipped sync: run published, nothing rendered
+        complete: false,
+      },
+    };
+    expect(weatherHours(run)).toEqual([]);
+    // legacy manifests (no frames block) still fall back to the hour list
+    expect(weatherHours({ ...run, frames: undefined })).toHaveLength(2);
+  });
+});
+
 describe('buildFrameTimes', () => {
   it('unions spread hourly ticks with weather hours, clipped and sorted', () => {
     const times = buildFrameTimes({

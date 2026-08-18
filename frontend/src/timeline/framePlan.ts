@@ -80,13 +80,16 @@ export interface WeatherFrame {
 }
 
 /**
- * The hours that actually exist as pre-rendered frames: frames.hours when
- * present (hours actually rendered — may lag `hours` while a run is
- * budget-limited), else the run's full hour list (older catalogs).
+ * The hours that actually exist as pre-rendered frames: frames.hours when the
+ * block is present (hours actually rendered — may lag `hours` while a run is
+ * budget-limited, and may be EMPTY when a GDAL-skipped sync published the run
+ * before rendering anything), else the run's full hour list (older catalogs
+ * that predate the frames block). Never guess hours the worker didn't render:
+ * that 404s every frame.
  */
 export function weatherHours(run: WeatherRun | null): string[] {
   if (!run) return [];
-  return run.frames?.hours?.length ? run.frames.hours : (run.hours ?? []);
+  return run.frames ? (run.frames.hours ?? []) : (run.hours ?? []);
 }
 
 /**

@@ -124,10 +124,17 @@ export function latestRun(
 }
 
 /** Newest weather run for a model, or null. */
+/** A run the map can actually draw: rendered frames, or a legacy manifest. */
+export function isRenderableWeatherRun(run: WeatherRun): boolean {
+  return !run.frames || (run.frames.hours?.length ?? 0) > 0;
+}
+
 export function latestWeatherRun(
   weather: { models: Record<string, { runs: WeatherRun[] }> } | undefined,
   model = 'hrrr',
 ): WeatherRun | null {
-  const runs = weather?.models?.[model]?.runs;
-  return runs?.length ? runs[0] : null;
+  const runs = weather?.models?.[model]?.runs ?? [];
+  // A GDAL-skipped sync can publish a NEWER run with zero rendered frames —
+  // selecting it would blank every weather layer. Prefer the newest drawable.
+  return runs.find(isRenderableWeatherRun) ?? runs[0] ?? null;
 }
