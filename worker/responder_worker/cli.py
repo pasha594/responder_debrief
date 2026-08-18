@@ -308,6 +308,7 @@ def _tile_and_manifest(args, storage, state, fires_by_slug, mirrors) -> None:
                 local_path=None,          # never re-tiled; geo comes from state
                 changed=False,
                 rel_dir=rel.rpartition("/")[0],
+                lm=meta.get("lm"),
             )
             for rel, meta in inc_files.items()
             if rel not in seen_rel
@@ -414,7 +415,7 @@ def _tile_and_manifest(args, storage, state, fires_by_slug, mirrors) -> None:
             maps.append(cat.map_entry(
                 parsed=parsed, kind=mf.kind, sha_id=sha_id, fire_slug=fire_slug,
                 pdf_key=mf.key, size_bytes=mf.size, geo=geo, rev=mf.rev,
-                tiling_pending=pending,
+                tiling_pending=pending, uploaded_lm=mf.lm,
             ))
 
         ir_flights = _ir_flights(args, storage, fire, ir_by_flight)

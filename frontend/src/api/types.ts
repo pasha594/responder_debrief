@@ -335,6 +335,10 @@ export interface IncidentMapEntry {
   orientation: string | null;
   op_date: string | null;
   period: 'day' | 'night' | null;
+  /** Fire-local wall time parsed from the filename (no zone suffix). */
+  generated_at_local?: string | null;
+  /** UTC ISO of the FTP Last-Modified — when the sheet was uploaded. */
+  uploaded_at?: string | null;
   filename: string;
   pdf_url: string;
   size_bytes: number | null;

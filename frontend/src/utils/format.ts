@@ -116,3 +116,16 @@ export function formatBytes(n: number | null | undefined): string {
   const gb = mb / 1024;
   return `${gb < 10 ? trimTrailingZero(gb.toFixed(1)) : Math.round(gb)} GB`;
 }
+
+/** Compact fire-local clock time, e.g. "3:23 PM" (falls back to viewer-local). */
+export function formatTime(t: number, timezone: string | null | undefined): string {
+  try {
+    return new Intl.DateTimeFormat('en-US', {
+      hour: 'numeric',
+      minute: '2-digit',
+      timeZone: timezone ?? undefined,
+    }).format(t);
+  } catch {
+    return new Intl.DateTimeFormat('en-US', { hour: 'numeric', minute: '2-digit' }).format(t);
+  }
+}

@@ -76,6 +76,7 @@ class MirroredFile:
     local_path: Path | None   # None if skipped/unchanged and not re-downloaded
     changed: bool
     rel_dir: str         # 'products/20260817' | 'qr' | 'ir/20260817'
+    lm: str | None = None     # upstream FTP Last-Modified (RFC 1123) = upload time
 
 
 @dataclass
@@ -187,6 +188,7 @@ class IncidentMirror:
                 url=meta.get("url", ""), size=meta.get("size"),
                 sha16=meta.get("sha16"), rev=meta.get("rev", 1),
                 local_path=None, changed=False, rel_dir=rel_dir,
+                lm=meta.get("lm"),
             ))
 
     def _sync_products(self, child: Entry, inc_state: dict, fire_slug: str,
@@ -321,7 +323,7 @@ class IncidentMirror:
                 kind=meta.get("kind", fkind), filename=filename, key=key, url=e.url,
                 size=meta.get("size"), sha16=meta.get("sha16"),
                 rev=meta.get("rev", 1), local_path=None, changed=False,
-                rel_dir=rel_dir,
+                rel_dir=rel_dir, lm=meta.get("lm"),
             ))
             return
 
@@ -354,5 +356,5 @@ class IncidentMirror:
         res.files.append(MirroredFile(
             kind=fkind, filename=filename, key=key, url=e.url, size=len(body),
             sha16=sha, rev=max(rev, 1), local_path=local, changed=changed,
-            rel_dir=rel_dir,
+            rel_dir=rel_dir, lm=resp.headers.get("last-modified"),
         ))

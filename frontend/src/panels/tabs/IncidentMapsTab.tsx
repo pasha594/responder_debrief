@@ -10,7 +10,7 @@ import { dataUrl } from '../../api/catalogs';
 import type { IncidentMapEntry, IrFlight } from '../../api/types';
 import { useMap } from '../../map/MapRoot';
 import { useStore } from '../../state/store';
-import { formatBytes } from '../../utils/format';
+import { formatBytes, formatTime } from '../../utils/format';
 import {
   friendlyOpDate,
   groupMapsByDate,
@@ -59,16 +59,36 @@ function Thumb({ entry }: { entry: IncidentMapEntry }) {
   );
 }
 
-/** The row's own sub-label: period + size, without repeating the date. */
-function rowMeta(entry: IncidentMapEntry): string {
+/**
+ * The row's own sub-label: when the sheet was uploaded + size. Upload time is
+ * the FTP Last-Modified (UTC ISO, shown fire-local); older manifests without
+ * it fall back to the filename's generation stamp (already fire-local wall
+ * time — parsed as-is, NOT through a zone), then to the day/night period.
+ */
+function rowMeta(entry: IncidentMapEntry, timezone: string | null): string {
   const parts: string[] = [];
-  if (entry.period) parts.push(entry.period === 'night' ? 'Night' : 'Day');
+  if (entry.uploaded_at) {
+    const t = Date.parse(entry.uploaded_at);
+    if (Number.isFinite(t)) parts.push(`Uploaded ${formatTime(t, timezone)}`);
+  } else if (entry.generated_at_local) {
+    const m = /T(\d{2}):(\d{2})/.exec(entry.generated_at_local);
+    if (m) parts.push(`Generated ${m[1]}:${m[2]}`);
+  }
+  if (!parts.length && entry.period) parts.push(entry.period === 'night' ? 'Night' : 'Day');
   if (entry.kind === 'qr') parts.push('QR sheet');
   parts.push(formatBytes(entry.size_bytes));
   return parts.join(' · ');
 }
 
-function MapRow({ entry, onView }: { entry: IncidentMapEntry; onView: () => void }) {
+function MapRow({
+  entry,
+  timezone,
+  onView,
+}: {
+  entry: IncidentMapEntry;
+  timezone: string | null;
+  onView: () => void;
+}) {
   const map = useMap();
   const incident = useStore((s) => s.layers.incidentMap);
   const actions = useStore((s) => s.actions);
@@ -100,7 +120,7 @@ function MapRow({ entry, onView }: { entry: IncidentMapEntry; onView: () => void
       <Thumb entry={entry} />
       <div className="rd-map-row-body">
         <div className="rd-map-row-title">{entry.product_label}</div>
-        <div className="rd-map-row-meta">{rowMeta(entry)}</div>
+        <div className="rd-map-row-meta">{rowMeta(entry, timezone)}</div>
 
         <div className="rd-map-row-actions">
           {action === 'overlay' && (
@@ -262,7 +282,12 @@ export function IncidentMapsTab({ corneaId }: { corneaId: string }) {
               )}
             </h3>
             {group.entries.map((m) => (
-              <MapRow key={m.id} entry={m} onView={() => setViewing(m.id)} />
+              <MapRow
+                key={m.id}
+                entry={m}
+                timezone={fire?.timezone ?? null}
+                onView={() => setViewing(m.id)}
+              />
             ))}
           </section>
         );

@@ -234,6 +234,17 @@ def build_incident_manifest(
     }
 
 
+def rfc1123_to_iso(lm: str | None) -> str | None:
+    """FTP Last-Modified ('Sun, 16 Aug 2026 03:18:07 GMT') -> UTC ISO, or None."""
+    if not lm:
+        return None
+    try:
+        dt = datetime.strptime(lm, "%a, %d %b %Y %H:%M:%S %Z")
+        return dt.replace(tzinfo=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    except ValueError:
+        return None
+
+
 def map_entry(
     *,
     parsed: dict,
@@ -245,6 +256,7 @@ def map_entry(
     geo: dict | None,
     rev: int = 1,
     tiling_pending: bool = False,
+    uploaded_lm: str | None = None,
 ) -> dict:
     geo = geo or {}
     tiles = None
@@ -265,6 +277,7 @@ def map_entry(
         "op_date": parsed.get("op_date"),
         "period": parsed.get("period"),
         "generated_at_local": parsed.get("generated_at_local"),
+        "uploaded_at": rfc1123_to_iso(uploaded_lm),
         "filename": parsed.get("filename"),
         "pdf_url": f"/{pdf_key}",
         "size_bytes": size_bytes,
