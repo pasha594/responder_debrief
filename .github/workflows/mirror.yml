@@ -22,7 +22,11 @@ on:
         default: false
 
 concurrency:
-  group: mirror
+  # Shared group: sync-catalogs and sync-incidents both read-modify-write
+  # state/state.json AND catalogs/catalog.json. Running concurrently, the
+  # later writer clobbers the other's update (observed: a mirror run wiped
+  # the catalog run's backfilled counts). Serialize them.
+  group: worker-b2-writes
   cancel-in-progress: false
 
 jobs:

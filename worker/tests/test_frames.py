@@ -142,3 +142,22 @@ def test_deadline_is_rearmable(monkeypatch):
     clock["t"] = 51.0
     assert frames.deadline_passed()
     frames.start_deadline(0)           # leave global state disabled for others
+
+
+# ---------------------------------------------------------------------------
+# Incident tree shapes (mirror._sync_* dispatch). Real incidents vary wildly;
+# each of these shapes mirrored ZERO files at some point.
+# ---------------------------------------------------------------------------
+
+def test_daily_key_accepts_both_real_date_formats():
+    from responder_worker.mirror import _daily_key
+    # Coleman Creek's "Daily Products/" mixes these two in one folder
+    assert _daily_key("20260730") == "20260730"
+    assert _daily_key("07282026") == "20260728"
+    assert _daily_key("12312026") == "20261231"
+
+
+def test_daily_key_rejects_named_folders():
+    from responder_worker.mirror import _daily_key
+    for name in ("Current Maps", "DAILY IAP", "Daily Products", "2026", "99999999"):
+        assert _daily_key(name) is None, name

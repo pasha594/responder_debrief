@@ -114,6 +114,7 @@ class IncidentMirror:
         children = list_dir(self.client, dir_url)
         res.listings += 1
 
+        saw_known_child = False
         for child in children:
             if not child.is_dir:
                 continue
@@ -138,7 +139,21 @@ class IncidentMirror:
                     self._replay_cached(inc_state, "ir/", fire_slug, res)
                 else:
                     self._sync_ir(child, inc_state, fire_slug, res)
+            else:
+                continue  # unknown subfolder — not a known container
+            saw_known_child = True
             inc_state["children"][cname] = child.mtime
+
+        if not saw_known_child:
+            # No Products/GIS/QR/IR at all: the incident dir IS the products
+            # container, with dated dirs (and sometimes loose files) at its root
+            # — e.g. 2026_BigGrass/20260817/. Without this the whole incident
+            # mirrored as zero files.
+            self._sync_dailies(children, inc_state, fire_slug, res)
+            for e in children:
+                if not e.is_dir:
+                    self._file(e, inc_state, fire_slug, "products/current",
+                               "product", res)
 
         inc_state["dir_mtime"] = dir_mtime
         inc_state["synced_at"] = now_iso()
