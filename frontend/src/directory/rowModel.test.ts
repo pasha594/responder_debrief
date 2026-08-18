@@ -330,3 +330,26 @@ describe('summarizeRows', () => {
     ).toEqual({ total: 3, active: 2, withForecast: 1, withIncidentMaps: 1 });
   });
 });
+
+describe('FTP files when counts are not yet known', () => {
+  it('treats a mirrored fire with no counts as having maps', () => {
+    const rows = buildDirectoryRows(
+      {
+        fires: [
+          {
+            cornea_id: '{A}',
+            fire_slug: 'a',
+            name: 'A',
+            state: 'OR',
+            has_incident_maps: true,
+            incident_map_count: null,
+            incident_ir_count: null,
+          },
+        ],
+      } as never,
+      undefined,
+    );
+    expect(rows[0].hasIncidentMaps).toBe(true);
+    expect(rows[0].mapCount).toBe(0);
+  });
+});

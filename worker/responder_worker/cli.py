@@ -101,9 +101,26 @@ def cmd_sync_catalogs(args) -> int:
 
     # keep incident matches recorded by previous sync-incidents runs
     incident_matches: dict[str, dict] = {}
+    healed = 0
     for inc_key, inc in state.get("incidents", {}).items():
         m = inc.get("match") or {}
         if inc.get("fire_slug") and m:
+            # Self-heal directory counts: incidents mirrored before the counts
+            # existed (or by a run that skipped them as unchanged) have no
+            # map_count. Read the already-published manifest instead of
+            # re-crawling the FTP — cheap, and it converges within the hour.
+            if inc.get("map_count") is None:
+                man = storage.get_json(
+                    f"catalogs/incidents/{inc['fire_slug']}.json") or {}
+                maps = man.get("maps") or []
+                irs = man.get("ir_flights") or []
+                if maps or irs:
+                    dates = [x.get("op_date") for x in maps if x.get("op_date")]
+                    dates += [x.get("flight_date") for x in irs if x.get("flight_date")]
+                    inc["map_count"] = len(maps)
+                    inc["ir_count"] = len(irs)
+                    inc["latest_upload"] = max(dates) if dates else None
+                    healed += 1
             incident_matches[inc["fire_slug"]] = {
                 "method": m.get("method"),
                 "confidence": m.get("confidence"),
@@ -113,6 +130,9 @@ def cmd_sync_catalogs(args) -> int:
                 "ir_count": inc.get("ir_count"),
                 "latest_upload": inc.get("latest_upload"),
             }
+
+    if healed:
+        log(f"[catalogs] backfilled incident counts for {healed} fires from manifests")
 
     version = int(state.get("catalog_version", 0)) + 1
     catalog = cat.build_catalog(

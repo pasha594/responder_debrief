@@ -46,10 +46,15 @@ interface Cells {
 function cells(row: Row, nowMs: number): Cells {
   const days = daysSince(row.createdOn, nowMs);
   const bucket = perimeterFreshness(row.polyLastUpdated, nowMs);
+  // A fire can be mirrored before its counts are known (a run that skipped it
+  // as unchanged records no map_count). "—" would read as "no maps", so show a
+  // check until the next catalog sync backfills the number.
   const files =
     row.mapCount || row.irCount
       ? `${row.mapCount}${row.irCount ? ` · ${row.irCount} IR` : ''}`
-      : DASH;
+      : row.hasIncidentMaps
+        ? '✓'
+        : DASH;
   return {
     started: formatDay(row.createdOn, null, nowMs),
     age: days == null ? null : `${days} ${days === 1 ? 'day' : 'days'}`,
