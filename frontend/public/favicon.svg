@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <rect width="64" height="64" rx="13" fill="#1a1218"/>
+  <!-- ")(" — the right paren bulges toward center, the left paren mirrors it;
+       control points stop short of each other so the strokes never cross. -->
+  <g fill="none" stroke="#ffbd5a" stroke-width="5.5" stroke-linecap="round">
+    <path d="M21 13 C 29 26, 29 38, 21 51"/>
+    <path d="M43 13 C 35 26, 35 38, 43 51"/>
+  </g>
+</svg>
