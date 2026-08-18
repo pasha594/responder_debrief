@@ -129,3 +129,17 @@ export function formatTime(t: number, timezone: string | null | undefined): stri
     return new Intl.DateTimeFormat('en-US', { hour: 'numeric', minute: '2-digit' }).format(t);
   }
 }
+
+/** Short zone label ("MDT") for an IANA zone at a given instant. */
+export function zoneAbbr(timezone: string | null | undefined, at: number): string | null {
+  if (!timezone) return null;
+  try {
+    const parts = new Intl.DateTimeFormat('en-US', {
+      timeZone: timezone,
+      timeZoneName: 'short',
+    }).formatToParts(at);
+    return parts.find((p) => p.type === 'timeZoneName')?.value ?? null;
+  } catch {
+    return null;
+  }
+}

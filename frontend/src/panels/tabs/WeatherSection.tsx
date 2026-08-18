@@ -1,4 +1,7 @@
-/** Weather layer toggles: one checkbox row per pre-rendered catalog product. */
+/**
+ * Weather layer toggles: one checkbox row per pre-rendered catalog product.
+ * Rendered as the "Weather" section of the Forecast tab.
+ */
 import { LegendImg } from '../../utils/LegendImg';
 import { useState } from 'react';
 import { useWeatherRuns } from '../../api/queries';
@@ -84,7 +87,7 @@ function WeatherRow({
   );
 }
 
-export function WeatherTab() {
+export function WeatherSection() {
   const { data: weather, isLoading } = useWeatherRuns();
 
   if (isLoading) return <div className="rd-empty">Loading weather catalogs…</div>;
@@ -98,7 +101,7 @@ export function WeatherTab() {
   }
 
   return (
-    <div className="rd-tab-body">
+    <>
       {usable.map(([modelId, model]) => {
         const run = model.runs[0];
         const stale = Date.now() - Date.parse(run.run_time) > STALE_MS;
@@ -128,6 +131,6 @@ export function WeatherTab() {
           </section>
         );
       })}
-    </div>
+    </>
   );
 }

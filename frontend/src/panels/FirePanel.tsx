@@ -4,8 +4,7 @@ import { useFire, useMasterCatalog } from '../api/queries';
 import { useStore, type AppState } from '../state/store';
 import { formatAcres, formatPct } from '../utils/format';
 import { OverviewTab } from './tabs/OverviewTab';
-import { ForecastTab, useSpreadRunForFire } from './tabs/ForecastTab';
-import { WeatherTab } from './tabs/WeatherTab';
+import { ForecastTab } from './tabs/ForecastTab';
 import { IncidentMapsTab } from './tabs/IncidentMapsTab';
 
 type Tab = AppState['ui']['sidebarTab'];
@@ -13,14 +12,12 @@ type Tab = AppState['ui']['sidebarTab'];
 const TABS: { id: Tab; label: string }[] = [
   { id: 'overview', label: 'Overview' },
   { id: 'forecast', label: 'Forecast' },
-  { id: 'weather', label: 'Weather' },
   { id: 'maps', label: 'Maps' },
 ];
 
 export function FirePanel({ corneaId }: { corneaId: string }) {
   const { data: fire } = useFire(corneaId);
   const { data: catalog } = useMasterCatalog();
-  const run = useSpreadRunForFire(corneaId);
   const tab = useStore((s) => s.ui.sidebarTab);
   const actions = useStore((s) => s.actions);
 
@@ -29,12 +26,12 @@ export function FirePanel({ corneaId }: { corneaId: string }) {
     [catalog, corneaId],
   );
 
-  const forecastDisabled = !catalogFire?.has_spread_forecast && !run;
+  // Forecast hosts the weather section too, so it never disables; the fire-
+  // forecast half shows its own empty note when no run exists.
   const mapsDisabled = !catalogFire?.incident_manifest;
   const disabled: Record<Tab, boolean> = {
     overview: false,
-    forecast: forecastDisabled,
-    weather: false,
+    forecast: false,
     maps: mapsDisabled,
   };
   const activeTab: Tab = disabled[tab] ? 'overview' : tab;
@@ -44,9 +41,6 @@ export function FirePanel({ corneaId }: { corneaId: string }) {
   return (
     <div className="rd-panel">
       <header className="rd-fp-header">
-        <button type="button" className="rd-back" onClick={() => actions.backToDirectory()}>
-          ← All fires
-        </button>
         <div className="rd-fp-titlerow">
           <h2 className="rd-fp-name">{fire?.post_title ?? '…'}</h2>
           {fire &&
@@ -97,11 +91,9 @@ export function FirePanel({ corneaId }: { corneaId: string }) {
               className={`rd-tab${activeTab === t.id ? ' rd-tab--active' : ''}`}
               disabled={disabled[t.id]}
               title={
-                t.id === 'forecast' && forecastDisabled
-                  ? 'No spread forecast published for this fire'
-                  : t.id === 'maps' && mapsDisabled
-                    ? 'No incident maps published for this fire'
-                    : undefined
+                t.id === 'maps' && mapsDisabled
+                  ? 'No incident maps published for this fire'
+                  : undefined
               }
               onClick={() => actions.setSidebarTab(t.id)}
             >
@@ -114,7 +106,6 @@ export function FirePanel({ corneaId }: { corneaId: string }) {
       <div className="rd-panel-scroll">
         {activeTab === 'overview' && <OverviewTab corneaId={corneaId} />}
         {activeTab === 'forecast' && <ForecastTab corneaId={corneaId} />}
-        {activeTab === 'weather' && <WeatherTab />}
         {activeTab === 'maps' && <IncidentMapsTab corneaId={corneaId} />}
       </div>
     </div>

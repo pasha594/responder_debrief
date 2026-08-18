@@ -68,7 +68,7 @@ export interface AppState {
 
   ui: {
     theme: 'dark' | 'light';
-    sidebarTab: 'overview' | 'forecast' | 'weather' | 'maps';
+    sidebarTab: 'overview' | 'forecast' | 'maps';
     sidebarCollapsed: boolean;
     sheetSnap: 'peek' | 'half' | 'full';
     /** which product's legend the LegendBar shows (qualified key, see LegendBar) */

@@ -5,9 +5,10 @@
  * opacity, and data-driven legends (legend_stops / discrete legend_labels /
  * the ToA legends).
  *
- * The forecast layer has no visibility checkbox: it is on whenever this tab
- * has a run and a product. Anything that could strand it invisible re-arms it
- * (see the store's selectFire / setSpreadProduct, plus the guard below).
+ * Hosts two sections since the Weather tab folded in here: "Weather" (the
+ * multi-select raster toggles) on top, "Fire forecast" below with its own
+ * show-on-map checkbox (selecting a fire or a product re-arms visibility —
+ * see the store's selectFire / setSpreadProduct).
  */
 import { useEffect, useMemo } from 'react';
 import {
@@ -33,6 +34,7 @@ import { useStore, type ToaMode } from '../../state/store';
 import { formatDateTime, formatRelative } from '../../utils/format';
 import { GradientLegend } from '../../utils/GradientLegend';
 import { LegendSwatch, ToaBandLegend, ToaTimelineLegend } from '../ToaLegends';
+import { WeatherSection } from './WeatherSection';
 
 export const SPREAD_PRODUCT_LABELS: Record<SpreadProduct, string> = {
   'time-of-arrival': 'Fire spread (time of arrival)',
@@ -192,23 +194,17 @@ function DiscreteLegend({
   );
 }
 
-export function ForecastTab({ corneaId }: { corneaId: string }) {
+function FireForecastSection({ corneaId }: { corneaId: string }) {
   const run = useSpreadRunForFire(corneaId);
   const { data: fire } = useFire(corneaId);
   const spread = useStore((s) => s.layers.spread);
   const actions = useStore((s) => s.actions);
 
-  // Mirror this tab's active product into the LegendBar.
+  // Mirror this tab's active product into the LegendBar (only while shown).
   useEffect(() => {
-    const key = run ? `spread:${spread.product}` : null;
+    const key = run && spread.visible ? `spread:${spread.product}` : null;
     if (useStore.getState().ui.legendKey !== key) actions.setLegendKey(key);
-  }, [run, spread.product, actions]);
-
-  // There is no visibility control any more, so the tab guarantees the layer
-  // is on whenever it has something to show (see the store actions too).
-  useEffect(() => {
-    if (run && !spread.visible) actions.setSpreadVisible(true);
-  }, [run, spread.visible, actions]);
+  }, [run, spread.product, spread.visible, actions]);
 
   const products = run ? availableProducts(run) : [];
   if (!run || products.length === 0) {
@@ -228,7 +224,16 @@ export function ForecastTab({ corneaId }: { corneaId: string }) {
   const timezone = fire?.timezone ?? null;
 
   return (
-    <div className="rd-tab-body">
+    <>
+      <label className="rd-field--row">
+        <input
+          type="checkbox"
+          checked={spread.visible}
+          onChange={(e) => actions.setSpreadVisible(e.target.checked)}
+        />
+        <span>Show on map</span>
+      </label>
+
       <div className="rd-field">
         <span className="rd-field-label">Product</span>
         <select
@@ -308,6 +313,21 @@ export function ForecastTab({ corneaId }: { corneaId: string }) {
           <GradientLegend stops={meta.legend_stops} units={meta.units ?? undefined} />
         ) : null}
       </div>
+    </>
+  );
+}
+
+export function ForecastTab({ corneaId }: { corneaId: string }) {
+  return (
+    <div className="rd-tab-body">
+      <section className="rd-section">
+        <h3 className="rd-section-title">Weather</h3>
+        <WeatherSection />
+      </section>
+      <section className="rd-section">
+        <h3 className="rd-section-title">Fire forecast</h3>
+        <FireForecastSection corneaId={corneaId} />
+      </section>
     </div>
   );
 }

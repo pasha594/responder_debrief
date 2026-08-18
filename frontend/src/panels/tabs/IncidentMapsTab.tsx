@@ -10,7 +10,7 @@ import { dataUrl } from '../../api/catalogs';
 import type { IncidentMapEntry, IrFlight } from '../../api/types';
 import { useMap } from '../../map/MapRoot';
 import { useStore } from '../../state/store';
-import { formatBytes, formatTime } from '../../utils/format';
+import { formatBytes, formatTime, zoneAbbr } from '../../utils/format';
 import {
   friendlyOpDate,
   groupMapsByDate,
@@ -69,10 +69,19 @@ function rowMeta(entry: IncidentMapEntry, timezone: string | null): string {
   const parts: string[] = [];
   if (entry.uploaded_at) {
     const t = Date.parse(entry.uploaded_at);
-    if (Number.isFinite(t)) parts.push(`Uploaded ${formatTime(t, timezone)}`);
+    if (Number.isFinite(t)) {
+      const z = zoneAbbr(timezone, t);
+      parts.push(`Uploaded ${formatTime(t, timezone)}${z ? ` ${z}` : ''}`);
+    }
   } else if (entry.generated_at_local) {
     const m = /T(\d{2}):(\d{2})/.exec(entry.generated_at_local);
-    if (m) parts.push(`Generated ${m[1]}:${m[2]}`);
+    if (m) {
+      // The stamp is already fire-local wall time; label it with the fire
+      // zone's abbreviation (the ±12h parse skew can't cross a DST change
+      // often enough to matter for a label).
+      const z = zoneAbbr(timezone, Date.parse(entry.generated_at_local + 'Z'));
+      parts.push(`Generated ${m[1]}:${m[2]}${z ? ` ${z}` : ''}`);
+    }
   }
   if (!parts.length && entry.period) parts.push(entry.period === 'night' ? 'Night' : 'Day');
   if (entry.kind === 'qr') parts.push('QR sheet');
