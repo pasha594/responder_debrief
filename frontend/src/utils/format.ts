@@ -71,6 +71,40 @@ export function formatDateTime(
   }
 }
 
+/**
+ * Calendar-only date: "Jul 25" for the current year, "Jul 25, 2025" otherwise.
+ * Used by the directory's START column, where the clock time is noise.
+ */
+export function formatDay(
+  input: string | number | Date | null | undefined,
+  tz?: string | null,
+  nowMs: number = Date.now(),
+): string {
+  if (input == null) return EMDASH;
+  const d = input instanceof Date ? input : new Date(input);
+  if (!Number.isFinite(d.getTime())) return EMDASH;
+  const sameYear = d.getUTCFullYear() === new Date(nowMs).getUTCFullYear();
+  return formatDateTime(d, tz, {
+    month: 'short',
+    day: 'numeric',
+    year: sameYear ? undefined : 'numeric',
+    hour: undefined,
+    minute: undefined,
+    timeZoneName: undefined,
+  });
+}
+
+/** Whole days elapsed since an instant; null when missing/unparseable. */
+export function daysSince(
+  input: string | number | Date | null | undefined,
+  nowMs: number = Date.now(),
+): number | null {
+  if (input == null) return null;
+  const t = input instanceof Date ? input.getTime() : new Date(input).getTime();
+  if (!Number.isFinite(t)) return null;
+  return Math.max(0, Math.floor((nowMs - t) / 86_400_000));
+}
+
 /** "890 B" / "340 KB" / "11 MB" / "1.2 GB". Null/invalid → "—". */
 export function formatBytes(n: number | null | undefined): string {
   if (n == null || !Number.isFinite(n) || n < 0) return EMDASH;

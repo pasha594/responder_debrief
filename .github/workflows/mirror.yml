@@ -57,6 +57,7 @@ jobs:
           B2_S3_ENDPOINT: ${{ vars.B2_S3_ENDPOINT }}
           TILE_BUDGET: "40"
           MIRROR_MAX_SECONDS: ${{ vars.MIRROR_MAX_SECONDS || '1200' }}
+          PRIORITY_FIRES: ${{ vars.PRIORITY_FIRES || 'big-grass' }}
           TILE_MAX_SECONDS: ${{ vars.TILE_MAX_SECONDS || '900' }}
           INPUT_FIRE: ${{ inputs.fire }}
           INPUT_SINCE: ${{ inputs.since }}

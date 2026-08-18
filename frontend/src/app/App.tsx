@@ -1,13 +1,19 @@
-/** App shell: map + panels + timeline; URL hash ↔ store view sync. */
+/**
+ * App shell. Two modes, one hash router:
+ *   ''            → the fire directory (no map is mounted)
+ *   '#/fire/{id}' → the full-screen map shell, scoped to that one fire
+ */
 import { useEffect } from 'react';
 import { MapRoot } from '../map/MapRoot';
 import { useMapLayerSync } from '../map/useMapLayerSync';
 import { useStore } from '../state/store';
 import { Sidebar } from '../panels/Sidebar';
+import { BackControl } from '../panels/BackControl';
 import { Timeline } from '../timeline/Timeline';
 import { LegendBar } from '../panels/LegendBar';
 import { ErrorBoundary } from '../utils/ErrorBoundary';
 import { useTimelineDomain } from '../timeline/useTimelineDomain';
+import { DirectoryView } from '../directory/DirectoryView';
 
 function MapLayerBridge() {
   useMapLayerSync();
@@ -21,9 +27,9 @@ function parseHash(): string | null {
 }
 
 /**
- * Two-way sync between the URL hash (#/fire/{corneaId}) and store.view.
- * Hash routing keeps GitHub Pages deploys trivial (no 404 fallback needed)
- * and costs no router dependency.
+ * Two-way sync between the URL hash (#/fire/{corneaId}) and store.view; no
+ * hash (or '#/') is the directory. Hash routing keeps GitHub Pages deploys
+ * trivial (no 404 fallback needed) and costs no router dependency.
  */
 function HashSync() {
   const view = useStore((s) => s.view);
@@ -36,8 +42,8 @@ function HashSync() {
       const cur = useStore.getState().view;
       if (id && (cur.mode !== 'fire' || cur.corneaId !== id)) {
         actions.selectFire(id);
-      } else if (!id && cur.mode !== 'national') {
-        actions.backToNational();
+      } else if (!id && cur.mode !== 'directory') {
+        actions.backToDirectory();
       }
     };
     apply();
@@ -45,7 +51,7 @@ function HashSync() {
     return () => window.removeEventListener('hashchange', apply);
   }, [actions]);
 
-  // store → hash (map pin clicks, back button)
+  // store → hash (row clicks, map pin clicks, back button)
   useEffect(() => {
     const want = view.mode === 'fire' ? `#/fire/${encodeURIComponent(view.corneaId)}` : '';
     const cur = window.location.hash;
@@ -75,24 +81,43 @@ function NowSampler() {
   return null;
 }
 
+/**
+ * Single-fire map shell. Mounted only in fire mode: entering the directory
+ * unmounts MapRoot, which disposes the maplibre instance and every layer
+ * manager, so a repeat entry starts from a clean map.
+ */
+function FireMapView() {
+  return (
+    <MapRoot>
+      <MapLayerBridge />
+      <BackControl />
+      <ErrorBoundary label="Fire panel">
+        <Sidebar />
+      </ErrorBoundary>
+      <ErrorBoundary label="Legend">
+        <LegendBar />
+      </ErrorBoundary>
+      <ErrorBoundary label="Timeline">
+        <Timeline />
+      </ErrorBoundary>
+    </MapRoot>
+  );
+}
+
 export function App() {
+  const mode = useStore((s) => s.view.mode);
   return (
     <div className="rd-app">
-      <MapRoot>
-        <MapLayerBridge />
-        <HashSync />
-        <NowSampler />
-        <ErrorBoundary label="Fire panel">
-          <Sidebar />
+      <HashSync />
+      <NowSampler />
+      {mode === 'fire' ? (
+        <FireMapView />
+      ) : (
+        <ErrorBoundary label="Fire directory">
+          <DirectoryView />
         </ErrorBoundary>
-        <ErrorBoundary label="Legend">
-          <LegendBar />
-        </ErrorBoundary>
-        <ErrorBoundary label="Timeline">
-          <Timeline />
-        </ErrorBoundary>
-        <Toast />
-      </MapRoot>
+      )}
+      <Toast />
     </div>
   );
 }

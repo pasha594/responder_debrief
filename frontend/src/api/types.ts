@@ -111,8 +111,20 @@ export interface CatalogFire {
   last_updated: string;
   poly_last_updated: string | null;
   timezone: string | null;
+  /**
+   * Fields below arrived with the directory pivot; older catalogs (and a
+   * CDN-cached one mid-deploy) omit them, so every consumer must guard.
+   */
+  created_on?: string | null;
   has_incident_maps: boolean;
   incident_manifest: string | null;
+  incident_last_synced?: string | null;
+  /** FTP map sheets mirrored for this fire. */
+  incident_map_count?: number | null;
+  /** IR flight packages mirrored for this fire. */
+  incident_ir_count?: number | null;
+  /** YYYY-MM-DD of the newest FTP upload. */
+  incident_latest_upload?: string | null;
   ftp_match: {
     method: 'unit_id' | 'name_exact' | 'name_fuzzy';
     confidence: number;

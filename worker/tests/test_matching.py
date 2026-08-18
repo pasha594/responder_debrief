@@ -209,3 +209,53 @@ class TestPyrecastSlug:
         fires = [_fire("paradise-ca", "Paradise", "CA")]
         fire, method, _ = match_pyrecast_slug("or-paradise", fires)
         assert fire is None and method == "unmatched"
+
+
+# ---------------------------------------------------------------------------
+# Crawl ordering: runs are wall-clock bounded, so ORDER decides what makes it
+# onto the site after a partial sync (user asked to prioritize Big Grass).
+# ---------------------------------------------------------------------------
+
+def _cand(dir_name):
+    from responder_worker.matching import IncidentCandidate
+    return IncidentCandidate(region="pacific_nw", year=2026, dir_name=dir_name,
+                             dir_url=f"https://x/{dir_name}/", dir_mtime=None)
+
+
+FIRES = [
+    {"fire_slug": "big-grass", "post_title": "BIG GRASS", "acres": 578422,
+     "last_updated": "2026-08-17T13:51:18Z"},
+    {"fire_slug": "coleman-creek", "post_title": "Coleman Creek", "acres": 308721,
+     "last_updated": "2026-08-17T16:54:55Z"},
+    {"fire_slug": "tiny", "post_title": "Tiny", "acres": 12,
+     "last_updated": "2026-08-17T18:00:00Z"},
+]
+
+
+def test_rank_orders_by_acreage_desc_by_default():
+    from responder_worker.cli import _rank_candidates
+    cands = [_cand("2026_Tiny"), _cand("2026_ColemanCreek"), _cand("2026_BigGrass")]
+    got = [c.dir_name for c in _rank_candidates(cands, FIRES, [])]
+    assert got == ["2026_BigGrass", "2026_ColemanCreek", "2026_Tiny"]
+
+
+def test_rank_puts_priority_fire_first_even_when_small():
+    from responder_worker.cli import _rank_candidates
+    cands = [_cand("2026_BigGrass"), _cand("2026_Tiny")]
+    got = [c.dir_name for c in _rank_candidates(cands, FIRES, ["tiny"])]
+    assert got == ["2026_Tiny", "2026_BigGrass"]
+
+
+def test_rank_priority_accepts_slug_or_display_name():
+    from responder_worker.cli import _rank_candidates
+    cands = [_cand("2026_ColemanCreek"), _cand("2026_BigGrass")]
+    for spelling in ("big-grass", "BIG GRASS", "biggrass"):
+        got = [c.dir_name for c in _rank_candidates(cands, FIRES, [spelling])]
+        assert got[0] == "2026_BigGrass", spelling
+
+
+def test_rank_tolerates_unmatched_dirs():
+    from responder_worker.cli import _rank_candidates
+    cands = [_cand("2026_NotAFireWeKnow"), _cand("2026_BigGrass")]
+    got = [c.dir_name for c in _rank_candidates(cands, FIRES, [])]
+    assert got[0] == "2026_BigGrass"  # unknown dirs sink to the end (0 acres)

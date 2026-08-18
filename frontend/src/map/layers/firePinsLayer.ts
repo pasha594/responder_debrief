@@ -1,7 +1,8 @@
 /**
- * National fire pins: teardrop symbols from the /fires index. Selection is a
- * per-feature icon-image swap driven by ctx.view; hover shows a lightweight
- * popup (name • acres • containment) and click selects the fire.
+ * The selected fire's pin: a teardrop symbol from the /fires index (falling
+ * back to the catalog's coordinates). Since the directory pivot this layer
+ * renders exactly ONE feature — the fire in view — so no other incidents leak
+ * onto the map. Hover shows a lightweight popup (name • acres • containment).
  */
 import {
   Popup,
@@ -11,7 +12,7 @@ import {
   type MapLayerMouseEvent,
 } from 'maplibre-gl';
 import { parseFireCoordinates } from '../../api/geo';
-import type { FiresListResponse } from '../../api/types';
+import { isPrescribed } from '../../api/fireFields';
 import { beforeIdFor } from '../zOrder';
 import type { LayerContext, LayerManager } from '../layerTypes';
 import { installMarkerImages } from './markerImages';
@@ -48,36 +49,48 @@ const ICON_SIZE: ExpressionSpecification = [
 function iconImageExpr(selectedId: string | null): ExpressionSpecification {
   return [
     'concat',
-    [
-      'case',
-      ['==', ['get', 'firetype'], 'Prescribed Fire'],
-      'rd-pin-prescribed',
-      'rd-pin-wildfire',
-    ],
+    // `prescribed` is set when the feature is built (the API's firetype
+    // spelling has drifted, so the string test lived in one place only).
+    ['case', ['get', 'prescribed'], 'rd-pin-prescribed', 'rd-pin-wildfire'],
     ['case', ['==', ['get', 'cornea_id'], selectedId ?? ''], '-selected', ''],
   ];
 }
 
-function toFeatureCollection(
-  fires: FiresListResponse,
+/**
+ * One-feature collection for the fire in view. Prefers the live index (it
+ * carries firetype/containment); falls back to the catalog's coordinates so a
+ * fire the index has dropped still gets a pin.
+ */
+function selectedFeatureCollection(
+  ctx: LayerContext,
+  selectedId: string | null,
 ): GeoJSON.FeatureCollection<GeoJSON.Point> {
-  const features: GeoJSON.Feature<GeoJSON.Point>[] = [];
-  for (const f of fires.fires) {
-    const coords = parseFireCoordinates(f.fire_coordinates);
-    if (!coords) continue; // unparseable/missing coordinates: skip
-    features.push({
-      type: 'Feature',
-      geometry: { type: 'Point', coordinates: coords },
-      properties: {
-        cornea_id: f.cornea_id,
-        name: f.post_title,
-        acres: f.acres ?? 0,
-        containment: f.containment,
-        firetype: f.firetype,
+  if (!selectedId) return EMPTY_FC;
+
+  const summary = ctx.fires?.fires.find((f) => f.cornea_id === selectedId);
+  const coords =
+    parseFireCoordinates(summary?.fire_coordinates) ??
+    ctx.catalog?.fires.find((f) => f.cornea_id === selectedId)?.coordinates ??
+    null;
+  if (!coords) return EMPTY_FC;
+
+  const catalogFire = ctx.catalog?.fires.find((f) => f.cornea_id === selectedId);
+  return {
+    type: 'FeatureCollection',
+    features: [
+      {
+        type: 'Feature',
+        geometry: { type: 'Point', coordinates: coords },
+        properties: {
+          cornea_id: selectedId,
+          name: summary?.post_title ?? catalogFire?.name ?? ctx.selectedFire?.post_title ?? '',
+          acres: summary?.acres ?? catalogFire?.acres ?? 0,
+          containment: summary?.containment ?? catalogFire?.containment ?? null,
+          prescribed: isPrescribed(summary?.firetype),
+        },
       },
-    });
-  }
-  return { type: 'FeatureCollection', features };
+    ],
+  };
 }
 
 function escapeHtml(s: string): string {
@@ -107,7 +120,8 @@ function popupHtml(props: Record<string, unknown>): string {
 
 // ---------- module state (one live map at a time) ----------
 
-let lastFires: FiresListResponse | undefined;
+let lastFires: LayerContext['fires'] | undefined;
+let lastCatalog: LayerContext['catalog'] | undefined;
 let lastSelected: string | null | undefined; // undefined = never applied
 let ctxRef: LayerContext | null = null;
 let popup: Popup | null = null;
@@ -115,7 +129,12 @@ const handlersInstalled = new WeakSet<MlMap>();
 
 function onClick(e: MapLayerMouseEvent): void {
   const id = e.features?.[0]?.properties?.cornea_id;
-  if (typeof id === 'string' && id) ctxRef?.onSelectFire(id);
+  if (typeof id !== 'string' || !id) return;
+  // The only pin on the map is the fire already in view: re-selecting it would
+  // reset the sidebar tab and drop the active incident-map overlay.
+  const cur = ctxRef?.view;
+  if (cur?.mode === 'fire' && cur.corneaId === id) return;
+  ctxRef?.onSelectFire(id);
 }
 
 function onEnter(this: MlMap, e: MapLayerMouseEvent): void {
@@ -137,6 +156,7 @@ function onLeave(this: MlMap): void {
 export const firePinsLayer: LayerManager = {
   mount(map) {
     lastFires = undefined;
+    lastCatalog = undefined;
     lastSelected = undefined;
     installMarkerImages(map);
     if (!map.getSource(SRC)) {
@@ -172,13 +192,14 @@ export const firePinsLayer: LayerManager = {
     ctxRef = ctx;
     if (!map.getLayer(LYR)) return;
 
-    if (ctx.fires !== lastFires) {
+    const selected = ctx.view.mode === 'fire' ? ctx.view.corneaId : null;
+    if (ctx.fires !== lastFires || ctx.catalog !== lastCatalog || selected !== lastSelected) {
       lastFires = ctx.fires;
+      lastCatalog = ctx.catalog;
       const src = map.getSource(SRC) as GeoJSONSource | undefined;
-      src?.setData(ctx.fires ? toFeatureCollection(ctx.fires) : EMPTY_FC);
+      src?.setData(selectedFeatureCollection(ctx, selected));
     }
 
-    const selected = ctx.view.mode === 'fire' ? ctx.view.corneaId : null;
     if (selected !== lastSelected) {
       lastSelected = selected;
       map.setLayoutProperty(LYR, 'icon-image', iconImageExpr(selected));
@@ -194,6 +215,7 @@ export const firePinsLayer: LayerManager = {
     popup = null;
     ctxRef = null;
     lastFires = undefined;
+    lastCatalog = undefined;
     lastSelected = undefined;
     if (map.getLayer(LYR)) map.removeLayer(LYR);
     if (map.getSource(SRC)) map.removeSource(SRC);

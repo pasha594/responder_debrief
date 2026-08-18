@@ -6,8 +6,13 @@
 import { create } from 'zustand';
 import { DEFAULT_PLAYBACK_SPEED } from '../app/config';
 import type { Percentile, SpreadProduct, WeatherProduct } from '../api/types';
+import type { DirectoryFilter, DirectorySort, DirectorySortKey } from '../directory/rowModel';
 
-export type ViewState = { mode: 'national' } | { mode: 'fire'; corneaId: string };
+/**
+ * 'directory' is the app's default: a full-screen roster with no map. 'fire'
+ * swaps in the map shell scoped to exactly one incident.
+ */
+export type ViewState = { mode: 'directory' } | { mode: 'fire'; corneaId: string };
 
 export interface WeatherLayerState {
   visible: boolean;
@@ -49,11 +54,20 @@ export interface AppState {
     /** which product's legend the LegendBar shows (qualified key, see LegendBar) */
     legendKey: string | null;
     toast: string | null;
+    /**
+     * Directory search/filter/sort. Lives in the store (not component state)
+     * so entering a fire and coming back restores the roster as it was.
+     */
+    directory: {
+      query: string;
+      filter: DirectoryFilter;
+      sort: DirectorySort;
+    };
   };
 
   actions: {
     selectFire(corneaId: string): void;
-    backToNational(): void;
+    backToDirectory(): void;
     setTime(t: number): void;
     setDomain(domain: [number, number], opts?: { clampCurrent?: boolean }): void;
     sampleNow(): void;
@@ -78,13 +92,17 @@ export interface AppState {
     setLegendKey(key: string | null): void;
     showToast(msg: string): void;
     clearToast(): void;
+    setDirectoryQuery(query: string): void;
+    setDirectoryFilter(filter: DirectoryFilter): void;
+    /** Click a column header: same key flips direction, new key starts descending. */
+    toggleDirectorySort(key: DirectorySortKey): void;
   };
 }
 
 const now = Date.now();
 
 export const useStore = create<AppState>((set, get) => ({
-  view: { mode: 'national' },
+  view: { mode: 'directory' },
 
   time: {
     currentTime: now,
@@ -112,6 +130,7 @@ export const useStore = create<AppState>((set, get) => ({
     sheetSnap: 'peek',
     legendKey: null,
     toast: null,
+    directory: { query: '', filter: 'all', sort: { key: 'acres', dir: 'desc' } },
   },
 
   actions: {
@@ -126,9 +145,9 @@ export const useStore = create<AppState>((set, get) => ({
         },
       })),
 
-    backToNational: () =>
+    backToDirectory: () =>
       set((s) => ({
-        view: { mode: 'national' },
+        view: { mode: 'directory' },
         time: { ...s.time, playing: false },
         layers: {
           ...s.layers,
@@ -227,6 +246,20 @@ export const useStore = create<AppState>((set, get) => ({
       }, 5000);
     },
     clearToast: () => set((s) => ({ ui: { ...s.ui, toast: null } })),
+
+    setDirectoryQuery: (query) =>
+      set((s) => ({ ui: { ...s.ui, directory: { ...s.ui.directory, query } } })),
+    setDirectoryFilter: (filter) =>
+      set((s) => ({ ui: { ...s.ui, directory: { ...s.ui.directory, filter } } })),
+    toggleDirectorySort: (key) =>
+      set((s) => {
+        const cur = s.ui.directory.sort;
+        const sort: DirectorySort =
+          cur.key === key
+            ? { key, dir: cur.dir === 'desc' ? 'asc' : 'desc' }
+            : { key, dir: 'desc' };
+        return { ui: { ...s.ui, directory: { ...s.ui.directory, sort } } };
+      }),
   },
 }));
 

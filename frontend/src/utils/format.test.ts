@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { formatAcres, formatBytes, formatDateTime, formatPct, formatRelative } from './format';
+import {
+  daysSince,
+  formatAcres,
+  formatBytes,
+  formatDateTime,
+  formatDay,
+  formatPct,
+  formatRelative,
+} from './format';
 
 describe('formatAcres', () => {
   it('groups small values', () => {
@@ -93,5 +101,37 @@ describe('formatBytes', () => {
     expect(formatBytes(null)).toBe('—');
     expect(formatBytes(undefined)).toBe('—');
     expect(formatBytes(-1)).toBe('—');
+  });
+});
+
+const NOW = Date.parse('2026-08-17T12:00:00Z');
+
+describe('formatDay', () => {
+  it('drops the year within the current year', () => {
+    expect(formatDay('2026-07-25T15:35:49Z', 'UTC', NOW)).toBe('Jul 25');
+  });
+  it('keeps the year for other years', () => {
+    expect(formatDay('2025-11-02T00:00:00Z', 'UTC', NOW)).toBe('Nov 2, 2025');
+  });
+  it('never shows a clock time', () => {
+    expect(formatDay('2026-07-25T15:35:49Z', 'UTC', NOW)).not.toMatch(/\d:\d/);
+  });
+  it('em-dashes nulls and junk', () => {
+    expect(formatDay(null, null, NOW)).toBe('—');
+    expect(formatDay(undefined, null, NOW)).toBe('—');
+    expect(formatDay('nope', null, NOW)).toBe('—');
+  });
+});
+
+describe('daysSince', () => {
+  it('floors whole elapsed days', () => {
+    expect(daysSince('2026-08-17T11:00:00Z', NOW)).toBe(0);
+    expect(daysSince('2026-08-16T11:00:00Z', NOW)).toBe(1);
+    expect(daysSince('2026-07-26T22:00:00Z', NOW)).toBe(21);
+  });
+  it('clamps future instants to 0 and em-dashes junk', () => {
+    expect(daysSince('2026-09-01T00:00:00Z', NOW)).toBe(0);
+    expect(daysSince(null, NOW)).toBeNull();
+    expect(daysSince('nope', NOW)).toBeNull();
   });
 });

@@ -12,6 +12,7 @@ import os
 import sys
 import tempfile
 from collections import Counter
+from datetime import datetime
 from pathlib import Path
 
 from . import archives, catalogs as cat
@@ -108,6 +109,9 @@ def cmd_sync_catalogs(args) -> int:
                 "confidence": m.get("confidence"),
                 "dir_url": inc.get("dir_url") or m.get("dir_url"),
                 "synced_at": inc.get("synced_at"),
+                "map_count": inc.get("map_count"),
+                "ir_count": inc.get("ir_count"),
+                "latest_upload": inc.get("latest_upload"),
             }
 
     version = int(state.get("catalog_version", 0)) + 1
@@ -173,6 +177,43 @@ def _collect_candidates(client, args, fires) -> list[IncidentCandidate]:
                 dir_url=e.url, dir_mtime=e.mtime,
             ))
     return cands
+
+
+def _rank_candidates(cands: list[IncidentCandidate], fires: list[dict],
+                     priority: list[str]) -> list[IncidentCandidate]:
+    """Order the crawl so the most useful incidents are mirrored first.
+
+    Runs are wall-clock bounded, so ORDER decides what exists on the site after
+    a partial sync. Ranking is name-only (no extra FTP requests): explicit
+    --priority-fires first, then biggest acreage, then most recently updated.
+    """
+    prio = {normalize_name(p) for p in priority if p.strip()}
+    prio |= {p.strip().replace("-", "").lower() for p in priority if p.strip()}
+
+    by_norm: dict[str, dict] = {}
+    for f in fires:
+        by_norm.setdefault(normalize_name(f.get("post_title") or ""), f)
+        by_norm.setdefault((f.get("fire_slug") or "").replace("-", ""), f)
+
+    def _epoch(iso: str | None) -> float:
+        if not iso:
+            return 0.0
+        try:
+            return datetime.fromisoformat(iso.replace("Z", "+00:00")).timestamp()
+        except ValueError:
+            return 0.0
+
+    def sort_key(c: IncidentCandidate) -> tuple:
+        rest = candidate_dir_name(c.dir_name + "/", c.year) or c.dir_name
+        norm = normalize_name(rest)
+        fire = by_norm.get(norm) or {}
+        return (
+            0 if norm in prio else 1,                 # explicit priority first
+            -float(fire.get("acres") or 0),           # then biggest fires
+            -_epoch(fire.get("last_updated")),        # then most recently updated
+        )
+
+    return sorted(cands, key=sort_key)
 
 
 def _gather_unit_tokens(client, cand: IncidentCandidate) -> Counter:
@@ -314,6 +355,15 @@ def _tile_and_manifest(args, storage, state, fires_by_slug, mirrors) -> None:
         log(f"[incidents] manifest written: catalogs/incidents/{fire_slug}.json "
             f"(maps={len(maps)}, ir_flights={len(ir_flights)})")
 
+        # Directory-view summary in catalog.json, so the fire list can show
+        # file counts without fetching every per-fire manifest.
+        upload_dates = [m["op_date"] for m in maps if m.get("op_date")]
+        upload_dates += [f["flight_date"] for f in ir_flights if f.get("flight_date")]
+        inc_state = state["incidents"].setdefault(inc_key, {})
+        inc_state["map_count"] = len(maps)
+        inc_state["ir_count"] = len(ir_flights)
+        inc_state["latest_upload"] = max(upload_dates) if upload_dates else None
+
     if tiles_deferred:
         log(f"[geopdf] {tiles_deferred} sheets deferred (tile budget/deadline) — "
             "flagged tiling_pending, picked up next run")
@@ -392,7 +442,11 @@ def cmd_sync_incidents(args) -> int:
 
         log("[incidents] crawling FTP year roots for candidate dirs ...")
         cands = _collect_candidates(client, args, fires)
-        log(f"[incidents] candidate incident dirs: {len(cands)}")
+        priority = [x for x in (args.priority_fires or "").split(",") if x.strip()]
+        cands = _rank_candidates(cands, fires, priority)
+        log(f"[incidents] candidate incident dirs: {len(cands)}"
+            + (f" (priority: {', '.join(priority)})" if priority else "")
+            + " — ordered priority, then acreage desc")
 
         # Wall-clock budget: the job must ALWAYS reach tiling + manifest +
         # catalog publication and state save below — a run killed by the CI
@@ -475,6 +529,9 @@ def cmd_sync_incidents(args) -> int:
                     "confidence": mrec.get("confidence"),
                     "dir_url": inc.get("dir_url") or mrec.get("dir_url"),
                     "synced_at": inc.get("synced_at"),
+                    "map_count": inc.get("map_count"),
+                    "ir_count": inc.get("ir_count"),
+                    "latest_upload": inc.get("latest_upload"),
                 }
         # Preserve forecast fields owned by sync-catalogs: rebuild them from the
         # previously published catalog so this job never blanks them.
@@ -617,6 +674,10 @@ def build_parser() -> argparse.ArgumentParser:
         sp.add_argument("--products-keep", type=int, default=config.PRODUCTS_DAILY_KEEP)
         sp.add_argument("--ir-keep", type=int, default=config.IR_KEEP)
         sp.add_argument("--tile-budget", type=int, default=config.TILE_BUDGET)
+        sp.add_argument("--priority-fires",
+                        default=os.environ.get("PRIORITY_FIRES", ""),
+                        help="comma-separated fire slugs/names mirrored first "
+                             "(env PRIORITY_FIRES); others by acreage desc")
         sp.add_argument("--zoom-cap", type=int, default=None,
                         help="cap tile maxzoom (fast dry-run tiling)")
 

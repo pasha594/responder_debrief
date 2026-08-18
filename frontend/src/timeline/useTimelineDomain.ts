@@ -34,7 +34,8 @@ export function useTimelineDomain(): void {
       ? Date.parse(weatherRun.hours[weatherRun.hours.length - 1])
       : NaN;
 
-    if (view.mode === 'national') {
+    // Defensive: the hook only mounts inside the fire-mode map shell.
+    if (view.mode !== 'fire') {
       const end = Number.isFinite(weatherEnd) ? weatherEnd : now + 48 * 3600_000;
       return [now - NATIONAL_PAST_MS, Math.max(end, now + 3600_000)];
     }

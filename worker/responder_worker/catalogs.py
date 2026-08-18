@@ -177,9 +177,14 @@ def build_catalog(
             "last_updated": f.get("last_updated"),
             "poly_last_updated": f.get("poly_last_updated"),
             "timezone": f.get("timezone"),
+            "created_on": f.get("created_on"),
             "has_incident_maps": m is not None,
             "incident_manifest": f"/catalogs/incidents/{slug}.json" if m else None,
             "incident_last_synced": (m or {}).get("synced_at"),
+            # directory-view summary (avoids fetching every per-fire manifest)
+            "incident_map_count": (m or {}).get("map_count"),
+            "incident_ir_count": (m or {}).get("ir_count"),
+            "incident_latest_upload": (m or {}).get("latest_upload"),
             "ftp_match": (
                 {"method": m["method"], "confidence": m["confidence"], "dir_url": m["dir_url"]}
                 if m else None

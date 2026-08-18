@@ -1,3 +1,5 @@
+// RETIRED by the directory pivot: the map is single-fire now, so this CONUS
+// perimeter raster is no longer in useMapLayerSync's MANAGERS list.
 /**
  * National current-year perimeters: a single pre-rendered CONUS snapshot
  * image from B2 (catalog.national_layers). The image path is MUTABLE (the
@@ -57,7 +59,8 @@ export const nationalPerimetersLayer: LayerManager = {
       lastVisible = null;
     }
 
-    const visible = ctx.view.mode === 'national' && ctx.layers.nationalPerimeters.visible;
+    // Unreachable while retired: no mode shows a CONUS-wide overlay any more.
+    const visible = ctx.view.mode !== 'fire' && ctx.layers.nationalPerimeters.visible;
     if (visible !== lastVisible) {
       lastVisible = visible;
       map.setLayoutProperty(LYR, 'visibility', visible ? 'visible' : 'none');

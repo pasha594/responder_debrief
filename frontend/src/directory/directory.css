@@ -1,0 +1,338 @@
+/* Fire directory: dense roster table (desktop) / stacked cards (mobile). */
+
+.rd-directory {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--color-bg);
+  color: var(--color-text);
+}
+
+/* ---------- header ---------- */
+
+.rd-dir-header {
+  flex-shrink: 0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 18px 24px 12px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.rd-dir-wordmark {
+  font-family: var(--font-serif);
+  font-weight: 600;
+  font-size: 26px;
+  line-height: 1.1;
+  letter-spacing: -0.01em;
+}
+
+.rd-dir-subtitle {
+  margin-top: 3px;
+  font-size: 12.5px;
+  color: var(--color-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.rd-dir-theme {
+  flex-shrink: 0;
+}
+
+/* ---------- toolbar ---------- */
+
+.rd-dir-toolbar {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 10px 24px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.rd-dir-search {
+  width: 260px;
+  max-width: 100%;
+}
+
+.rd-dir-count {
+  margin-left: auto;
+  font-size: 11.5px;
+  color: var(--color-text-muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* ---------- scroll region ---------- */
+
+.rd-dir-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+/* ---------- table ---------- */
+
+.rd-dir-table {
+  width: 100%;
+  min-width: 780px;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.rd-dir-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  padding: 0;
+  text-align: left;
+  background: var(--color-bg);
+  box-shadow: inset 0 -1px 0 var(--color-border);
+}
+
+.rd-dir-th {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  padding: 9px 10px;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+  white-space: nowrap;
+}
+.rd-dir-th:hover {
+  color: var(--color-text);
+  background: var(--color-hover-bg);
+}
+.rd-dir-th--active {
+  color: var(--color-text);
+}
+
+.rd-dir-arrow {
+  font-size: 8px;
+  color: var(--color-accent);
+}
+
+.rd-dir-table td {
+  /* `height` is a minimum in table layout: keeps rows even whether or not the
+     fire carries a containment sub-line. */
+  height: 42px;
+  padding: 8px 10px;
+  vertical-align: top;
+  border-bottom: 1px solid var(--color-border);
+}
+
+/* column sizing */
+.rd-dir-table .rd-dir-c-loc {
+  width: 92px;
+}
+.rd-dir-table .rd-dir-c-num {
+  width: 104px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.rd-dir-table th.rd-dir-c-num .rd-dir-th {
+  justify-content: flex-end;
+}
+.rd-dir-table .rd-dir-c-started {
+  width: 148px;
+  white-space: nowrap;
+}
+.rd-dir-table .rd-dir-c-perim {
+  width: 118px;
+  white-space: nowrap;
+}
+.rd-dir-table .rd-dir-c-fcst {
+  width: 132px;
+}
+.rd-dir-table .rd-dir-c-ftp {
+  width: 118px;
+}
+
+/* rows */
+
+.rd-dir-row {
+  cursor: pointer;
+}
+.rd-dir-table tbody tr:nth-child(2n) td {
+  background: var(--color-surface);
+}
+.rd-dir-table tbody tr.rd-dir-row:hover td {
+  background: var(--color-hover-bg);
+}
+.rd-dir-row:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: -2px;
+}
+
+.rd-dir-fire-main {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  min-width: 0;
+}
+
+.rd-dir-name {
+  font-family: var(--font-serif);
+  font-weight: 600;
+  font-size: 15.5px;
+  line-height: 1.25;
+}
+
+.rd-dir-contain {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 3px;
+  font-size: 11.5px;
+  color: var(--color-text-muted);
+}
+
+.rd-dir-sub {
+  font-size: 11.5px;
+  color: var(--color-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.rd-muted {
+  color: var(--color-text-muted);
+}
+
+.rd-dir-files {
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+}
+
+/* perimeter freshness */
+
+.rd-dir-fresh {
+  font-variant-numeric: tabular-nums;
+}
+.rd-dir-fresh--fresh {
+  color: var(--color-accent);
+  font-weight: 600;
+}
+.rd-dir-fresh--recent {
+  color: var(--color-text);
+}
+.rd-dir-fresh--stale,
+.rd-dir-fresh--none {
+  color: var(--color-text-muted);
+}
+
+/* forecast availability */
+
+.rd-dir-yes {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+  white-space: nowrap;
+}
+
+.rd-dir-check {
+  color: var(--color-accent);
+  font-size: 12px;
+}
+
+/* ---------- mobile cards ---------- */
+
+.rd-dir-cards {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.rd-dir-card {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--color-border);
+  cursor: pointer;
+}
+.rd-dir-card:nth-child(2n) {
+  background: var(--color-surface);
+}
+.rd-dir-card:active {
+  background: var(--color-hover-bg);
+}
+.rd-dir-card:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: -2px;
+}
+
+.rd-dir-card-top {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.rd-dir-card-size {
+  margin-left: auto;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.rd-dir-card-meta {
+  margin-top: 4px;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 5px;
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+
+/* ---------- skeletons ---------- */
+
+.rd-skel {
+  height: 11px;
+  border-radius: 3px;
+  background: var(--color-hover-bg);
+  animation: rd-skel-pulse 1.4s ease-in-out infinite;
+}
+.rd-skel--title {
+  width: 42%;
+  height: 14px;
+}
+.rd-skel--meta {
+  width: 70%;
+  margin-top: 8px;
+}
+.rd-dir-row--skeleton td {
+  cursor: default;
+}
+
+@keyframes rd-skel-pulse {
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 0.95;
+  }
+}
+
+/* ---------- responsive ---------- */
+
+@media (max-width: 767px) {
+  .rd-dir-header {
+    padding: 14px 16px 10px;
+  }
+  .rd-dir-wordmark {
+    font-size: 22px;
+  }
+  .rd-dir-toolbar {
+    padding: 10px 16px;
+  }
+  .rd-dir-search {
+    width: 100%;
+  }
+  .rd-dir-count {
+    margin-left: 0;
+  }
+}

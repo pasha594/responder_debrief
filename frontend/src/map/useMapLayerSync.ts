@@ -37,25 +37,25 @@ import type { LayerContext, LayerManager } from './layerTypes';
 
 import { firePinsLayer } from './layers/firePinsLayer';
 import { perimeterLayer } from './layers/perimeterLayer';
-import { nationalPerimetersLayer } from './layers/nationalPerimetersLayer';
 import { hotspotLayer } from './layers/hotspotLayer';
 import { spreadForecastLayer } from './layers/spreadForecastLayer';
 import { weatherLayers } from './layers/weatherLayers';
 import { incidentMapLayer } from './layers/incidentMapLayer';
 import { irHeatLayer } from './layers/irHeatLayer';
 
+// The directory pivot retired nationalPerimetersLayer: the map now only ever
+// shows one incident, so the CONUS perimeter raster has nowhere to render.
 const MANAGERS: LayerManager[] = [
   weatherLayers,
   incidentMapLayer,
   spreadForecastLayer,
-  nationalPerimetersLayer,
   irHeatLayer,
   perimeterLayer,
   hotspotLayer,
   firePinsLayer,
 ];
 
-/** Track the viewport as a grid-snapped Bounds4326 (national hotspot query). */
+/** Track the viewport as a grid-snapped Bounds4326 (fallback hotspot query). */
 function useViewportBounds(map: MlMap | null): { bounds: Bounds4326; zoom: number } | null {
   const [vp, setVp] = useState<{ bounds: Bounds4326; zoom: number } | null>(null);
   useEffect(() => {
@@ -87,6 +87,15 @@ function useViewportBounds(map: MlMap | null): { bounds: Bounds4326; zoom: numbe
 
 function daysAgoIso(days: number): string {
   return new Date(Date.now() - days * 864e5).toISOString().slice(0, 10);
+}
+
+/**
+ * False once maplibre's `remove()` has run: the map object survives but its
+ * style is gone, so every getLayer/removeSource call throws.
+ */
+function isMapUsable(map: MlMap): boolean {
+  const internals = map as unknown as { _removed?: boolean; style?: unknown };
+  return !internals._removed && !!internals.style;
 }
 
 export function useMapLayerSync(): void {
@@ -130,8 +139,8 @@ export function useMapLayerSync(): void {
   );
   const { data: perimeterFeature } = usePerimeterVersion(versionItem?.path ?? null);
 
-  // Hotspot query: fire mode = fixed bbox since discovery (capped);
-  // national mode = viewport bbox, 7-day window, only at z >= 6.
+  // Hotspot query: fire mode = fixed bbox since discovery (capped). The map
+  // only mounts in fire mode now; the viewport fallback stays as a guard.
   const vp = useViewportBounds(map);
   const hotspotQuery = useMemo(() => {
     if (!layers.hotspots.visible) return null;
@@ -207,8 +216,20 @@ export function useMapLayerSync(): void {
     for (const m of MANAGERS) m.mount(map);
     return () => {
       if (mountedOn.current !== map) return;
-      for (const m of MANAGERS) m.unmount(map);
       mountedOn.current = null;
+      // Leaving fire mode deletes this whole subtree, and React tears the
+      // PARENT (MapRoot, which calls map.remove()) down first — so by the time
+      // we get here the style may already be gone. Skip the layer teardown in
+      // that case: maplibre has released everything anyway, and an exception
+      // raised inside an unmount effect would blank the app.
+      if (!isMapUsable(map)) return;
+      for (const m of MANAGERS) {
+        try {
+          m.unmount(map);
+        } catch {
+          /* style vanished mid-teardown */
+        }
+      }
     };
   }, [map]);
 

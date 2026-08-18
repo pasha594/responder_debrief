@@ -2,28 +2,17 @@
  * Right-hand panel shell. Desktop (≥768px): fixed-width sidebar with a
  * collapse rail. Mobile: the same content inside the bottom MobileSheet.
  */
-import { useEffect, useState } from 'react';
 import { useStore } from '../state/store';
-import { NationalPanel } from './NationalPanel';
+import { useIsDesktop } from '../utils/useMediaQuery';
 import { FirePanel } from './FirePanel';
 import { MobileSheet } from './MobileSheet';
 import { IncidentMapChip } from './tabs/IncidentMapsTab';
 import './panels.css';
 
-function useMediaQuery(query: string): boolean {
-  const [matches, setMatches] = useState(() => window.matchMedia(query).matches);
-  useEffect(() => {
-    const mq = window.matchMedia(query);
-    const onChange = () => setMatches(mq.matches);
-    mq.addEventListener('change', onChange);
-    return () => mq.removeEventListener('change', onChange);
-  }, [query]);
-  return matches;
-}
-
+/** The sidebar only ever mounts in fire mode (the directory has no map). */
 function PanelContent() {
   const view = useStore((s) => s.view);
-  return view.mode === 'fire' ? <FirePanel corneaId={view.corneaId} /> : <NationalPanel />;
+  return view.mode === 'fire' ? <FirePanel corneaId={view.corneaId} /> : null;
 }
 
 function Chevron({ collapsed }: { collapsed: boolean }) {
@@ -42,7 +31,7 @@ function Chevron({ collapsed }: { collapsed: boolean }) {
 }
 
 export function Sidebar() {
-  const isDesktop = useMediaQuery('(min-width: 768px)');
+  const isDesktop = useIsDesktop();
   const collapsed = useStore((s) => s.ui.sidebarCollapsed);
   const setSidebarCollapsed = useStore((s) => s.actions.setSidebarCollapsed);
 

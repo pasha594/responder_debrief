@@ -44,7 +44,7 @@ export function FirePanel({ corneaId }: { corneaId: string }) {
   return (
     <div className="rd-panel">
       <header className="rd-fp-header">
-        <button type="button" className="rd-back" onClick={() => actions.backToNational()}>
+        <button type="button" className="rd-back" onClick={() => actions.backToDirectory()}>
           ← All fires
         </button>
         <div className="rd-fp-titlerow">
