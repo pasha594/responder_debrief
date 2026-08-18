@@ -12,6 +12,9 @@ import {
 import { NATIONAL_PAST_MS } from '../app/config';
 import { spreadCoverage } from './framePlan';
 
+/** The future always extends at least this far — room to scrub forecasts. */
+const MIN_FUTURE_MS = 5 * 86_400_000;
+
 export function useTimelineDomain(): void {
   const view = useStore((s) => s.view);
   const now = useStore((s) => s.time.now);
@@ -48,7 +51,7 @@ export function useTimelineDomain(): void {
     const end = Math.max(
       Number.isFinite(spreadEnd) ? spreadEnd : 0,
       Number.isFinite(weatherEnd) ? weatherEnd : 0,
-      now + 3600_000,
+      now + MIN_FUTURE_MS,
     );
     return [start, end];
   }, [view.mode, fire, fireSlug, pyrecastRuns, weatherRuns, now]);
