@@ -21,22 +21,35 @@ const SRC = 'rd-hotspots';
 const LYR = 'rd-hotspots';
 
 const DAY_MS = 86_400_000;
-const WEEK_MS = 604_800_000;
+
+/**
+ * Detections older than this are not shown at all: past ~3 days a hotspot says
+ * little about where the fire is now, and the pile-up buries fresh heat.
+ */
+export const HOTSPOT_MAX_AGE_MS = 3 * DAY_MS;
+
+/** Age ramp: fresh yellow → 1 d orange → 2 d purple, smooth in between. */
+const AGE_YELLOW = '#ffd400';
+const AGE_ORANGE = '#ff7518';
+const AGE_PURPLE = '#c05de1';
 
 const EMPTY_FC: HotspotFeatureCollection = { type: 'FeatureCollection', features: [] };
 
-/** Age-based tint; interpolate clamps at both ends, max guards negatives. */
-function ageColorExpr(tEff: number): ExpressionSpecification {
+/**
+ * Age-based tint, interpolated by the hour across the three day-bands.
+ * `max 0` guards clock skew (a detection stamped slightly ahead of tEff).
+ */
+export function ageColorExpr(tEff: number): ExpressionSpecification {
   return [
     'interpolate',
     ['linear'],
     ['max', 0, ['-', tEff, ['coalesce', ['get', 'acq_ts'], 0]]],
     0,
-    '#FF7518',
+    AGE_YELLOW,
     DAY_MS,
-    '#FF6467',
-    WEEK_MS,
-    '#C05DE1',
+    AGE_ORANGE,
+    2 * DAY_MS,
+    AGE_PURPLE,
   ];
 }
 
@@ -59,8 +72,13 @@ const CIRCLE_RADIUS: ExpressionSpecification = [
   8,
 ];
 
-function timeFilter(tEff: number): FilterSpecification {
-  return ['<=', ['coalesce', ['get', 'acq_ts'], 0], tEff];
+/** Detections already acquired at tEff, and no older than the age cutoff. */
+export function timeFilter(tEff: number): FilterSpecification {
+  return [
+    'all',
+    ['<=', ['coalesce', ['get', 'acq_ts'], 0], tEff],
+    ['>=', ['coalesce', ['get', 'acq_ts'], 0], tEff - HOTSPOT_MAX_AGE_MS],
+  ];
 }
 
 function escapeHtml(s: string): string {
