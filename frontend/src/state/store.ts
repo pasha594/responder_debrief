@@ -6,6 +6,7 @@
 import { create } from 'zustand';
 import { DEFAULT_PLAYBACK_SPEED } from '../app/config';
 import type { Percentile, SpreadProduct, WeatherProduct } from '../api/types';
+import { TOA_DEFAULT_WITHIN_HOURS } from '../spread/toaBands';
 import type { DirectoryFilter, DirectorySort, DirectorySortKey } from '../directory/rowModel';
 
 /**
@@ -18,6 +19,14 @@ export interface WeatherLayerState {
   visible: boolean;
   opacity: number;
 }
+
+/**
+ * How the time-of-arrival product paints:
+ *   'timeline' — burned-so-far + leading edge, relative to the playhead.
+ *   'whole'    — the ENTIRE prediction at once as hours-to-arrival bands,
+ *                independent of the playhead, clipped to `toaWithinHours`.
+ */
+export type ToaMode = 'timeline' | 'whole';
 
 export interface AppState {
   view: ViewState;
@@ -33,10 +42,20 @@ export interface AppState {
 
   layers: {
     spread: {
+      /**
+       * The forecast layer has no user-facing on/off switch: it is simply on
+       * whenever fire mode has a run and a product. Kept in the type (layers
+       * and the LegendBar read it) but hard-set true on fire select / product
+       * change so nothing can strand the layer invisible.
+       */
       visible: boolean;
       product: SpreadProduct;
       percentile: Percentile;
       opacity: number;
+      /** ToA paint mode (see ToaMode). Persists across fire switches. */
+      toaMode: ToaMode;
+      /** Whole-mode reach: hide arrivals later than this many hours. */
+      toaWithinHours: number;
     };
     weather: Partial<Record<WeatherProduct, WeatherLayerState>>;
     hotspots: { visible: boolean };
@@ -80,6 +99,8 @@ export interface AppState {
     setSpreadProduct(product: SpreadProduct): void;
     setSpreadPercentile(pct: Percentile): void;
     setSpreadOpacity(opacity: number): void;
+    setToaMode(mode: ToaMode): void;
+    setToaWithinHours(hours: number): void;
     setWeatherLayer(product: WeatherProduct, state: Partial<WeatherLayerState>): void;
     toggleHotspots(): void;
     togglePerimeters(): void;
@@ -115,7 +136,14 @@ export const useStore = create<AppState>((set, get) => ({
   },
 
   layers: {
-    spread: { visible: true, product: 'time-of-arrival', percentile: 50, opacity: 0.8 },
+    spread: {
+      visible: true,
+      product: 'time-of-arrival',
+      percentile: 50,
+      opacity: 0.8,
+      toaMode: 'timeline',
+      toaWithinHours: TOA_DEFAULT_WITHIN_HOURS,
+    },
     weather: {},
     hotspots: { visible: true },
     perimeters: { visible: true },
@@ -141,6 +169,10 @@ export const useStore = create<AppState>((set, get) => ({
         ui: { ...s.ui, sidebarTab: 'overview', sheetSnap: 'half' },
         layers: {
           ...s.layers,
+          // No UI can turn the forecast layer off, so entering a fire always
+          // re-arms it — a stale `false` from an older session would leave the
+          // Forecast tab with nothing on the map and no way to fix it.
+          spread: { ...s.layers.spread, visible: true },
           incidentMap: { mapId: null, opacity: s.layers.incidentMap.opacity },
           irFlight: { flightId: null },
         },
@@ -190,11 +222,17 @@ export const useStore = create<AppState>((set, get) => ({
     setSpreadVisible: (visible) =>
       set((s) => ({ layers: { ...s.layers, spread: { ...s.layers.spread, visible } } })),
     setSpreadProduct: (product) =>
-      set((s) => ({ layers: { ...s.layers, spread: { ...s.layers.spread, product } } })),
+      set((s) => ({
+        layers: { ...s.layers, spread: { ...s.layers.spread, product, visible: true } },
+      })),
     setSpreadPercentile: (percentile) =>
       set((s) => ({ layers: { ...s.layers, spread: { ...s.layers.spread, percentile } } })),
     setSpreadOpacity: (opacity) =>
       set((s) => ({ layers: { ...s.layers, spread: { ...s.layers.spread, opacity } } })),
+    setToaMode: (toaMode) =>
+      set((s) => ({ layers: { ...s.layers, spread: { ...s.layers.spread, toaMode } } })),
+    setToaWithinHours: (toaWithinHours) =>
+      set((s) => ({ layers: { ...s.layers, spread: { ...s.layers.spread, toaWithinHours } } })),
 
     setWeatherLayer: (product, state) =>
       set((s) => {

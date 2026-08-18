@@ -19,7 +19,9 @@ import {
   type WeatherProduct,
 } from '../api/types';
 import { useStore, type WeatherLayerState } from '../state/store';
-import { LegendSwatch, SPREAD_PRODUCT_LABELS } from './tabs/ForecastTab';
+import { SPREAD_PRODUCT_LABELS } from './tabs/ForecastTab';
+import { LegendSwatch, ToaBandLegend, ToaTimelineLegend } from './ToaLegends';
+import { clampWithinHours } from '../spread/toaBands';
 import { GradientLegend } from '../utils/GradientLegend';
 
 interface WeatherLegendRow {
@@ -34,6 +36,9 @@ export function LegendBar() {
   const legendKey = useStore((s) => s.ui.legendKey);
   const weatherState = useStore((s) => s.layers.weather);
   const spreadVisible = useStore((s) => s.layers.spread.visible);
+  const toaMode = useStore((s) => s.layers.spread.toaMode);
+  const toaWithinHours = useStore((s) => s.layers.spread.toaWithinHours);
+  const sidebarCollapsed = useStore((s) => s.ui.sidebarCollapsed);
   const view = useStore((s) => s.view);
   const corneaId = view.mode === 'fire' ? view.corneaId : null;
 
@@ -56,10 +61,10 @@ export function LegendBar() {
       : null;
   const showSpread = spreadVisible && !!spreadProduct && !!run;
   const spreadMeta = showSpread && spreadProduct ? run?.products?.[spreadProduct] : undefined;
-  const toaRamp = spreadProduct === 'time-of-arrival' ? run?.toa_ramp : undefined;
+  const isToa = spreadProduct === 'time-of-arrival';
   // Legacy image fallback for pre-v2 catalogs only.
   const spreadLegendSrc =
-    showSpread && spreadProduct && !spreadMeta?.legend_stops && !toaRamp
+    showSpread && spreadProduct && !spreadMeta?.legend_stops && !isToa
       ? spreadLegendUrl(spreadProduct, run)
       : null;
 
@@ -97,18 +102,22 @@ export function LegendBar() {
   if (!showSpread && weatherRows.length === 0) return null;
 
   return (
-    <div className="rd-legendbar">
+    <div className={`rd-legendbar${sidebarCollapsed ? ' rd-legendbar--rail' : ''}`}>
       {showSpread && spreadProduct && (
         <div className="rd-legendbar-spread">
           <div className="rd-legendbar-caption">{SPREAD_PRODUCT_LABELS[spreadProduct]}</div>
-          {toaRamp ? (
-            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-              {toaRamp.stops.map(([name, color]) => (
-                <LegendSwatch key={name} color={color} label={name} />
-              ))}
-            </div>
+          {isToa && run ? (
+            // Mirror whichever ToA legend the Forecast tab is showing.
+            toaMode === 'whole' ? (
+              <ToaBandLegend
+                horizonHours={run.horizon_hours}
+                withinHours={clampWithinHours(toaWithinHours, run.horizon_hours)}
+              />
+            ) : (
+              <ToaTimelineLegend run={run} timezone={fire?.timezone ?? null} />
+            )
           ) : spreadMeta?.legend_labels && spreadMeta.legend_stops ? (
-            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+            <div className="rd-swatch-row">
               {spreadMeta.legend_stops.map(([, color], i) => (
                 <LegendSwatch key={i} color={color} label={spreadMeta.legend_labels?.[i] ?? ''} />
               ))}

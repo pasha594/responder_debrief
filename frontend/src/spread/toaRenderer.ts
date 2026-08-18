@@ -1,17 +1,28 @@
 /**
  * Time-of-arrival renderer: decodes a {pct}.tif from the public forecast
  * archive (float32, per-fire UTM grid, values = HOURS since forecast start,
- * nodata 0) once, then repaints an RGBA canvas per scrub tick:
- *   nodata → transparent, toa <= hours-recent → dark burned, hours-recent <
- *   toa <= hours → bright leading edge, toa > hours → transparent.
- * The paint pass is a simple typed-array loop over ≤1536² pixels (~5–15 ms);
- * the layer manager throttles calls with requestAnimationFrame.
+ * nodata 0) ONCE, then repaints an RGBA canvas in one of two modes from that
+ * same decoded Float32Array — switching modes or dragging the reach slider
+ * never re-fetches or re-decodes:
+ *
+ *   TIMELINE (renderAt / paintToa) — "what has burned as of the playhead":
+ *     nodata → transparent, toa <= hours-recent → dark burned, hours-recent <
+ *     toa <= hours → bright leading edge, toa > hours → transparent.
+ *   WHOLE (renderWhole / paintToaBands) — "how long until it reaches here",
+ *     for the entire run at once and independent of the playhead: nodata and
+ *     toa > withinHours → transparent, else the discrete toaBands color for
+ *     that arrival hour.
+ *
+ * Either paint pass is a simple typed-array loop over ≤1536² pixels (~5–15 ms);
+ * the layer manager throttles calls with requestAnimationFrame, and both
+ * modes reuse one ImageData buffer so slider drags stay smooth.
  *
  * Also hosts `decodeSpreadTiff`, the geotiff→grid decode shared with
  * productRenderer (both consume the same UTM grids).
  */
 import { fromArrayBuffer } from 'geotiff';
 import type { ToaRamp } from '../api/types';
+import { TOA_BAND_ALPHA, TOA_BANDS, toaBandIndex } from './toaBands';
 import { epsgToUtm, utmBoundsTo4326, type Corners } from './utm';
 
 /** Decode cap: readRasters resamples on read to at most this width. */
@@ -150,6 +161,45 @@ export function paintToa(
   }
 }
 
+// ---------- Whole-prediction band colorize ----------
+
+/**
+ * TOA_BANDS resolved to RGBA once at module load — same order, same
+ * boundaries, so a legend swatch and the pixels under it can never drift.
+ */
+export const TOA_BAND_RGBA: Rgba[] = TOA_BANDS.map((b) => {
+  const rgb = parseHexColor(b.color) ?? [0, 0, 0];
+  return [rgb[0], rgb[1], rgb[2], Math.round(TOA_BAND_ALPHA * 255)];
+});
+
+/**
+ * Pure band paint (exported for tests): every pixel is filled with the color
+ * of the band its arrival hour falls in. Nodata is 0; NaN and negatives are
+ * nodata too (`v > 0` guards all three). Arrivals later than `withinHours`
+ * are transparent — dragging that value down peels the prediction back toward
+ * the ignition area. Note there is no time argument: whole mode cannot depend
+ * on the playhead.
+ */
+export function paintToaBands(
+  values: ArrayLike<number>,
+  withinHours: number,
+  out: Uint8ClampedArray,
+  bands: Rgba[] = TOA_BAND_RGBA,
+): void {
+  for (let i = 0, o = 0; i < values.length; i++, o += 4) {
+    const v = values[i];
+    if (v > 0 && v <= withinHours) {
+      const [r, g, b, a] = bands[toaBandIndex(v)];
+      out[o] = r;
+      out[o + 1] = g;
+      out[o + 2] = b;
+      out[o + 3] = a;
+    } else {
+      out[o + 3] = 0; // transparent; rgb left stale is fine at alpha 0
+    }
+  }
+}
+
 export interface ToaRendererOptions {
   /** Date.parse(run.run_time) — toa values are hours since this instant. */
   runStartMs: number;
@@ -163,7 +213,10 @@ export class ToaRenderer {
   private readonly runStartMs: number;
   private ctx2d: CanvasRenderingContext2D | null = null;
   private imageData: ImageData | null = null;
+  /** What the canvas currently holds, so no-op repaints can be skipped. */
+  private lastMode: 'timeline' | 'whole' | null = null;
   private lastHours: number | null = null;
+  private lastWithin: number | null = null;
 
   constructor(grid: SpreadGrid, values: Float32Array, opts: ToaRendererOptions) {
     this.grid = grid;
@@ -191,21 +244,46 @@ export class ToaRenderer {
     this.imageData = this.ctx2d
       ? this.ctx2d.createImageData(this.grid.width, this.grid.height)
       : null;
+    this.lastMode = null;
     this.lastHours = null;
+    this.lastWithin = null;
   }
 
   /**
-   * Repaint for scrub time tMs. Returns true when the canvas changed; skips
-   * (false) when the scrub moved < TOA_MIN_REPAINT_HOURS since the last paint.
+   * TIMELINE mode: repaint for scrub time tMs. Returns true when the canvas
+   * changed; skips (false) when the scrub moved < TOA_MIN_REPAINT_HOURS since
+   * the last paint. A mode switch always repaints.
    */
   renderAt(tMs: number): boolean {
     if (!this.ctx2d || !this.imageData) return false;
     const hours = (tMs - this.runStartMs) / 3.6e6;
-    if (this.lastHours !== null && Math.abs(hours - this.lastHours) < TOA_MIN_REPAINT_HOURS) {
+    if (
+      this.lastMode === 'timeline' &&
+      this.lastHours !== null &&
+      Math.abs(hours - this.lastHours) < TOA_MIN_REPAINT_HOURS
+    ) {
       return false;
     }
+    this.lastMode = 'timeline';
     this.lastHours = hours;
     paintToa(this.values, hours, this.ramp, this.imageData.data);
+    this.ctx2d.putImageData(this.imageData, 0, 0);
+    return true;
+  }
+
+  /**
+   * WHOLE mode: repaint the entire prediction as hours-to-arrival bands,
+   * hiding anything the model reaches later than `withinHours`. Deliberately
+   * takes no time argument — the playhead cannot alter this paint, so
+   * scrubbing costs nothing. Returns true when the canvas changed; repeated
+   * calls with the same reach are skipped (false).
+   */
+  renderWhole(withinHours: number): boolean {
+    if (!this.ctx2d || !this.imageData) return false;
+    if (this.lastMode === 'whole' && this.lastWithin === withinHours) return false;
+    this.lastMode = 'whole';
+    this.lastWithin = withinHours;
+    paintToaBands(this.values, withinHours, this.imageData.data);
     this.ctx2d.putImageData(this.imageData, 0, 0);
     return true;
   }

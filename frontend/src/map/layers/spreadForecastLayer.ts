@@ -4,6 +4,11 @@
  * (time-of-arrival {pct}.tif) or productRenderer (hourly {pct}_{product}.tar)
  * on every scrub tick — continuous rendering, no pre-rendered frames.
  *
+ * Time-of-arrival has two paint modes, chosen by layers.spread.toaMode: the
+ * timeline paint (burned-so-far at the playhead) and the whole-prediction
+ * paint (hours-to-arrival bands clipped to spread.toaWithinHours). Whole mode
+ * never reads currentTime, so scrubbing the timeline leaves it untouched.
+ *
  * Loads are async (2–9 MB archive files): the store's buffering flag shows a
  * spinner while a tif/tar downloads; the previous grid stays visible until
  * the new renderer adopts (no flash). Repaints are rAF-throttled and the
@@ -23,7 +28,7 @@ import type { PyrecastRun, SpreadProduct } from '../../api/types';
 import { ProductRenderer } from '../../spread/productRenderer';
 import { ToaRenderer } from '../../spread/toaRenderer';
 import type { Corners } from '../../spread/utm';
-import { useStore } from '../../state/store';
+import { useStore, type AppState } from '../../state/store';
 import { beforeIdFor } from '../zOrder';
 import type { LayerContext, LayerManager } from '../layerTypes';
 
@@ -44,7 +49,15 @@ let lastVisible: boolean | null = null;
 let lastOpacity: number | null = null;
 const failedKeys = new Set<string>();
 let raf = 0;
-let pendingT: number | null = null;
+
+/**
+ * What the next rAF should paint. 'time' is the timeline paint (ToA relative
+ * to the playhead, and every hourly product); 'whole' is ToA whole-prediction
+ * mode, which carries a reach instead of a time — the playhead is not an
+ * input there, so scrubbing produces no repaint at all.
+ */
+type PaintJob = { kind: 'time'; t: number } | { kind: 'whole'; within: number };
+let pendingJob: PaintJob | null = null;
 
 function setVisible(map: MlMap, visible: boolean): void {
   if (!map.getLayer(LYR) || visible === lastVisible) return;
@@ -63,7 +76,7 @@ function removeSourceAndLayer(map: MlMap): void {
 function resetAll(map: MlMap): void {
   if (raf) cancelAnimationFrame(raf);
   raf = 0;
-  pendingT = null;
+  pendingJob = null;
   removeSourceAndLayer(map);
   renderer = null;
   rendererKey = null;
@@ -83,16 +96,25 @@ function setBuffering(b: boolean): void {
   useStore.getState().actions.setBuffering(b);
 }
 
-/** rAF-throttled repaint at the latest scrub time. */
-function schedulePaint(tMs: number): void {
-  pendingT = tMs;
+/**
+ * rAF-throttled repaint: only the latest job survives, so a slider drag or a
+ * playback scrub collapses to one paint per frame. The renderers themselves
+ * skip no-op paints, so an unchanged job costs nothing beyond the callback.
+ */
+function schedulePaint(job: PaintJob): void {
+  pendingJob = job;
   if (raf) return;
   raf = requestAnimationFrame(() => {
     raf = 0;
     const r = renderer;
-    const t = pendingT;
-    if (!r || t === null) return;
-    const painted = r.renderAt(t);
+    const j = pendingJob;
+    if (!r || !j) return;
+    // Whole mode only exists for ToA; anything else falls back to the time
+    // paint (a product renderer has no bands to draw).
+    const painted =
+      j.kind === 'whole' && r instanceof ToaRenderer
+        ? r.renderWhole(j.within)
+        : r.renderAt(j.kind === 'time' ? j.t : useStore.getState().time.currentTime);
     if (painted instanceof Promise) {
       void painted.then((did) => {
         if (did) mapRef?.triggerRepaint();
@@ -101,6 +123,16 @@ function schedulePaint(tMs: number): void {
       mapRef?.triggerRepaint();
     }
   });
+}
+
+/**
+ * The paint the current store state calls for. Whole mode deliberately never
+ * reads time.currentTime — that is what makes scrubbing free.
+ */
+function jobFor(spread: AppState['layers']['spread'], currentTime: number): PaintJob {
+  return spread.product === 'time-of-arrival' && spread.toaMode === 'whole'
+    ? { kind: 'whole', within: spread.toaWithinHours }
+    : { kind: 'time', t: currentTime };
 }
 
 /** Adopt a freshly loaded renderer: (re)build the canvas source if the grid
@@ -152,7 +184,7 @@ function adopt(map: MlMap, key: string, r: SpreadRenderer, run: PyrecastRun): vo
   // The user may have hidden the layer / left fire mode while we downloaded.
   const s = useStore.getState();
   setVisible(map, s.view.mode === 'fire' && s.layers.spread.visible);
-  schedulePaint(s.time.currentTime);
+  schedulePaint(jobFor(s.layers.spread, s.time.currentTime));
 }
 
 function beginLoad(
@@ -240,7 +272,7 @@ export const spreadForecastLayer: LayerManager = {
       map.setPaintProperty(LYR, 'raster-opacity', spread.opacity);
     }
     setVisible(map, true);
-    schedulePaint(ctx.currentTime);
+    schedulePaint(jobFor(spread, ctx.currentTime));
   },
 
   unmount(map) {
