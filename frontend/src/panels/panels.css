@@ -1243,3 +1243,75 @@
   line-height: 1.5;
   color: var(--color-text);
 }
+
+/* ---------- Draw tab ---------- */
+
+.rd-draw-palette {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+}
+
+.rd-draw-sym {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 4px 6px;
+  background: var(--color-card-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+}
+
+.rd-draw-sym--active {
+  border-color: var(--color-accent);
+  background: var(--color-hover-bg);
+}
+
+.rd-draw-sym-disc {
+  width: 26px;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  border: 2px solid;
+  font-size: 10px;
+  font-weight: 700;
+  background: rgba(20, 16, 20, 0.85);
+}
+
+.rd-draw-sym-name {
+  font-size: 10.5px;
+  line-height: 1.15;
+  text-align: center;
+  color: var(--color-text-muted);
+}
+
+.rd-draw-sym--active .rd-draw-sym-name {
+  color: var(--color-text);
+}
+
+.rd-draw-tools {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 6px;
+  flex-wrap: wrap;
+}
+
+.rd-draw-tool {
+  padding: 7px 10px;
+  font-size: 12.5px;
+  background: var(--color-card-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+}
+
+.rd-draw-tool--active {
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+}
+
+.rd-draw-tool:disabled {
+  opacity: 0.4;
+}

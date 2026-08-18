@@ -26,6 +26,25 @@ export interface WeatherLayerState {
  *   'whole'    — the ENTIRE prediction at once as hours-to-arrival bands,
  *                independent of the playhead, clipped to `toaWithinHours`.
  */
+/** Draw-tab feature: a placed symbol marker or a freehand line. */
+export interface DrawFeature {
+  type: 'Feature';
+  geometry:
+    | { type: 'Point'; coordinates: [number, number] }
+    | { type: 'LineString'; coordinates: [number, number][] };
+  properties: {
+    fid: string;
+    kind: 'marker' | 'line';
+    /** Symbol id from the palette (markers only). */
+    sym?: string;
+    /** Glyph drawn on the map (markers only). */
+    glyph?: string;
+    color: string;
+  };
+}
+
+export type DrawTool = 'none' | 'freehand' | 'erase' | `marker:${string}`;
+
 export type ToaMode = 'timeline' | 'whole';
 
 export interface AppState {
@@ -66,9 +85,19 @@ export interface AppState {
     irFlight: { flightId: string | null };
   };
 
+  draw: {
+    /** Active tool: none, a marker symbol id, freehand line, or eraser. */
+    tool: DrawTool;
+    features: DrawFeature[];
+    past: DrawFeature[][];
+    future: DrawFeature[][];
+  };
+
   ui: {
     theme: 'dark' | 'light';
-    sidebarTab: 'overview' | 'forecast' | 'maps';
+    sidebarTab: 'overview' | 'forecast' | 'maps' | 'draw';
+    /** 3D terrain (AWS terrarium DEM) on the fire map. */
+    terrain3d: boolean;
     sidebarCollapsed: boolean;
     sheetSnap: 'peek' | 'half' | 'full';
     /** which product's legend the LegendBar shows (qualified key, see LegendBar) */
@@ -110,6 +139,15 @@ export interface AppState {
     setTheme(theme: 'dark' | 'light'): void;
     setSidebarTab(tab: AppState['ui']['sidebarTab']): void;
     setSidebarCollapsed(collapsed: boolean): void;
+    setTerrain3d(on: boolean): void;
+    setDrawTool(tool: DrawTool): void;
+    /** Replace the feature set, pushing the previous onto the undo stack. */
+    drawCommit(features: DrawFeature[]): void;
+    drawUndo(): void;
+    drawRedo(): void;
+    drawClear(): void;
+    /** Load persisted features without touching undo history. */
+    drawHydrate(features: DrawFeature[]): void;
     setSheetSnap(snap: AppState['ui']['sheetSnap']): void;
     setLegendKey(key: string | null): void;
     showToast(msg: string): void;
@@ -152,9 +190,12 @@ export const useStore = create<AppState>((set, get) => ({
     irFlight: { flightId: null },
   },
 
+  draw: { tool: 'none', features: [], past: [], future: [] },
+
   ui: {
     theme: (document.documentElement.dataset.theme as 'dark' | 'light') ?? 'dark',
     sidebarTab: 'overview',
+    terrain3d: false,
     sidebarCollapsed: false,
     sheetSnap: 'peek',
     legendKey: null,
@@ -276,6 +317,58 @@ export const useStore = create<AppState>((set, get) => ({
     },
     setSidebarTab: (sidebarTab) => set((s) => ({ ui: { ...s.ui, sidebarTab } })),
     setSidebarCollapsed: (sidebarCollapsed) => set((s) => ({ ui: { ...s.ui, sidebarCollapsed } })),
+    setTerrain3d: (terrain3d) => set((s) => ({ ui: { ...s.ui, terrain3d } })),
+    setDrawTool: (tool) => set((s) => ({ draw: { ...s.draw, tool } })),
+    drawCommit: (features) =>
+      set((s) => ({
+        draw: {
+          ...s.draw,
+          features,
+          past: [...s.draw.past, s.draw.features].slice(-50),
+          future: [],
+        },
+      })),
+    drawUndo: () =>
+      set((s) => {
+        const past = s.draw.past;
+        if (!past.length) return {};
+        return {
+          draw: {
+            ...s.draw,
+            features: past[past.length - 1],
+            past: past.slice(0, -1),
+            future: [s.draw.features, ...s.draw.future],
+          },
+        };
+      }),
+    drawRedo: () =>
+      set((s) => {
+        const future = s.draw.future;
+        if (!future.length) return {};
+        return {
+          draw: {
+            ...s.draw,
+            features: future[0],
+            past: [...s.draw.past, s.draw.features],
+            future: future.slice(1),
+          },
+        };
+      }),
+    drawClear: () =>
+      set((s) =>
+        s.draw.features.length
+          ? {
+              draw: {
+                ...s.draw,
+                features: [],
+                past: [...s.draw.past, s.draw.features].slice(-50),
+                future: [],
+              },
+            }
+          : {},
+      ),
+    drawHydrate: (features) =>
+      set(() => ({ draw: { tool: 'none', features, past: [], future: [] } })),
     setSheetSnap: (sheetSnap) => set((s) => ({ ui: { ...s.ui, sheetSnap } })),
     setLegendKey: (legendKey) => set((s) => ({ ui: { ...s.ui, legendKey } })),
     showToast: (toast) => {

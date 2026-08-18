@@ -39,6 +39,8 @@ import { weatherLayers } from './layers/weatherLayers';
 import { windArrowsLayer } from './layers/windArrowsLayer';
 import { incidentMapLayer } from './layers/incidentMapLayer';
 import { labelContrastLayer } from './layers/labelContrast';
+import { drawLayer } from './layers/drawLayer';
+import { terrainControl } from './layers/terrainControl';
 import { irHeatLayer } from './layers/irHeatLayer';
 
 // The directory pivot retired nationalPerimetersLayer: the map now only ever
@@ -52,6 +54,8 @@ const MANAGERS: LayerManager[] = [
   perimeterLayer,
   hotspotLayer,
   firePinsLayer,
+  drawLayer,
+  terrainControl,
   labelContrastLayer, // paints no layers of its own — tunes basemap halos
 ];
 

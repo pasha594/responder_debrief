@@ -6,6 +6,7 @@ import { formatAcresValue, formatPct } from '../utils/format';
 import { OverviewTab } from './tabs/OverviewTab';
 import { ForecastTab } from './tabs/ForecastTab';
 import { IncidentMapsTab } from './tabs/IncidentMapsTab';
+import { DrawTab } from './tabs/DrawTab';
 
 type Tab = AppState['ui']['sidebarTab'];
 
@@ -13,6 +14,7 @@ const TABS: { id: Tab; label: string }[] = [
   { id: 'overview', label: 'Overview' },
   { id: 'forecast', label: 'Forecast' },
   { id: 'maps', label: 'Maps' },
+  { id: 'draw', label: 'Draw' },
 ];
 
 export function FirePanel({ corneaId }: { corneaId: string }) {
@@ -33,6 +35,7 @@ export function FirePanel({ corneaId }: { corneaId: string }) {
     overview: false,
     forecast: false,
     maps: mapsDisabled,
+    draw: false,
   };
   const activeTab: Tab = disabled[tab] ? 'overview' : tab;
 
@@ -107,6 +110,7 @@ export function FirePanel({ corneaId }: { corneaId: string }) {
         {activeTab === 'overview' && <OverviewTab corneaId={corneaId} />}
         {activeTab === 'forecast' && <ForecastTab corneaId={corneaId} />}
         {activeTab === 'maps' && <IncidentMapsTab corneaId={corneaId} />}
+        {activeTab === 'draw' && <DrawTab />}
       </div>
     </div>
   );

@@ -32,6 +32,10 @@ export const RD_LAYER_ORDER = [
   'rd-perimeter-line',
   'rd-hotspots',
   'rd-fire-pins',
+  // user annotations (Draw tab) ride above every data layer
+  'rd-draw-line',
+  'rd-draw-pt',
+  'rd-draw-label',
 ] as const;
 
 export type RdLayerId = (typeof RD_LAYER_ORDER)[number];
