@@ -2,9 +2,10 @@
  * Bottom timeline dock: play/pause (with buffering spinner), scrubbable
  * track, and a fire-local-time readout. Hosts the playback engine.
  */
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useStore } from '../state/store';
 import { useFire } from '../api/queries';
+import { makeLinearScale } from './timeScale';
 import { TimelineTrack, formatDateTime, tzAbbreviation } from './TimelineTrack';
 import { WeatherStrip } from './WeatherStrip';
 import { usePlayback } from './usePlayback';
@@ -58,32 +59,66 @@ export function Timeline() {
 
   const domain = useStore((s) => s.time.domain);
 
-  // Fixed 10-day window: the scroll viewport always spans WINDOW_DAYS, the
-  // content stretches to the whole domain at that constant px/day, and the
-  // dock opens scrolled to the right end (NOW + the forecast).
-  const scrollRef = useRef<HTMLDivElement>(null);
-  const scrolledFor = useRef<string | null>(null);
-  const spanDays = Math.max(1, (domain[1] - domain[0]) / 86_400_000);
-  const contentPct = Math.max(100, (spanDays / WINDOW_DAYS) * 100);
+  // Radio-dial scrubbing: the playhead is FIXED at the viewport center and
+  // the content (dates, track, weather) slides beneath it. The transform is
+  // a pure function of currentTime, so playback and programmatic seeks move
+  // the dial for free; dragging ANY part of the dock pans it.
+  const viewportRef = useRef<HTMLDivElement>(null);
+  const [vw, setVw] = useState(0);
   useEffect(() => {
-    const el = scrollRef.current;
+    const el = viewportRef.current;
     if (!el) return;
-    const key = `${corneaId}|${domain[0]}`;
-    if (scrolledFor.current === key) return;
-    // The dock can mount before layout settles (scrollWidth ~0) — retry on
-    // frames until the content is real, THEN snap to the right end once.
-    let raf = 0;
-    const tryScroll = () => {
-      if (el.clientWidth > 0 && el.scrollWidth > el.clientWidth + 1) {
-        el.scrollLeft = el.scrollWidth;
-        scrolledFor.current = key;
-        return;
-      }
-      raf = requestAnimationFrame(tryScroll);
-    };
-    tryScroll();
-    return () => cancelAnimationFrame(raf);
-  }, [corneaId, domain, contentPct]);
+    const ro = new ResizeObserver((entries) => {
+      for (const e of entries) setVw(e.contentRect.width);
+    });
+    ro.observe(el);
+    setVw(el.getBoundingClientRect().width);
+    return () => ro.disconnect();
+  }, []);
+
+  const spanMs = Math.max(1, domain[1] - domain[0]);
+  const spanDays = spanMs / 86_400_000;
+  const contentW = Math.max(vw, (spanDays / WINDOW_DAYS) * vw);
+  const scale = makeLinearScale(domain, contentW);
+  const translateX = vw / 2 - scale.timeToX(currentTime);
+  const msPerPx = spanMs / contentW;
+
+  // ---- dial pan / tap-seek (pointer capture on the whole dock) ----
+  const [dragging, setDragging] = useState(false);
+  const gesture = useRef<{ startX: number; startTime: number; moved: boolean } | null>(null);
+
+  const onPointerDown = (e: React.PointerEvent) => {
+    if (e.button !== 0 && e.pointerType === 'mouse') return;
+    if (useStore.getState().time.playing) actions.pause();
+    viewportRef.current?.setPointerCapture(e.pointerId);
+    gesture.current = { startX: e.clientX, startTime: currentTime, moved: false };
+    setDragging(true);
+  };
+  const onPointerMove = (e: React.PointerEvent) => {
+    const g = gesture.current;
+    if (!g) return;
+    const dx = e.clientX - g.startX;
+    if (Math.abs(dx) > 4) g.moved = true;
+    // Dragging the dial left tunes forward in time, like spinning it.
+    if (g.moved) actions.setTime(g.startTime - dx * msPerPx);
+  };
+  const endGesture = (e: React.PointerEvent) => {
+    const g = gesture.current;
+    if (!g) return;
+    gesture.current = null;
+    setDragging(false);
+    viewportRef.current?.releasePointerCapture(e.pointerId);
+    if (!g.moved && viewportRef.current) {
+      // A plain tap tunes the dial to the tapped instant.
+      const rect = viewportRef.current.getBoundingClientRect();
+      const contentX = e.clientX - rect.left - translateX;
+      actions.setTime(scale.xToTime(contentX));
+    }
+  };
+  const onWheel = (e: React.WheelEvent) => {
+    const d = Math.abs(e.deltaX) >= Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
+    if (d) actions.setTime(useStore.getState().time.currentTime + d * msPerPx);
+  };
 
   return (
     <div className="rd-timeline">
@@ -96,12 +131,27 @@ export function Timeline() {
       >
         {buffering ? <span className="rd-play-spinner" /> : playing ? <PauseIcon /> : <PlayIcon />}
       </button>
-      <div className="rd-tl-scroll" ref={scrollRef}>
-        <div className="rd-tl-content" style={{ width: `${contentPct}%` }}>
+      <div
+        className={`rd-tl-viewport${dragging ? ' rd-tl-viewport--dragging' : ''}`}
+        ref={viewportRef}
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={endGesture}
+        onPointerCancel={endGesture}
+        onWheel={onWheel}
+      >
+        <div
+          className="rd-tl-content"
+          style={{ width: contentW || undefined, transform: `translateX(${translateX}px)` }}
+        >
           <TimelineTrack />
           <div className="rd-wx-row">
             <WeatherStrip />
           </div>
+        </div>
+        <div className="rd-dial-playhead" aria-hidden="true">
+          <div className="rd-playhead-line" />
+          <div className="rd-playhead-handle" />
         </div>
       </div>
       <div className="rd-time-readout">

@@ -23,8 +23,6 @@ const HOUR_TICK_MIN_PX = 3;
 const DAY_LABEL_MIN_GAP_PX = 34;
 /** Below this track width the sparkline caption would crowd the lane. */
 const CAPTION_MIN_TRACK_PX = 300;
-/** Drag auto-scroll speed (px/frame) at the viewport's outermost edge. */
-const EDGE_SCROLL_MAX_PX = 22;
 
 /** Activity-lane geometry (px insets inside the track), per breakpoint. */
 const LANE = {
@@ -142,7 +140,6 @@ export function TimelineTrack() {
 
   const trackRef = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ width: 0, height: 0 });
-  const [dragging, setDragging] = useState(false);
   const { width, height } = size;
 
   useEffect(() => {
@@ -214,86 +211,14 @@ export function TimelineTrack() {
 
   const showCaption = !!sparkline && isDesktop && width >= CAPTION_MIN_TRACK_PX;
 
-  // ---- seek / drag (pointer events + capture) ----
-  const seekFromClientX = (clientX: number) => {
-    const el = trackRef.current;
-    if (!el) return;
-    const rect = el.getBoundingClientRect();
-    const x = Math.min(rect.width, Math.max(0, clientX - rect.left));
-    actions.setTime(scale.xToTime(x));
-  };
-
-  // While a drag hovers the viewport's outer thirds, scroll the 10-day
-  // window under the pointer so the user can scrub past the fold. Velocity
-  // ramps from 0 at the third's inner edge to EDGE_SCROLL_MAX_PX at the rim.
-  const dragClientX = useRef<number | null>(null);
-  const edgeRaf = useRef(0);
-  const edgeScrollLoop = () => {
-    const el = trackRef.current;
-    const sc = el?.closest('.rd-tl-scroll') as HTMLElement | null;
-    const cx = dragClientX.current;
-    if (!el || !sc || cx === null) return;
-    const vr = sc.getBoundingClientRect();
-    const third = vr.width / 3;
-    let v = 0;
-    if (cx < vr.left + third) {
-      v = -EDGE_SCROLL_MAX_PX * Math.min(1, (vr.left + third - cx) / third);
-    } else if (cx > vr.right - third) {
-      v = EDGE_SCROLL_MAX_PX * Math.min(1, (cx - (vr.right - third)) / third);
-    }
-    if (v !== 0) {
-      const max = sc.scrollWidth - sc.clientWidth;
-      const next = Math.min(max, Math.max(0, sc.scrollLeft + v));
-      if (next !== sc.scrollLeft) {
-        sc.scrollLeft = next;
-        seekFromClientX(cx); // the content moved under a stationary pointer
-      }
-    }
-    edgeRaf.current = requestAnimationFrame(edgeScrollLoop);
-  };
-  useEffect(() => () => cancelAnimationFrame(edgeRaf.current), []);
-
-  const onPointerDown = (e: React.PointerEvent) => {
-    if (e.button !== 0 && e.pointerType === 'mouse') return;
-    const el = trackRef.current;
-    if (!el) return;
-    if (useStore.getState().time.playing) actions.pause();
-    el.setPointerCapture(e.pointerId);
-    setDragging(true);
-    dragClientX.current = e.clientX;
-    seekFromClientX(e.clientX);
-    cancelAnimationFrame(edgeRaf.current);
-    edgeRaf.current = requestAnimationFrame(edgeScrollLoop);
-  };
-
-  const onPointerMove = (e: React.PointerEvent) => {
-    if (!dragging) return;
-    dragClientX.current = e.clientX;
-    seekFromClientX(e.clientX);
-  };
-
-  const endDrag = (e: React.PointerEvent) => {
-    if (!dragging) return;
-    setDragging(false);
-    dragClientX.current = null;
-    cancelAnimationFrame(edgeRaf.current);
-    trackRef.current?.releasePointerCapture(e.pointerId);
-  };
-
-  const playheadX = scale.timeToX(currentTime);
+  // Gestures live on the dial viewport (Timeline.tsx); the track is a
+  // passive layer save for the perimeter diamonds' own click handlers.
+  const coverX = scale.timeToX(currentTime);
   const nowInDomain = now > domain[0] && now < domain[1];
   const nowX = scale.timeToX(now);
-  const tooltipX = Math.min(Math.max(playheadX, 48), Math.max(width - 48, 48));
 
   return (
-    <div
-      ref={trackRef}
-      className="rd-track"
-      onPointerDown={onPointerDown}
-      onPointerMove={onPointerMove}
-      onPointerUp={endDrag}
-      onPointerCancel={endDrag}
-    >
+    <div ref={trackRef} className="rd-track">
       {sparkline && (
         <svg
           className="rd-spark"
@@ -373,18 +298,7 @@ export function TimelineTrack() {
         />
       ))}
 
-      <div className="rd-track-cover" style={{ left: playheadX, width: Math.max(0, width - playheadX) }} />
-
-      <div className={`rd-playhead${dragging ? ' rd-playhead-dragging' : ''}`} style={{ left: playheadX }}>
-        <div className="rd-playhead-line" />
-        <div className="rd-playhead-handle" />
-      </div>
-
-      {dragging && (
-        <div className="rd-drag-tooltip" style={{ left: tooltipX }}>
-          {formatDateTime(currentTime, tz)} {tzAbbreviation(currentTime, tz)}
-        </div>
-      )}
+      <div className="rd-track-cover" style={{ left: coverX, width: Math.max(0, width - coverX) }} />
     </div>
   );
 }

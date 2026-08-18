@@ -18,15 +18,20 @@
   -webkit-user-select: none;
 }
 
-/* ---- scroll viewport: a fixed 10-day window over the whole domain ---- */
+/* ---- dial viewport: fixed 10-day window, content slides beneath ---- */
 
-.rd-tl-scroll {
+.rd-tl-viewport {
+  position: relative;
   height: calc(100% - 8px);
-  overflow-x: auto;
-  overflow-y: hidden;
-  overscroll-behavior-x: contain;
-  scrollbar-width: thin;
-  scrollbar-color: var(--color-border) transparent;
+  overflow: hidden;
+  cursor: grab;
+  touch-action: none; /* the dock owns its pan gesture, mouse and touch */
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.rd-tl-viewport--dragging {
+  cursor: grabbing;
 }
 
 .rd-tl-content {
@@ -35,6 +40,18 @@
   min-width: 100%;
   display: flex;
   flex-direction: column;
+  will-change: transform;
+}
+
+/* The fixed center playhead the content tunes against. */
+.rd-dial-playhead {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 0;
+  pointer-events: none;
+  z-index: 4;
 }
 
 /* ---- weather strip (Open-Meteo point weather at the fire origin) ---- */
@@ -131,9 +148,6 @@
   position: relative;
   flex: 1;
   min-height: 0;
-  /* no overflow:hidden — the drag tooltip floats above the dock */
-  cursor: pointer;
-  touch-action: none; /* pointer-event dragging on touch */
 }
 
 .rd-tick-day {
@@ -283,20 +297,6 @@
 
 /* ---- playhead ---- */
 
-.rd-playhead {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  width: 20px; /* hit area */
-  margin-left: -10px;
-  cursor: grab;
-  z-index: 3;
-}
-
-.rd-playhead-dragging {
-  cursor: grabbing;
-}
-
 .rd-playhead-line {
   position: absolute;
   top: 0;
@@ -322,23 +322,6 @@
 }
 
 /* ---- drag tooltip ---- */
-
-.rd-drag-tooltip {
-  position: absolute;
-  top: 14px;
-  transform: translateX(-50%);
-  background: var(--color-surface);
-  color: var(--color-text);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius);
-  padding: 3px 8px;
-  font-size: 11px;
-  white-space: nowrap;
-  font-variant-numeric: tabular-nums;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
-  pointer-events: none;
-  z-index: 4;
-}
 
 /* ---- readout ---- */
 
