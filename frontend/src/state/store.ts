@@ -39,11 +39,25 @@ export interface DrawFeature {
     sym?: string;
     /** Glyph drawn on the map (markers only). */
     glyph?: string;
+    /** Marker shape image key ('circle' | 'square' | 'diamond' | 'none'). */
+    shape?: string;
+    /** Glyph text size (breaks render bigger, disc-less). */
+    tsize?: number;
+    /** Line style id + derived paint hints (lines only). */
+    style?: string;
+    dash?: string;
+    letter?: string;
+    width?: number;
     color: string;
   };
 }
 
-export type DrawTool = 'none' | 'freehand' | 'erase' | `marker:${string}`;
+export type DrawTool =
+  | 'none'
+  | 'freehand'
+  | 'erase'
+  | `marker:${string}`
+  | `line:${string}`;
 
 export type ToaMode = 'timeline' | 'whole';
 

@@ -12,6 +12,10 @@ export const PIN_WILDFIRE_SELECTED = 'rd-pin-wildfire-selected';
 export const PIN_PRESCRIBED_SELECTED = 'rd-pin-prescribed-selected';
 export const HEX_IMAGE = 'rd-hex';
 export const WIND_ARROW_IMAGE = 'rd-wind-arrow';
+/** Draw-tab marker shapes (SDF, tinted per feature via icon-color). */
+export const DRAW_CIRCLE_IMAGE = 'rd-draw-circle';
+export const DRAW_SQUARE_IMAGE = 'rd-draw-square';
+export const DRAW_DIAMOND_IMAGE = 'rd-draw-diamond';
 
 const PIXEL_RATIO = 2;
 
@@ -194,6 +198,29 @@ function drawArrowSdf(): RawImage {
   return { data: img, pixelRatio: PIXEL_RATIO };
 }
 
+/** Filled marker shape SDF for the Draw tab (circle / square / diamond). */
+function drawShapeSdf(shape: 'circle' | 'square' | 'diamond'): RawImage {
+  const size = 36;
+  const sdfRadius = 6;
+  const cutoff = 0.25;
+  const img = new ImageData(size, size);
+  const c = (size - 1) / 2;
+  const r = 11;
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const px = x - c;
+      const py = y - c;
+      let dist: number;
+      if (shape === 'circle') dist = Math.hypot(px, py) - r;
+      else if (shape === 'square') dist = boxDist(px, py, r * 0.9, r * 0.9);
+      else dist = Math.abs(px) + Math.abs(py) - r * 1.25; // diamond (L1 ball)
+      const a = Math.round(255 - 255 * (dist / sdfRadius + cutoff));
+      img.data[(y * size + x) * 4 + 3] = Math.max(0, Math.min(255, a));
+    }
+  }
+  return { data: img, pixelRatio: PIXEL_RATIO };
+}
+
 function makeImage(id: string): RawImage | null {
   switch (id) {
     case PIN_WILDFIRE:
@@ -208,6 +235,12 @@ function makeImage(id: string): RawImage | null {
       return drawHexSdf();
     case WIND_ARROW_IMAGE:
       return drawArrowSdf();
+    case DRAW_CIRCLE_IMAGE:
+      return drawShapeSdf('circle');
+    case DRAW_SQUARE_IMAGE:
+      return drawShapeSdf('square');
+    case DRAW_DIAMOND_IMAGE:
+      return drawShapeSdf('diamond');
     default:
       return null;
   }
@@ -220,6 +253,9 @@ const ALL_IDS = [
   PIN_PRESCRIBED_SELECTED,
   HEX_IMAGE,
   WIND_ARROW_IMAGE,
+  DRAW_CIRCLE_IMAGE,
+  DRAW_SQUARE_IMAGE,
+  DRAW_DIAMOND_IMAGE,
 ];
 
 function addIfMissing(map: MlMap, id: string): void {
@@ -228,7 +264,8 @@ function addIfMissing(map: MlMap, id: string): void {
   if (!img) return;
   map.addImage(id, img.data, {
     pixelRatio: img.pixelRatio,
-    sdf: id === HEX_IMAGE || id === WIND_ARROW_IMAGE,
+    sdf: id !== PIN_WILDFIRE && id !== PIN_WILDFIRE_SELECTED
+      && id !== PIN_PRESCRIBED && id !== PIN_PRESCRIBED_SELECTED,
   });
 }
 

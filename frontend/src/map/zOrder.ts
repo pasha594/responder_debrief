@@ -34,6 +34,9 @@ export const RD_LAYER_ORDER = [
   'rd-fire-pins',
   // user annotations (Draw tab) ride above every data layer
   'rd-draw-line',
+  'rd-draw-line-dash',
+  'rd-draw-line-dots',
+  'rd-draw-line-letter',
   'rd-draw-pt',
   'rd-draw-label',
 ] as const;

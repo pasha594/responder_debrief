@@ -5,7 +5,7 @@
  * device (localStorage) — nothing is uploaded.
  */
 import { useStore, type DrawTool } from '../../state/store';
-import { DRAW_SYMBOLS } from '../../map/layers/drawSymbols';
+import { DRAW_LINES, DRAW_SYMBOLS } from '../../map/layers/drawSymbols';
 
 function ToolButton({
   active,
@@ -52,6 +52,8 @@ export function DrawTab() {
         <div className="rd-draw-palette">
           {DRAW_SYMBOLS.map((sym) => {
             const tool: DrawTool = `marker:${sym.id}`;
+            const shapeCls =
+              sym.shape === 'none' ? 'rd-draw-shape--bare' : `rd-draw-shape--${sym.shape}`;
             return (
               <button
                 key={sym.id}
@@ -59,9 +61,17 @@ export function DrawTab() {
                 className={`rd-draw-sym${draw.tool === tool ? ' rd-draw-sym--active' : ''}`}
                 onClick={() => toggle(tool)}
                 aria-pressed={draw.tool === tool}
+                title={sym.label}
               >
-                <span className="rd-draw-sym-disc" style={{ borderColor: sym.color, color: sym.color }}>
-                  {sym.glyph}
+                <span
+                  className={`rd-draw-sym-disc ${shapeCls}`}
+                  style={
+                    sym.shape === 'none'
+                      ? { color: sym.color }
+                      : { background: sym.color, color: '#151015' }
+                  }
+                >
+                  <span className="rd-draw-sym-glyph">{sym.glyph}</span>
                 </span>
                 <span className="rd-draw-sym-name">{sym.label}</span>
               </button>
@@ -71,15 +81,55 @@ export function DrawTab() {
       </section>
 
       <section className="rd-section">
+        <h3 className="rd-section-title">
+          Lines
+          <span className="rd-title-meta">pick one, then drag on the map</span>
+        </h3>
+        <div className="rd-draw-lines">
+          {DRAW_LINES.map((ls) => {
+            const tool: DrawTool = ls.id === 'sketch' ? 'freehand' : `line:${ls.id}`;
+            return (
+              <button
+                key={ls.id}
+                type="button"
+                className={`rd-draw-line-btn${draw.tool === tool ? ' rd-draw-line-btn--active' : ''}`}
+                onClick={() => toggle(tool)}
+                aria-pressed={draw.tool === tool}
+              >
+                <span className="rd-draw-line-sample">
+                  {ls.letter ? (
+                    <span className="rd-draw-line-letters" style={{ color: ls.color }}>
+                      {ls.letter}
+                      <span className="rd-draw-line-rule" style={{ background: ls.color }} />
+                      {ls.letter}
+                    </span>
+                  ) : (
+                    <span
+                      className="rd-draw-line-rule"
+                      style={{
+                        background:
+                          ls.dash === 'solid'
+                            ? ls.color
+                            : `repeating-linear-gradient(90deg, ${ls.color} 0 ${
+                                ls.dash === 'dots' ? '3px' : '7px'
+                              }, transparent ${ls.dash === 'dots' ? '3px' : '7px'} ${
+                                ls.dash === 'dots' ? '8px' : '12px'
+                              })`,
+                        height: (ls.width ?? 3) - 0.5,
+                      }}
+                    />
+                  )}
+                </span>
+                <span className="rd-draw-sym-name">{ls.label}</span>
+              </button>
+            );
+          })}
+        </div>
+      </section>
+
+      <section className="rd-section">
         <h3 className="rd-section-title">Tools</h3>
         <div className="rd-draw-tools">
-          <ToolButton
-            active={draw.tool === 'freehand'}
-            onClick={() => toggle('freehand')}
-            title="Drag on the map to sketch a line"
-          >
-            ✏️ Freehand
-          </ToolButton>
           <ToolButton
             active={draw.tool === 'erase'}
             onClick={() => toggle('erase')}

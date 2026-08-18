@@ -10,10 +10,22 @@ import type { GeoJSONSource, Map as MlMap, MapMouseEvent, MapTouchEvent } from '
 import { useStore, type DrawFeature } from '../../state/store';
 import { beforeIdFor } from '../zOrder';
 import type { LayerManager } from '../layerTypes';
-import { DRAW_LINE_COLOR, DRAW_SYMBOL_BY_ID } from './drawSymbols';
+import {
+  DRAW_LINE_BY_ID,
+  DRAW_LINE_COLOR,
+  DRAW_SYMBOL_BY_ID,
+} from './drawSymbols';
+import {
+  DRAW_CIRCLE_IMAGE,
+  DRAW_DIAMOND_IMAGE,
+  DRAW_SQUARE_IMAGE,
+} from './markerImages';
 
 const SRC = 'rd-draw';
 const LINE_LYR = 'rd-draw-line';
+const LINE_DASH_LYR = 'rd-draw-line-dash';
+const LINE_DOTS_LYR = 'rd-draw-line-dots';
+const LINE_LETTER_LYR = 'rd-draw-line-letter';
 const PT_LYR = 'rd-draw-pt';
 const LABEL_LYR = 'rd-draw-label';
 /** Erase click tolerance, px. */
@@ -57,37 +69,97 @@ let hydratedFor: string | null = null;
 /** In-flight freehand stroke (not yet committed). */
 let stroke: [number, number][] | null = null;
 
+const LINE_PAINT = {
+  'line-color': ['coalesce', ['get', 'color'], DRAW_LINE_COLOR],
+  'line-width': ['coalesce', ['get', 'width'], 3],
+  'line-opacity': 0.95,
+} as const;
+
 function ensureLayers(map: MlMap): void {
   if (!map.getSource(SRC)) map.addSource(SRC, { type: 'geojson', data: EMPTY });
-  if (!map.getLayer(LINE_LYR)) {
+  // line-dasharray is not data-driven — one layer per dash class.
+  const lineLayers: [string, string, number[] | null][] = [
+    [LINE_LYR, 'solid', null],
+    [LINE_DASH_LYR, 'dash', [1.6, 1.2]],
+    [LINE_DOTS_LYR, 'dots', [0.05, 2.2]],
+  ];
+  for (const [id, dash, dasharray] of lineLayers) {
+    if (map.getLayer(id)) continue;
     map.addLayer(
       {
-        id: LINE_LYR,
+        id,
         type: 'line',
         source: SRC,
-        filter: ['==', ['geometry-type'], 'LineString'],
+        filter: [
+          'all',
+          ['==', ['geometry-type'], 'LineString'],
+          ['==', ['coalesce', ['get', 'dash'], 'solid'], dash],
+        ],
         layout: { 'line-cap': 'round', 'line-join': 'round' },
+        paint: dasharray
+          ? ({ ...LINE_PAINT, 'line-dasharray': dasharray } as never)
+          : (LINE_PAINT as never),
+      },
+      beforeIdFor(map, id as never),
+    );
+  }
+  if (!map.getLayer(LINE_LETTER_LYR)) {
+    // "H—H" style construction-line letters repeating along the line.
+    map.addLayer(
+      {
+        id: LINE_LETTER_LYR,
+        type: 'symbol',
+        source: SRC,
+        filter: [
+          'all',
+          ['==', ['geometry-type'], 'LineString'],
+          ['has', 'letter'],
+        ],
+        layout: {
+          'symbol-placement': 'line',
+          'symbol-spacing': 90,
+          'text-field': ['get', 'letter'],
+          'text-size': 11,
+          'text-font': ['Noto Sans Bold'],
+          'text-allow-overlap': true,
+        },
         paint: {
-          'line-color': ['coalesce', ['get', 'color'], DRAW_LINE_COLOR],
-          'line-width': 3,
-          'line-opacity': 0.95,
+          'text-color': ['coalesce', ['get', 'color'], DRAW_LINE_COLOR],
+          'text-halo-color': 'rgba(20, 16, 20, 0.9)',
+          'text-halo-width': 1.5,
         },
       },
-      beforeIdFor(map, LINE_LYR),
+      beforeIdFor(map, LINE_LETTER_LYR),
     );
   }
   if (!map.getLayer(PT_LYR)) {
+    // NWCG marker shapes: purple circles (aviation), blue squares (ground),
+    // diamonds (comms) — SDF icons tinted per feature. Breaks are text-only.
     map.addLayer(
       {
         id: PT_LYR,
-        type: 'circle',
+        type: 'symbol',
         source: SRC,
-        filter: ['==', ['geometry-type'], 'Point'],
+        filter: [
+          'all',
+          ['==', ['geometry-type'], 'Point'],
+          ['!=', ['coalesce', ['get', 'shape'], 'circle'], 'none'],
+        ],
+        layout: {
+          'icon-image': [
+            'match',
+            ['coalesce', ['get', 'shape'], 'circle'],
+            'square', DRAW_SQUARE_IMAGE,
+            'diamond', DRAW_DIAMOND_IMAGE,
+            DRAW_CIRCLE_IMAGE,
+          ],
+          'icon-size': 0.85,
+          'icon-allow-overlap': true,
+        },
         paint: {
-          'circle-radius': 11,
-          'circle-color': 'rgba(20, 16, 20, 0.85)',
-          'circle-stroke-width': 2,
-          'circle-stroke-color': ['coalesce', ['get', 'color'], DRAW_LINE_COLOR],
+          'icon-color': ['coalesce', ['get', 'color'], DRAW_LINE_COLOR],
+          'icon-halo-color': 'rgba(20, 16, 20, 0.9)',
+          'icon-halo-width': 1,
         },
       },
       beforeIdFor(map, PT_LYR),
@@ -102,12 +174,30 @@ function ensureLayers(map: MlMap): void {
         filter: ['==', ['geometry-type'], 'Point'],
         layout: {
           'text-field': ['get', 'glyph'],
-          'text-size': 11,
+          'text-size': ['coalesce', ['get', 'tsize'], 10],
           'text-font': ['Noto Sans Bold'],
           'text-allow-overlap': true,
         },
         paint: {
-          'text-color': ['coalesce', ['get', 'color'], DRAW_LINE_COLOR],
+          // glyphs INSIDE a tinted disc knock out dark; break marks carry color
+          'text-color': [
+            'case',
+            ['==', ['coalesce', ['get', 'shape'], 'circle'], 'none'],
+            ['coalesce', ['get', 'color'], DRAW_LINE_COLOR],
+            'rgba(16, 12, 16, 0.95)',
+          ],
+          'text-halo-color': [
+            'case',
+            ['==', ['coalesce', ['get', 'shape'], 'circle'], 'none'],
+            'rgba(20, 16, 20, 0.9)',
+            'rgba(0, 0, 0, 0)',
+          ],
+          'text-halo-width': [
+            'case',
+            ['==', ['coalesce', ['get', 'shape'], 'circle'], 'none'],
+            1.5,
+            0,
+          ],
         },
       },
       beforeIdFor(map, LABEL_LYR),
@@ -122,12 +212,17 @@ function render(map: MlMap): void {
   const fc: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features: features as never };
   // The live stroke previews as one more line while the finger is down.
   if (stroke && stroke.length > 1) {
+    const style = DRAW_LINE_BY_ID[activeLineStyle() ?? 'sketch'];
     fc.features = [
       ...fc.features,
       {
         type: 'Feature',
         geometry: { type: 'LineString', coordinates: stroke },
-        properties: { color: DRAW_LINE_COLOR },
+        properties: {
+          color: style?.color ?? DRAW_LINE_COLOR,
+          dash: style?.dash ?? 'solid',
+          width: style?.width,
+        },
       },
     ];
   }
@@ -150,7 +245,15 @@ function onClick(map: MlMap, e: MapMouseEvent): void {
     const f: DrawFeature = {
       type: 'Feature',
       geometry: { type: 'Point', coordinates: [e.lngLat.lng, e.lngLat.lat] },
-      properties: { fid: nextFid(), kind: 'marker', sym: sym.id, glyph: sym.glyph, color: sym.color },
+      properties: {
+        fid: nextFid(),
+        kind: 'marker',
+        sym: sym.id,
+        glyph: sym.glyph,
+        shape: sym.shape,
+        tsize: sym.shape === 'none' ? 15 : sym.glyph.length > 1 ? 8.5 : 10,
+        color: sym.color,
+      },
     };
     actions.drawCommit([...draw.features, f]);
     return;
@@ -162,7 +265,10 @@ function onClick(map: MlMap, e: MapMouseEvent): void {
         [e.point.x - pad, e.point.y - pad],
         [e.point.x + pad, e.point.y + pad],
       ],
-      { layers: [PT_LYR, LINE_LYR, LABEL_LYR].filter((l) => !!map.getLayer(l)) },
+      {
+        layers: [PT_LYR, LABEL_LYR, LINE_LYR, LINE_DASH_LYR, LINE_DOTS_LYR,
+                 LINE_LETTER_LYR].filter((l) => !!map.getLayer(l)),
+      },
     );
     const hitFid = hits[0]?.properties?.fid as string | undefined;
     if (hitFid) {
@@ -171,8 +277,15 @@ function onClick(map: MlMap, e: MapMouseEvent): void {
   }
 }
 
+function activeLineStyle(): string | null {
+  const tool = useStore.getState().draw.tool;
+  if (tool === 'freehand') return 'sketch';
+  if (tool.startsWith('line:')) return tool.slice('line:'.length);
+  return null;
+}
+
 function strokeStart(map: MlMap, e: MapMouseEvent | MapTouchEvent): void {
-  if (useStore.getState().draw.tool !== 'freehand') return;
+  if (!activeLineStyle()) return;
   e.preventDefault(); // keep dragPan out of the gesture
   stroke = [[e.lngLat.lng, e.lngLat.lat]];
   render(map);
@@ -188,12 +301,22 @@ function strokeEnd(map: MlMap): void {
   if (!stroke) return;
   const pts = stroke;
   stroke = null;
-  if (pts.length > 1) {
+  const styleId = activeLineStyle();
+  const style = styleId ? DRAW_LINE_BY_ID[styleId] : null;
+  if (pts.length > 1 && style) {
     const { draw, actions } = useStore.getState();
     const f: DrawFeature = {
       type: 'Feature',
       geometry: { type: 'LineString', coordinates: pts },
-      properties: { fid: nextFid(), kind: 'line', color: DRAW_LINE_COLOR },
+      properties: {
+        fid: nextFid(),
+        kind: 'line',
+        style: style.id,
+        dash: style.dash,
+        letter: style.letter,
+        width: style.width,
+        color: style.color,
+      },
     };
     actions.drawCommit([...draw.features, f]);
   } else {
@@ -263,7 +386,10 @@ export const drawLayer: LayerManager = {
       map.off('touchmove', h.tmove);
       map.off('touchend', h.mup);
     }
-    for (const l of [LABEL_LYR, PT_LYR, LINE_LYR]) if (map.getLayer(l)) map.removeLayer(l);
+    for (const l of [LABEL_LYR, PT_LYR, LINE_LETTER_LYR, LINE_DOTS_LYR,
+                     LINE_DASH_LYR, LINE_LYR]) {
+      if (map.getLayer(l)) map.removeLayer(l);
+    }
     if (map.getSource(SRC)) map.removeSource(SRC);
   },
 };
