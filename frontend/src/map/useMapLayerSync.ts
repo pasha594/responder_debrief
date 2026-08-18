@@ -39,6 +39,7 @@ import { weatherLayers } from './layers/weatherLayers';
 import { windArrowsLayer } from './layers/windArrowsLayer';
 import { incidentMapLayer } from './layers/incidentMapLayer';
 import { labelContrastLayer } from './layers/labelContrast';
+import { basemapUnderlay } from './layers/basemapUnderlay';
 import { drawLayer } from './layers/drawLayer';
 import { terrainControl } from './layers/terrainControl';
 import { irHeatLayer } from './layers/irHeatLayer';
@@ -46,6 +47,7 @@ import { irHeatLayer } from './layers/irHeatLayer';
 // The directory pivot retired nationalPerimetersLayer: the map now only ever
 // shows one incident, so the CONUS perimeter raster has nowhere to render.
 const MANAGERS: LayerManager[] = [
+  basemapUnderlay,
   weatherLayers,
   incidentMapLayer,
   spreadForecastLayer,

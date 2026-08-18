@@ -9,6 +9,7 @@ import { useMapLayerSync } from '../map/useMapLayerSync';
 import { useStore } from '../state/store';
 import { Sidebar } from '../panels/Sidebar';
 import { BackControl } from '../panels/BackControl';
+import { BasemapControl } from '../panels/BasemapControl';
 import { Timeline } from '../timeline/Timeline';
 import { LegendBar } from '../panels/LegendBar';
 import { ErrorBoundary } from '../utils/ErrorBoundary';
@@ -101,6 +102,7 @@ function FireMapView() {
     <MapRoot>
       <MapLayerBridge />
       <BackControl />
+      <BasemapControl />
       <ErrorBoundary label="Fire panel">
         <Sidebar />
       </ErrorBoundary>

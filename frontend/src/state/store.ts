@@ -110,6 +110,8 @@ export interface AppState {
   ui: {
     theme: 'dark' | 'light';
     sidebarTab: 'overview' | 'forecast' | 'maps' | 'draw';
+    /** Basemap ground: vector map (default), satellite, or USGS topo. */
+    basemap: 'map' | 'satellite' | 'topo';
     sidebarCollapsed: boolean;
     sheetSnap: 'peek' | 'half' | 'full';
     /** which product's legend the LegendBar shows (qualified key, see LegendBar) */
@@ -151,6 +153,7 @@ export interface AppState {
     setTheme(theme: 'dark' | 'light'): void;
     setSidebarTab(tab: AppState['ui']['sidebarTab']): void;
     setSidebarCollapsed(collapsed: boolean): void;
+    setBasemap(basemap: AppState['ui']['basemap']): void;
     setDrawTool(tool: DrawTool): void;
     /** Replace the feature set, pushing the previous onto the undo stack. */
     drawCommit(features: DrawFeature[]): void;
@@ -206,6 +209,7 @@ export const useStore = create<AppState>((set, get) => ({
   ui: {
     theme: (document.documentElement.dataset.theme as 'dark' | 'light') ?? 'dark',
     sidebarTab: 'overview',
+    basemap: 'map',
     sidebarCollapsed: false,
     sheetSnap: 'peek',
     legendKey: null,
@@ -327,6 +331,7 @@ export const useStore = create<AppState>((set, get) => ({
     },
     setSidebarTab: (sidebarTab) => set((s) => ({ ui: { ...s.ui, sidebarTab } })),
     setSidebarCollapsed: (sidebarCollapsed) => set((s) => ({ ui: { ...s.ui, sidebarCollapsed } })),
+    setBasemap: (basemap) => set((s) => ({ ui: { ...s.ui, basemap } })),
     setDrawTool: (tool) => set((s) => ({ draw: { ...s.draw, tool } })),
     drawCommit: (features) =>
       set((s) => ({
