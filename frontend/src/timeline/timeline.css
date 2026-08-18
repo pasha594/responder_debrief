@@ -342,6 +342,17 @@
     --timeline-wx-h: 0px;
   }
 
+  /* Swipe-up on the dock reveals the weather lane (swipe-down tucks it);
+     the height vars ripple to the map inset and panel offsets. */
+  :root:has(.rd-timeline--wx-open) {
+    --timeline-h: 94px;
+    --timeline-wx-h: 46px;
+  }
+
+  .rd-timeline--wx-open .rd-wx-row {
+    display: block;
+  }
+
   .rd-timeline {
     grid-template-columns: auto 1fr;
     gap: 8px;
@@ -362,8 +373,8 @@
   }
 
   .rd-playhead-handle {
-    width: 20px;
-    height: 20px;
+    width: 10px;
+    height: 10px;
   }
 
   .rd-tick-hour {

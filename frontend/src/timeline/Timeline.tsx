@@ -8,6 +8,7 @@ import { useFire } from '../api/queries';
 import { makeLinearScale } from './timeScale';
 import { TimelineTrack, formatDateTime, tzAbbreviation } from './TimelineTrack';
 import { WeatherStrip } from './WeatherStrip';
+import { useIsDesktop } from '../utils/useMediaQuery';
 import { usePlayback } from './usePlayback';
 import './timeline.css';
 
@@ -83,24 +84,36 @@ export function Timeline() {
   const translateX = vw / 2 - scale.timeToX(currentTime);
   const msPerPx = spanMs / contentW;
 
-  // ---- dial pan / tap-seek (pointer capture on the whole dock) ----
+  // ---- dial pan / tap-seek / mobile weather reveal ----
+  // The first significant movement locks the gesture's axis: horizontal pans
+  // the dial; vertical (mobile) swipes the weather lane open or closed.
+  const isDesktop = useIsDesktop();
+  const [wxOpen, setWxOpen] = useState(false);
   const [dragging, setDragging] = useState(false);
-  const gesture = useRef<{ startX: number; startTime: number; moved: boolean } | null>(null);
+  const gesture = useRef<{
+    startX: number;
+    startY: number;
+    startTime: number;
+    axis: 'h' | 'v' | null;
+  } | null>(null);
 
   const onPointerDown = (e: React.PointerEvent) => {
     if (e.button !== 0 && e.pointerType === 'mouse') return;
     if (useStore.getState().time.playing) actions.pause();
     viewportRef.current?.setPointerCapture(e.pointerId);
-    gesture.current = { startX: e.clientX, startTime: currentTime, moved: false };
+    gesture.current = { startX: e.clientX, startY: e.clientY, startTime: currentTime, axis: null };
     setDragging(true);
   };
   const onPointerMove = (e: React.PointerEvent) => {
     const g = gesture.current;
     if (!g) return;
     const dx = e.clientX - g.startX;
-    if (Math.abs(dx) > 4) g.moved = true;
+    const dy = e.clientY - g.startY;
+    if (!g.axis && (Math.abs(dx) > 5 || Math.abs(dy) > 5)) {
+      g.axis = Math.abs(dx) >= Math.abs(dy) ? 'h' : 'v';
+    }
     // Dragging the dial left tunes forward in time, like spinning it.
-    if (g.moved) actions.setTime(g.startTime - dx * msPerPx);
+    if (g.axis === 'h') actions.setTime(g.startTime - dx * msPerPx);
   };
   const endGesture = (e: React.PointerEvent) => {
     const g = gesture.current;
@@ -108,7 +121,13 @@ export function Timeline() {
     gesture.current = null;
     setDragging(false);
     viewportRef.current?.releasePointerCapture(e.pointerId);
-    if (!g.moved && viewportRef.current) {
+    if (g.axis === 'v' && !isDesktop) {
+      const dy = e.clientY - g.startY;
+      if (dy < -20) setWxOpen(true);
+      else if (dy > 20) setWxOpen(false);
+      return;
+    }
+    if (!g.axis && viewportRef.current) {
       // A plain tap tunes the dial to the tapped instant.
       const rect = viewportRef.current.getBoundingClientRect();
       const contentX = e.clientX - rect.left - translateX;
@@ -121,7 +140,7 @@ export function Timeline() {
   };
 
   return (
-    <div className="rd-timeline">
+    <div className={`rd-timeline${wxOpen ? ' rd-timeline--wx-open' : ''}`}>
       <button
         type="button"
         className="rd-play-btn"
@@ -146,7 +165,7 @@ export function Timeline() {
         >
           <TimelineTrack />
           <div className="rd-wx-row">
-            <WeatherStrip />
+            {(isDesktop || wxOpen) && <WeatherStrip />}
           </div>
         </div>
         <div className="rd-dial-playhead" aria-hidden="true">

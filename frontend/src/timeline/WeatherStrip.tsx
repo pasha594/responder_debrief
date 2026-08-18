@@ -8,7 +8,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useStore } from '../state/store';
 import { useOriginWeather } from '../api/openMeteo';
-import { useIsDesktop } from '../utils/useMediaQuery';
 import { makeLinearScale } from './timeScale';
 import { buildWeatherSlots } from './weatherStripModel';
 import { formatDateTime, formatDayLabel, tzAbbreviation } from './TimelineTrack';
@@ -21,7 +20,6 @@ export function WeatherStrip() {
   const view = useStore((s) => s.view);
   const domain = useStore((s) => s.time.domain);
   const now = useStore((s) => s.time.now);
-  const isDesktop = useIsDesktop();
 
   const corneaId = view.mode === 'fire' ? view.corneaId : null;
   const { data: fire } = useFire(corneaId);
@@ -50,7 +48,8 @@ export function WeatherStrip() {
     );
   }, [hours, domain, now, width]);
 
-  if (!isDesktop || !corneaId) return null;
+  // Mounted only while its lane is visible (Timeline gates mobile).
+  if (!corneaId) return null;
 
   return (
     <div ref={setEl} className="rd-wx-strip" aria-label="Weather at fire origin">
