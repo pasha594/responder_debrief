@@ -3,7 +3,7 @@ spread flags fed by the archives doc, filename parsing on real names."""
 
 import json
 
-from responder_worker import archives
+from responder_worker import archives, catalogs
 from responder_worker.catalogs import (
     build_catalog,
     build_weather_runs_hrrr,
@@ -282,3 +282,41 @@ class TestIncidentManifestContract:
         assert doc["fire_slug"] == "elk"
         assert doc["ir_flights"][0]["heat_types"] == [
             "Perimeter", "Intense", "Scattered", "Isolated"]
+
+
+class TestRetainDrawableRun:
+    @staticmethod
+    def _weather(runs):
+        return {"models": {"hrrr": {"runs": runs}}}
+
+    @staticmethod
+    def _run(ws, hours):
+        return {"workspace": ws,
+                "frames": {"hours": hours, "complete": bool(hours)}}
+
+    def test_noop_when_a_discovered_run_is_drawable(self):
+        w = self._weather([self._run("hrrr_18", []), self._run("hrrr_17", ["h"])])
+        assert catalogs.retain_drawable_run(w, self._weather([self._run("hrrr_16", ["h"])])) is False
+        assert len(w["models"]["hrrr"]["runs"]) == 2
+
+    def test_carries_newest_drawable_from_previous_manifest(self):
+        w = self._weather([self._run("hrrr_18", []), self._run("hrrr_17", [])])
+        prev = self._weather([self._run("hrrr_17", []), self._run("hrrr_16", ["h"])])
+        assert catalogs.retain_drawable_run(w, prev) is True
+        runs = w["models"]["hrrr"]["runs"]
+        assert [r["workspace"] for r in runs] == ["hrrr_18", "hrrr_17", "hrrr_16"]
+
+    def test_never_duplicates_a_workspace(self):
+        w = self._weather([self._run("hrrr_17", [])])
+        prev = self._weather([self._run("hrrr_17", ["h"])])
+        # same workspace, previous copy drawable — but appending it would
+        # duplicate the id, so nothing is carried
+        assert catalogs.retain_drawable_run(w, prev) is False
+
+    def test_handles_missing_previous_manifest(self):
+        w = self._weather([self._run("hrrr_18", [])])
+        assert catalogs.retain_drawable_run(w, None) is False
+
+    def test_legacy_runs_without_frames_block_count_as_drawable(self):
+        w = self._weather([{"workspace": "hrrr_18"}])
+        assert catalogs.retain_drawable_run(w, self._weather([])) is False

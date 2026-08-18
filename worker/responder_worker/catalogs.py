@@ -146,6 +146,29 @@ def build_weather_runs_hrrr(hrrr_runs: list[dict],
     }
 
 
+def _drawable(run: dict) -> bool:
+    """A run the frontend can draw: rendered frames, or a legacy manifest."""
+    fr = run.get("frames")
+    return fr is None or bool(fr.get("hours"))
+
+
+def retain_drawable_run(weather: dict, previous: dict | None) -> bool:
+    """Carry the newest drawable run forward from the previously published
+    manifest when every discovered cycle is unrendered (GDAL-skipped syncs
+    would otherwise rotate the last drawable run out and blank the weather
+    layers). Returns True when a run was carried."""
+    runs = weather.get("models", {}).get("hrrr", {}).get("runs", [])
+    if any(_drawable(r) for r in runs):
+        return False
+    prev_runs = (previous or {}).get("models", {}).get("hrrr", {}).get("runs", [])
+    have = {r.get("workspace") for r in runs}
+    for r in prev_runs:
+        if _drawable(r) and r.get("workspace") not in have:
+            runs.append(r)
+            return True
+    return False
+
+
 # ---------------------------------------------------------------------------
 # catalog.json (master — uploaded LAST)
 # ---------------------------------------------------------------------------

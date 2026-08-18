@@ -44,14 +44,22 @@ jobs:
         timeout-minutes: 8
         run: |
           # A stalled Ubuntu mirror once hung this step for 30 min and the job
-          # was killed before doing any work. Bound it, retry, and let apt
-          # retry its own fetches.
-          for attempt in 1 2 3; do
-            sudo apt-get update -o Acquire::Retries=3 && break
-            echo "apt-get update failed (attempt $attempt) — retrying"
+          # was killed before doing any work; the azure mirror has since been
+          # flaky enough to skip several consecutive syncs. Bound it, retry,
+          # fall back to the canonical archive, and let apt retry its fetches.
+          for attempt in 1 2 3 4; do
+            if [ "$attempt" = "3" ]; then
+              echo "azure mirror still failing — switching to archive.ubuntu.com"
+              sudo sed -i 's|azure.archive.ubuntu.com|archive.ubuntu.com|g' \
+                /etc/apt/sources.list /etc/apt/sources.list.d/* 2>/dev/null || true
+            fi
+            if sudo apt-get update -o Acquire::Retries=3 \
+               && sudo apt-get install -y --no-install-recommends -o Acquire::Retries=3 gdal-bin python3-gdal; then
+              break
+            fi
+            echo "apt attempt $attempt failed — retrying"
             sleep 5
           done
-          sudo apt-get install -y --no-install-recommends -o Acquire::Retries=3 gdal-bin python3-gdal
 
       - name: Sync catalogs
         env:

@@ -94,6 +94,10 @@ def cmd_sync_catalogs(args) -> int:
         national_layers = frames.sync_national_frame(
             client, storage, national_probe, log=log)
         log(f"[frames] images fetched this sync: {frame_budget - budget_left}")
+        if cat.retain_drawable_run(
+                weather, storage.get_json("catalogs/weather_runs.json")):
+            log("[frames] no cycle rendered this sync — carried the previous "
+                "drawable run forward so weather layers stay live")
 
     spread_index = {
         slug: entry["runs"][0]["run_time"]
