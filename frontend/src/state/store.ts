@@ -41,6 +41,7 @@ export interface AppState {
     weather: Partial<Record<WeatherProduct, WeatherLayerState>>;
     hotspots: { visible: boolean };
     perimeters: { visible: boolean };
+    /** Retired with the directory pivot; kept for nationalPerimetersLayer. */
     nationalPerimeters: { visible: boolean };
     incidentMap: { mapId: string | null; opacity: number };
     irFlight: { flightId: string | null };
