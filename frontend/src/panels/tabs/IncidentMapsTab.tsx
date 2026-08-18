@@ -1,24 +1,23 @@
-/** Incident maps: grouped GeoPDF products, tiled overlays, IR flights. */
-import { useMemo } from 'react';
-import { useIncidentManifest, useMasterCatalog } from '../../api/queries';
+/**
+ * Incident maps: the FTP map wall for one fire, grouped the way an incident
+ * runs — by operational date, newest first, then by product priority inside
+ * the day. Each row's affordance follows the sheet's georeferencing:
+ * overlayable sheets drape on the map, flat sheets open a lightbox.
+ */
+import { useMemo, useState } from 'react';
+import { useFire, useIncidentManifest, useMasterCatalog } from '../../api/queries';
 import { dataUrl } from '../../api/catalogs';
 import type { IncidentMapEntry, IrFlight } from '../../api/types';
 import { useMap } from '../../map/MapRoot';
 import { useStore } from '../../state/store';
 import { formatBytes } from '../../utils/format';
-
-const GROUP_ORDER = ['ops', 'iap', 'brief', 'airops', 'evac', 'trans', 'pio', 'other', 'qr', 'mobile'];
-
-function groupKey(m: IncidentMapEntry): string {
-  if (m.kind === 'qr') return 'qr';
-  if (m.kind === 'mobile') return 'mobile';
-  return m.product;
-}
-
-function groupRank(key: string): number {
-  const i = GROUP_ORDER.indexOf(key);
-  return i >= 0 ? i : GROUP_ORDER.indexOf('other') + 0.5;
-}
+import {
+  friendlyOpDate,
+  groupMapsByDate,
+  localToday,
+  rowAction,
+} from '../../utils/incidentMaps';
+import { MapLightbox } from '../MapLightbox';
 
 function entryTitle(m: IncidentMapEntry): string {
   let t = m.product_label;
@@ -60,14 +59,24 @@ function Thumb({ entry }: { entry: IncidentMapEntry }) {
   );
 }
 
-function MapRow({ entry }: { entry: IncidentMapEntry }) {
+/** The row's own sub-label: period + size, without repeating the date. */
+function rowMeta(entry: IncidentMapEntry): string {
+  const parts: string[] = [];
+  if (entry.period) parts.push(entry.period === 'night' ? 'Night' : 'Day');
+  if (entry.kind === 'qr') parts.push('QR sheet');
+  parts.push(formatBytes(entry.size_bytes));
+  return parts.join(' · ');
+}
+
+function MapRow({ entry, onView }: { entry: IncidentMapEntry; onView: () => void }) {
   const map = useMap();
   const incident = useStore((s) => s.layers.incidentMap);
   const actions = useStore((s) => s.actions);
   const active = incident.mapId === entry.id;
   const pdfHref = dataUrl(entry.pdf_url) + '?v=' + entry.rev;
+  const action = rowAction(entry);
 
-  if (entry.kind === 'mobile') {
+  if (action === 'download') {
     return (
       <a
         className="rd-map-row rd-map-row--download"
@@ -77,7 +86,7 @@ function MapRow({ entry }: { entry: IncidentMapEntry }) {
       >
         <Thumb entry={entry} />
         <div className="rd-map-row-body">
-          <div className="rd-map-row-title">{entryTitle(entry)}</div>
+          <div className="rd-map-row-title">{entry.product_label}</div>
           <div className="rd-map-row-meta">
             Avenza mobile map — {formatBytes(entry.size_bytes)}
           </div>
@@ -90,11 +99,11 @@ function MapRow({ entry }: { entry: IncidentMapEntry }) {
     <div className={`rd-map-row${active ? ' rd-map-row--active' : ''}`}>
       <Thumb entry={entry} />
       <div className="rd-map-row-body">
-        <div className="rd-map-row-title">{entryTitle(entry)}</div>
-        <div className="rd-map-row-meta">{formatBytes(entry.size_bytes)}</div>
+        <div className="rd-map-row-title">{entry.product_label}</div>
+        <div className="rd-map-row-meta">{rowMeta(entry)}</div>
 
-        {entry.tiles ? (
-          <div className="rd-map-row-actions">
+        <div className="rd-map-row-actions">
+          {action === 'overlay' && (
             <button
               type="button"
               className={`rd-toggle-btn${active ? ' rd-toggle-btn--on' : ''}`}
@@ -104,50 +113,67 @@ function MapRow({ entry }: { entry: IncidentMapEntry }) {
               <span className="rd-radio-dot" aria-hidden="true" />
               {active ? 'Shown on map' : 'Show on map'}
             </button>
-            {active && (
-              <>
-                <input
-                  type="range"
-                  className="rd-slider"
-                  min={0}
-                  max={1}
-                  step={0.05}
-                  value={incident.opacity}
-                  onChange={(e) => actions.setIncidentMapOpacity(Number(e.target.value))}
-                  aria-label="Overlay opacity"
-                />
-                <button
-                  type="button"
-                  className="rd-mini-btn"
-                  onClick={() => {
-                    const b = entry.tiles!.bounds;
-                    map?.fitBounds(
-                      [
-                        [b[0], b[1]],
-                        [b[2], b[3]],
-                      ],
-                      { padding: 48, duration: 800 },
-                    );
-                  }}
-                >
-                  Zoom to
-                </button>
-              </>
-            )}
-          </div>
-        ) : entry.tiling_pending ? (
-          <div className="rd-processing">processing…</div>
-        ) : (
-          <div className="rd-map-row-actions">
-            <a
-              className="rd-pdf-pill"
-              href={pdfHref}
-              target="_blank"
-              rel="noopener noreferrer"
+          )}
+
+          {action === 'overlay-soon' && (
+            <button
+              type="button"
+              className="rd-toggle-btn"
+              disabled
+              aria-pressed={false}
+              title="The map overlay for this sheet is still rendering"
             >
-              PDF ↗
-            </a>
-          </div>
+              <span className="rd-radio-dot" aria-hidden="true" />
+              Show on map
+            </button>
+          )}
+
+          {action === 'view' && (
+            <button type="button" className="rd-mini-btn" onClick={onView}>
+              View
+            </button>
+          )}
+
+          {/* The PDF is always reachable — it is the sheet of record, whether
+              or not the row can drape it on the map. */}
+          <a className="rd-pdf-pill" href={pdfHref} target="_blank" rel="noopener noreferrer">
+            PDF ↗
+          </a>
+
+          {action === 'overlay' && active && (
+            <>
+              <input
+                type="range"
+                className="rd-slider"
+                min={0}
+                max={1}
+                step={0.05}
+                value={incident.opacity}
+                onChange={(e) => actions.setIncidentMapOpacity(Number(e.target.value))}
+                aria-label="Overlay opacity"
+              />
+              <button
+                type="button"
+                className="rd-mini-btn"
+                onClick={() => {
+                  const b = entry.tiles!.bounds;
+                  map?.fitBounds(
+                    [
+                      [b[0], b[1]],
+                      [b[2], b[3]],
+                    ],
+                    { padding: 48, duration: 800 },
+                  );
+                }}
+              >
+                Zoom to
+              </button>
+            </>
+          )}
+        </div>
+
+        {action === 'overlay-soon' && (
+          <div className="rd-pending-note">overlay rendering — check back shortly</div>
         )}
       </div>
     </div>
@@ -208,18 +234,15 @@ function IrFlightRow({ flight }: { flight: IrFlight }) {
 
 export function IncidentMapsTab({ corneaId }: { corneaId: string }) {
   const { data: manifest, isLoading } = useManifestForFire(corneaId);
+  const { data: fire } = useFire(corneaId);
+  const [viewing, setViewing] = useState<string | null>(null);
 
-  const groups = useMemo(() => {
-    if (!manifest) return [];
-    const byKey = new Map<string, IncidentMapEntry[]>();
-    for (const m of manifest.maps) {
-      const key = groupKey(m);
-      const list = byKey.get(key);
-      if (list) list.push(m);
-      else byKey.set(key, [m]);
-    }
-    return [...byKey.entries()].sort((a, b) => groupRank(a[0]) - groupRank(b[0]));
-  }, [manifest]);
+  const groups = useMemo(() => groupMapsByDate(manifest?.maps ?? []), [manifest]);
+  // "Today" is the fire's today, not the viewer's.
+  const today = useMemo(() => localToday(fire?.timezone ?? null), [fire]);
+  const viewingEntry = viewing
+    ? manifest?.maps.find((m) => m.id === viewing) ?? null
+    : null;
 
   if (isLoading) return <div className="rd-empty">Loading incident maps…</div>;
   if (!manifest || (manifest.maps.length === 0 && manifest.ir_flights.length === 0)) {
@@ -228,14 +251,22 @@ export function IncidentMapsTab({ corneaId }: { corneaId: string }) {
 
   return (
     <div className="rd-tab-body">
-      {groups.map(([key, entries]) => (
-        <section key={key} className="rd-map-group">
-          <h3 className="rd-section-title">{entries[0].product_label}</h3>
-          {entries.map((m) => (
-            <MapRow key={m.id} entry={m} />
-          ))}
-        </section>
-      ))}
+      {groups.map((group) => {
+        const heading = friendlyOpDate(group.date, today);
+        return (
+          <section key={group.date ?? 'undated'} className="rd-map-group">
+            <h3 className="rd-section-title rd-map-date-head">
+              <span>{heading.primary}</span>
+              {heading.secondary && heading.secondary !== heading.primary && (
+                <span className="rd-map-date-sub">{heading.secondary}</span>
+              )}
+            </h3>
+            {group.entries.map((m) => (
+              <MapRow key={m.id} entry={m} onView={() => setViewing(m.id)} />
+            ))}
+          </section>
+        );
+      })}
 
       {manifest.ir_flights.length > 0 && (
         <section className="rd-map-group">
@@ -244,6 +275,10 @@ export function IncidentMapsTab({ corneaId }: { corneaId: string }) {
             <IrFlightRow key={f.flight_id} flight={f} />
           ))}
         </section>
+      )}
+
+      {viewingEntry && (
+        <MapLightbox entry={viewingEntry} onClose={() => setViewing(null)} />
       )}
     </div>
   );

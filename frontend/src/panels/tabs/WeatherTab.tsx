@@ -11,6 +11,7 @@ import {
 import { useStore } from '../../state/store';
 import { formatDateTime, formatRelative } from '../../utils/format';
 import { GradientLegend } from '../../utils/GradientLegend';
+import { CompassLegend } from '../../utils/CompassLegend';
 
 const STALE_MS = 7 * 3600_000;
 
@@ -65,7 +66,11 @@ function WeatherRow({
       )}
       {legendOpen && (
         <div className="rd-mini-legend">
-          {meta.legend_stops ? (
+          {meta.legend_stops && product === 'wd' ? (
+            // Circular ramp: "0° from → 360° from" reads as a range when it is
+            // really one bearing twice. Label the compass instead.
+            <CompassLegend stops={meta.legend_stops} />
+          ) : meta.legend_stops ? (
             <GradientLegend stops={meta.legend_stops} units={meta.units} />
           ) : (
             <LegendImg src={weatherLegendUrl(product, legendTemplate)} alt={`${label} legend`} />

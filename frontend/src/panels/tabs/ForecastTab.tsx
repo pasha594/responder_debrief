@@ -244,6 +244,10 @@ export function ForecastTab({ corneaId }: { corneaId: string }) {
         </select>
       </div>
 
+      {/* Run/Covers sits with the product it describes — a reader picking a
+          product asks "how old is this?" before touching any of the knobs. */}
+      <RunMeta run={run} timezone={timezone} />
+
       {isToa && <ToaModeSwitch />}
       {wholeMode && <ToaReachSlider horizonHours={run.horizon_hours} />}
 
@@ -287,8 +291,6 @@ export function ForecastTab({ corneaId }: { corneaId: string }) {
           aria-label="Forecast opacity"
         />
       </div>
-
-      <RunMeta run={run} timezone={timezone} />
 
       <div className="rd-legend-card">
         {isToa ? (
