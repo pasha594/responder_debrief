@@ -70,6 +70,15 @@ PRODUCTS: dict[str, dict] = {
         "records": [("MASSDEN", "8 m above ground")],
         "calc": "A*1e9",                            # kg/m³ -> µg/m³
     },
+    "wd": {
+        "label": "Wind direction", "units": "° from",
+        "records": [("UGRD", "10 m above ground"), ("VGRD", "10 m above ground")],
+        # Meteorological convention: the direction the wind blows FROM, so a
+        # "270°" pixel is a westerly. atan2 is (y, x) = (u, v) here, and the
+        # +180 flips "toward" into "from". mod 360 keeps it in range.
+        "calc": "mod(180+arctan2(A,B)*180/pi, 360)",
+        "cyclic": True,
+    },
     "apcp01": {
         "label": "1-h precip", "units": "in",
         "records": [("APCP", "surface")],
@@ -86,9 +95,19 @@ _WIND_RAMP: list[tuple[float, str]] = [
     (0, "#78b4dc"), (10, "#50aa96"), (20, "#ffdc50"), (30, "#ff9628"),
     (45, "#e63c32"), (58, "#aa2882"), (70, "#6e1450"),
 ]
+# Direction is CIRCULAR: 0° and 360° are the same bearing, so the ramp must
+# start and end on the same color or north shows a hard seam. Hues run the
+# compass: N red -> E yellow-green -> S cyan -> W purple -> N red.
+_DIRECTION_RAMP: list[tuple[float, str]] = [
+    (0, "#e6484f"), (45, "#e8a13c"), (90, "#d8d43f"), (135, "#63c04c"),
+    (180, "#3fb9b0"), (225, "#4a8fe0"), (270, "#8a63d2"), (315, "#d059a8"),
+    (360, "#e6484f"),
+]
+
 RAMPS: dict[str, list[tuple[float, str]]] = {
     "ws": _WIND_RAMP,
     "wg": _WIND_RAMP,
+    "wd": _DIRECTION_RAMP,
     "tmpf": [(20, "#78b4dc"), (50, "#50aa96"), (70, "#ffdc50"),
              (85, "#ff9628"), (100, "#e63c32"), (115, "#6e1450")],
     "rh": [(5, "#d4572e"), (15, "#f57c00"), (25, "#ffdc50"),

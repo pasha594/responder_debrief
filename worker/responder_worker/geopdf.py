@@ -147,6 +147,37 @@ def render_preview(pdf_path: Path, out_png: Path, *, dpi: int = 72,
     return out_png
 
 
+def probe_pdf(pdf_path: Path) -> dict:
+    """CHEAP pass: is this sheet georeferenced, and in what projection?
+
+    Only gdalinfo (~1 s) — no rendering, no warping, no tiling. Every mirrored
+    PDF gets this on every run, so the manifest always knows whether a sheet is
+    overlayable, even when the expensive tiling step is deferred. Without it,
+    un-tiled sheets were indistinguishable from non-georeferenced ones and the
+    UI could only say "processing…" for both.
+    """
+    pdf_path = Path(pdf_path)
+    out: dict = {
+        "id": sha16(pdf_path),
+        "georeferenced": False,
+        "projection": None,
+        "pages": 1,
+        "tiles": None,
+    }
+    if not gdal_available():
+        out["error"] = "gdal unavailable"
+        return out
+    try:
+        out["pages"] = page_count(pdf_path)
+        info = gdalinfo_json(pdf_path)
+        if is_georeferenced(info):
+            out["georeferenced"] = True
+            out["projection"] = projection_name(info)
+    except Exception as exc:  # never fatal — degrade to "not georeferenced"
+        out["error"] = f"probe failed: {exc}"
+    return out
+
+
 def process_pdf(pdf_path: Path, tiles_out_dir: Path, *, sheet: str | None = None,
                 zoom_cap: int | None = None) -> dict:
     """Full pipeline for one PDF. Returns a manifest fragment:

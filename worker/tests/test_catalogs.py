@@ -120,7 +120,7 @@ class TestWeatherRunsContract:
         assert hrrr["label"] == "HRRR (NOAA)"
         # v1 products (no wd/ffwi — deferred per spec-hrrr.md)
         assert set(hrrr["products"]) == {
-            "ws", "wg", "tmpf", "rh", "smoke", "apcp01"}
+            "ws", "wg", "tmpf", "rh", "smoke", "wd", "apcp01"}
         for name, p in hrrr["products"].items():
             assert p["label"] and p["units"]
             stops = p["legend_stops"]

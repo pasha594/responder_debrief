@@ -151,14 +151,19 @@ class TestRamps:
 
     def test_manifest_products_shape(self):
         mp = manifest_products()
-        assert set(mp) == {"ws", "wg", "tmpf", "rh", "smoke", "apcp01"}
+        assert set(mp) == {"ws", "wg", "tmpf", "rh", "smoke", "wd", "apcp01"}
         assert mp["ws"]["units"] == "mph"
         assert mp["ws"]["legend_stops"][0] == [0, "#78b4dc"]
         assert mp["ws"]["legend_stops"][-1] == [70, "#6e1450"]
         assert mp["wg"]["legend_stops"] == mp["ws"]["legend_stops"]
         assert mp["apcp01"]["legend_stops"][1] == [0.05, "#627cae"]
         # no wd/ffwi in v1 (deferred per spec)
-        assert "wd" not in mp and "ffwi" not in mp
+        # wd IS rendered (cyclic ramp, added on request); ffwi still is not.
+        assert "ffwi" not in mp
+        wd = mp["wd"]["legend_stops"]
+        # Circular quantity: the ramp must close on itself or north seams.
+        assert wd[0][0] == 0 and wd[-1][0] == 360
+        assert wd[0][1] == wd[-1][1]
 
 
 # ---------------------------------------------------------------------------

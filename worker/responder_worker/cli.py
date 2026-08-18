@@ -311,7 +311,43 @@ def _tile_and_manifest(args, storage, state, fires_by_slug, mirrors) -> None:
             if mf.kind != "mobile" and gdal_ok and mf.local_path is not None:
                 if already_tiled:
                     geo = tiled_state.get("geo", geo)
-                elif tile_budget > 0 and not frames.deadline_passed():
+                elif tile_budget <= 0 or frames.deadline_passed():
+                    # Out of tiling budget, but detection is cheap: record
+                    # whether this sheet is EVEN overlayable plus a preview, so
+                    # the UI can offer a lightbox for flat sheets instead of an
+                    # indefinite "processing…".
+                    probe = geopdf.probe_pdf(mf.local_path)
+                    geo = {
+                        "georeferenced": probe["georeferenced"],
+                        "projection": probe.get("projection"),
+                        "tiles": None,
+                        "preview": False,
+                    }
+                    if probe.get("error"):
+                        geo["error"] = probe["error"]
+                    try:
+                        with tempfile.TemporaryDirectory() as td:
+                            preview = Path(td) / "preview.png"
+                            geopdf.render_preview(mf.local_path, preview)
+                            storage.put_file(
+                                f"previews/incidents/{fire_slug}/{sha_id}.png", preview)
+                            geo["preview"] = True
+                    except Exception as exc:
+                        log(f"[geopdf] preview failed for {mf.filename}: {exc}")
+                    # Only georeferenced sheets have tiling still owed.
+                    pending = probe["georeferenced"]
+                    if pending:
+                        tiles_deferred += 1
+                    state["tiled"][sha_id] = {
+                        # A flat sheet is DONE — nothing to tile, so don't let
+                        # it consume tiling budget on every future run. A
+                        # georeferenced one keeps tiler_version None so the
+                        # next run picks it up.
+                        "tiler_version": None if probe["georeferenced"] else config.TILER_VERSION,
+                        "at": state_mod.now_iso(),
+                        "geo": geo,
+                    }
+                else:
                     log(f"[geopdf] processing {mf.filename} ...")
                     with tempfile.TemporaryDirectory() as td:
                         tiles_dir = Path(td) / "tiles"
@@ -348,9 +384,6 @@ def _tile_and_manifest(args, storage, state, fires_by_slug, mirrors) -> None:
                         "at": state_mod.now_iso(),
                         "geo": geo,
                     }
-                else:
-                    pending = True
-                    tiles_deferred += 1
             elif already_tiled:
                 geo = tiled_state.get("geo", geo)
 
