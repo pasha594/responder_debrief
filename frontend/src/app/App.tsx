@@ -3,13 +3,14 @@
  *   ''            → the fire directory (no map is mounted)
  *   '#/fire/{id}' → the full-screen map shell, scoped to that one fire
  */
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { MapRoot } from '../map/MapRoot';
 import { useMapLayerSync } from '../map/useMapLayerSync';
 import { useStore } from '../state/store';
 import { Sidebar } from '../panels/Sidebar';
 import { BackControl } from '../panels/BackControl';
 import { BasemapControl } from '../panels/BasemapControl';
+import { HealthView } from '../panels/HealthView';
 import { Timeline } from '../timeline/Timeline';
 import { LegendBar } from '../panels/LegendBar';
 import { ErrorBoundary } from '../utils/ErrorBoundary';
@@ -63,6 +64,7 @@ function HashSync() {
     if (!hydrated.current) {
       hydrated.current = true;
       if (parseHash()) return; // a deep link is being applied — do not clobber it
+      if (window.location.hash === '#/health') return; // health page owns the hash
     }
     const want = view.mode === 'fire' ? `#/fire/${encodeURIComponent(view.corneaId)}` : '';
     const cur = window.location.hash;
@@ -116,8 +118,27 @@ function FireMapView() {
   );
 }
 
+/** Raw location.hash, live — for routes outside store.view (#/health). */
+function useHash(): string {
+  const [hash, setHash] = useState(window.location.hash);
+  useEffect(() => {
+    const onChange = () => setHash(window.location.hash);
+    window.addEventListener('hashchange', onChange);
+    return () => window.removeEventListener('hashchange', onChange);
+  }, []);
+  return hash;
+}
+
 export function App() {
   const mode = useStore((s) => s.view.mode);
+  const hash = useHash();
+  if (hash === '#/health') {
+    return (
+      <div className="rd-app">
+        <HealthView />
+      </div>
+    );
+  }
   return (
     <div className="rd-app">
       <HashSync />

@@ -9,6 +9,7 @@ import {
   type HotspotQuery,
 } from './fireApi';
 import {
+  fetchHealth,
   fetchImsr,
   fetchIncidentManifest,
   fetchMasterCatalog,
@@ -66,6 +67,15 @@ export const useMasterCatalog = () =>
     queryKey: ['catalog'],
     queryFn: fetchMasterCatalog,
     staleTime: 300_000,
+    retry: 1,
+  });
+
+/** Ingestion heartbeat (may 404 until the first post-deploy worker run). */
+export const useHealth = () =>
+  useQuery({
+    queryKey: ['health'],
+    queryFn: fetchHealth,
+    staleTime: 60_000,
     retry: 1,
   });
 

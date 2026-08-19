@@ -1,6 +1,7 @@
 /** Fetchers for worker-produced catalogs on B2 (or /data in dev). */
 import { DATA_BASE_URL } from '../app/config';
 import type {
+  HealthDoc,
   IncidentManifest,
   ImsrCatalog,
   MasterCatalog,
@@ -16,6 +17,7 @@ async function getJson<T>(path: string): Promise<T> {
 
 export const fetchMasterCatalog = () => getJson<MasterCatalog>('/catalogs/catalog.json');
 export const fetchImsr = () => getJson<ImsrCatalog>('/catalogs/imsr.json');
+export const fetchHealth = () => getJson<HealthDoc>('/catalogs/health.json');
 export const fetchPyrecastRuns = () => getJson<PyrecastRunsCatalog>('/catalogs/pyrecast_runs.json');
 export const fetchWeatherRuns = () => getJson<WeatherRunsCatalog>('/catalogs/weather_runs.json');
 

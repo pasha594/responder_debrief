@@ -41,7 +41,7 @@ jobs:
       # catalogs — the next hourly run picks the weather back up.
       - name: Install GDAL
         continue-on-error: true
-        timeout-minutes: 8
+        timeout-minutes: 9
         run: |
           # A stalled Ubuntu mirror once hung this step for 30 min and the job
           # was killed before doing any work; the azure mirror has since been

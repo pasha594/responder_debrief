@@ -40,7 +40,10 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install GDAL CLI tools
-        timeout-minutes: 6
+        # Mirroring works without GDAL (probing/tiling defer to the next
+        # GDAL-equipped run) — a slow apt mirror must not kill the whole job.
+        continue-on-error: true
+        timeout-minutes: 9
         run: |
           # A stalled Ubuntu mirror once hung this step for 30 min and the job
           # was killed before doing any work; the azure mirror has since been

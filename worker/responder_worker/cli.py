@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import shutil
 import sys
 import tempfile
 from collections import Counter
@@ -17,7 +18,7 @@ from pathlib import Path
 
 import httpx
 
-from . import archives, catalogs as cat, imsr
+from . import archives, catalogs as cat, health, imsr
 from . import config, frames, geopdf, hrrr, ir_vectors, pyrecast, state as state_mod
 from .b2 import make_storage
 from .fires import fetch_active_fires
@@ -44,6 +45,7 @@ def log(msg: str) -> None:
 # ===========================================================================
 
 def cmd_sync_catalogs(args) -> int:
+    job_started = cat.now_iso()
     storage = make_storage(args.dry_run, args.out)
     state = state_mod.load_state(storage)
 
@@ -95,8 +97,9 @@ def cmd_sync_catalogs(args) -> int:
             client, storage, national_probe, log=log)
         imsr_catalog = imsr.build_imsr_catalog(client, fires, log=log)
         log(f"[frames] images fetched this sync: {frame_budget - budget_left}")
-        if cat.retain_drawable_run(
-                weather, storage.get_json("catalogs/weather_runs.json")):
+        carried_forward = cat.retain_drawable_run(
+            weather, storage.get_json("catalogs/weather_runs.json"))
+        if carried_forward:
             log("[frames] no cycle rendered this sync — carried the previous "
                 "drawable run forward so weather layers stay live")
 
@@ -160,6 +163,36 @@ def cmd_sync_catalogs(args) -> int:
     state_mod.save_state(storage, state)
 
     weather_runs = weather["models"]["hrrr"]["runs"]
+    gdal_ok = all(shutil.which(t) for t in ("gdalwarp", "gdaldem", "gdal_translate"))
+    health.publish(storage, "catalogs", {
+        "started_at": job_started,
+        "finished_at": cat.now_iso(),
+        "ok": True,
+        "note": None if gdal_ok else "GDAL unavailable — weather frames skipped",
+        "catalog_version": version,
+        "fires": catalog["counts"]["active_fires"],
+        "matched_incident_dirs": catalog["counts"]["matched_incident_dirs"],
+        "spread_fires": catalog["counts"]["spread_forecast_fires"],
+        "weather": {
+            "gdal_available": gdal_ok,
+            "images_fetched": frame_budget - budget_left,
+            "carried_forward": carried_forward,
+            "deadline_hit": frames.deadline_passed(),
+            "runs": [
+                {
+                    "workspace": r["workspace"],
+                    "rendered": len((r.get("frames") or {}).get("hours", [])),
+                    "expected": len(r.get("hours") or []),
+                }
+                for r in weather_runs
+            ],
+        },
+        "imsr": {
+            "published": bool(imsr_catalog),
+            "matched_fires": len((imsr_catalog or {}).get("fires", {})),
+        },
+    }, log=log)
+
     log(
         "[catalogs] done: "
         f"fires={catalog['counts']['active_fires']} "
@@ -581,6 +614,7 @@ def _probe_backlog(storage, state, log, *, cap: int = 15) -> set[str]:
 
 
 def cmd_sync_incidents(args) -> int:
+    job_started = cat.now_iso()
     storage = make_storage(args.dry_run, args.out)
     state = state_mod.load_state(storage)
     overrides = config.load_match_overrides()
@@ -604,6 +638,8 @@ def cmd_sync_incidents(args) -> int:
         cands = _collect_candidates(client, args, fires)
         priority = [x for x in (args.priority_fires or "").split(",") if x.strip()]
         cands = _rank_candidates(cands, fires, priority)
+        unchanged_skips = 0
+        failed_incidents: list[str] = []
         log(f"[incidents] candidate incident dirs: {len(cands)}"
             + (f" (priority: {', '.join(priority)})" if priority else "")
             + " — ordered priority, then acreage desc")
@@ -628,6 +664,7 @@ def cmd_sync_incidents(args) -> int:
             if (prev and not args.force and prev.get("dir_mtime") == cand.dir_mtime
                     and prev.get("match")):
                 log(f"[incidents] {cand.key}: unchanged since last sync — skipping")
+                unchanged_skips += 1
                 continue
 
             cand.unit_tokens = _gather_unit_tokens(client, cand)
@@ -666,6 +703,7 @@ def cmd_sync_incidents(args) -> int:
                 # the run — its checkpoint state is intact, next run resumes.
                 log(f"[incidents] {cand.key}: FAILED mid-mirror ({exc}) — "
                     "skipping; will resume next run")
+                failed_incidents.append(cand.key)
                 continue
             state["incidents"][cand.key]["dir_url"] = cand.dir_url
             log(f"[incidents] {cand.key}: listings={res.listings} "
@@ -720,6 +758,25 @@ def cmd_sync_incidents(args) -> int:
 
         log(f"[incidents] done: candidates={len(cands)} matched={matched} "
             f"mirrored_incidents={len(mirrors)} catalog_version={version}")
+
+        downloads = sum(m["result"].downloads for m in mirrors.values())
+        dl_bytes = sum(m["result"].bytes_downloaded for m in mirrors.values())
+        health.publish(storage, "mirror", {
+            "started_at": job_started,
+            "finished_at": cat.now_iso(),
+            "ok": True,
+            "note": (f"{len(failed_incidents)} incident(s) skipped on FTP errors"
+                     if failed_incidents else None),
+            "catalog_version": version,
+            "candidates": len(cands),
+            "unchanged_skips": unchanged_skips,
+            "mirrored_incidents": len(mirrors),
+            "files_downloaded": downloads,
+            "bytes_downloaded": dl_bytes,
+            "failed_incidents": failed_incidents,
+            "deadline_hit": frames.deadline_passed(),
+            "gdal_available": geopdf.gdal_available(),
+        }, log=log)
     return 0
 
 

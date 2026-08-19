@@ -128,6 +128,9 @@ export function DirectoryView() {
       <header className="rd-dir-header">
         <div className="rd-dir-brand">
           <h1 className="rd-dir-wordmark">Responder Debrief</h1>
+          <a href="#/health" className="rd-dir-health-link" title="Ingestion health">
+            Health
+          </a>
           <div className="rd-dir-subtitle">{subtitle}</div>
         </div>
         <ThemeToggle />

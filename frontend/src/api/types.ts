@@ -410,3 +410,55 @@ export interface ImsrCatalog {
   source_url: string;
   fires: Record<string, ImsrEntry>;
 }
+
+
+// ---------- catalogs/health.json (ingestion heartbeat) ----------
+
+export interface HealthWeatherRun {
+  workspace: string;
+  rendered: number;
+  expected: number;
+}
+
+export interface HealthCatalogsEntry {
+  started_at: string;
+  finished_at: string;
+  ok: boolean;
+  note: string | null;
+  catalog_version: number;
+  fires: number;
+  matched_incident_dirs: number;
+  spread_fires: number;
+  weather: {
+    gdal_available: boolean;
+    images_fetched: number;
+    carried_forward: boolean;
+    deadline_hit: boolean;
+    runs: HealthWeatherRun[];
+  };
+  imsr: { published: boolean; matched_fires: number };
+}
+
+export interface HealthMirrorEntry {
+  started_at: string;
+  finished_at: string;
+  ok: boolean;
+  note: string | null;
+  catalog_version: number;
+  candidates: number;
+  unchanged_skips: number;
+  mirrored_incidents: number;
+  files_downloaded: number;
+  bytes_downloaded: number;
+  failed_incidents: string[];
+  deadline_hit: boolean;
+  gdal_available: boolean;
+}
+
+export interface HealthDoc {
+  schema_version: number;
+  updated_at: string;
+  catalogs?: HealthCatalogsEntry;
+  mirror?: HealthMirrorEntry;
+  history?: { job: string; at: string; ok: boolean; note: string | null }[];
+}
