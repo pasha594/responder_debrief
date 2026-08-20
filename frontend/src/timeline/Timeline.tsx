@@ -168,14 +168,10 @@ export function Timeline() {
       setWxOpen(reveal > 0.5);
       setWxDrag(null);
       setRootLaneVars(null);
-      return;
     }
-    if (!g.axis && viewportRef.current) {
-      // A plain tap tunes the dial to the tapped instant.
-      const rect = viewportRef.current.getBoundingClientRect();
-      const contentX = e.clientX - rect.left - translateX;
-      actions.setTime(scale.xToTime(contentX));
-    }
+    // A plain tap does NOT seek — the dial moves only by drag or wheel
+    // (tap-to-jump was too easy to trigger by accident). The perimeter
+    // diamonds and map pins keep their explicit click-to-snap.
   };
 
   // Live reveal fraction: follows the finger mid-drag, snaps with wxOpen.
