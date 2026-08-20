@@ -93,10 +93,13 @@ function rowMeta(entry: IncidentMapEntry, timezone: string | null): string {
 function MapRow({
   entry,
   timezone,
+  seriesCount,
   onView,
 }: {
   entry: IncidentMapEntry;
   timezone: string | null;
+  /** Overlayable versions sharing this sheet's name (timeline pins). */
+  seriesCount: number;
   onView: () => void;
 }) {
   const map = useMap();
@@ -152,10 +155,10 @@ function MapRow({
               type="button"
               className={`rd-toggle-btn${onTimeline ? ' rd-toggle-btn--on' : ''}`}
               aria-pressed={onTimeline}
-              title="Pin every version of this map to the timeline — scrubbing swaps the overlay"
+              title={`Pin ${seriesCount} version${seriesCount === 1 ? '' : 's'} of this map to the timeline — scrubbing swaps the overlay`}
               onClick={() => actions.setIncidentMapSeries(onTimeline ? null : key)}
             >
-              ⧗ Timeline
+              ⧗ Timeline · {seriesCount}
             </button>
           )}
 
@@ -296,6 +299,16 @@ export function IncidentMapsTab({ corneaId }: { corneaId: string }) {
   const [viewing, setViewing] = useState<string | null>(null);
 
   const groups = useMemo(() => groupMapsByDate(manifest?.maps ?? []), [manifest]);
+  // Tiled-version count per series — shown in the Timeline pill.
+  const seriesCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const m of manifest?.maps ?? []) {
+      if (!m.tiles) continue;
+      const k = seriesKey(m);
+      counts.set(k, (counts.get(k) ?? 0) + 1);
+    }
+    return counts;
+  }, [manifest]);
   // "Today" is the fire's today, not the viewer's.
   const today = useMemo(() => localToday(fire?.timezone ?? null), [fire]);
   const viewingEntry = viewing
@@ -324,6 +337,7 @@ export function IncidentMapsTab({ corneaId }: { corneaId: string }) {
                 key={m.id}
                 entry={m}
                 timezone={fire?.timezone ?? null}
+                seriesCount={seriesCounts.get(seriesKey(m)) ?? 0}
                 onView={() => setViewing(m.id)}
               />
             ))}
