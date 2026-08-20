@@ -4,7 +4,6 @@
  * the single-fire map shell.
  */
 import { useEffect, useLayoutEffect, useMemo, useRef } from 'react';
-import { HREF_HEALTH } from '../app/router';
 import { useFires, useMasterCatalog } from '../api/queries';
 import { useStore } from '../state/store';
 import { useIsDesktop } from '../utils/useMediaQuery';
@@ -60,22 +59,6 @@ function SkeletonRows({ desktop }: { desktop: boolean }) {
   );
 }
 
-function ThemeToggle() {
-  const theme = useStore((s) => s.ui.theme);
-  const setTheme = useStore((s) => s.actions.setTheme);
-  const next = theme === 'dark' ? 'light' : 'dark';
-  return (
-    <button
-      type="button"
-      className="rd-mini-btn rd-dir-theme"
-      onClick={() => setTheme(next)}
-      aria-label={`Switch to ${next} theme`}
-      title={`Switch to ${next} theme`}
-    >
-      {theme === 'dark' ? '☀ Light' : '☾ Dark'}
-    </button>
-  );
-}
 
 export function DirectoryView() {
   const fires = useFires();
@@ -129,12 +112,8 @@ export function DirectoryView() {
       <header className="rd-dir-header">
         <div className="rd-dir-brand">
           <h1 className="rd-dir-wordmark">Responder Brief</h1>
-          <a href={HREF_HEALTH} className="rd-dir-health-link" title="Ingestion health">
-            Health
-          </a>
           <div className="rd-dir-subtitle">{subtitle}</div>
         </div>
-        <ThemeToggle />
       </header>
 
       <div className="rd-dir-toolbar">

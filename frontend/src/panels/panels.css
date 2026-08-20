@@ -1101,6 +1101,11 @@
 /* the sheet has no collapse chevron — reclaim its left gutter */
 .rd-sheet .rd-fp-header {
   padding-left: 16px;
+  /* the whole header is a drag surface for the sheet (see MobileSheet) */
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  cursor: grab;
 }
 .rd-sheet .rd-tabbar {
   margin-left: -16px;

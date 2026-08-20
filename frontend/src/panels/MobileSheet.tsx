@@ -33,6 +33,10 @@ export function MobileSheet({ children }: { children: ReactNode }) {
 
   const onPointerDown = (e: PointerEvent<HTMLDivElement>) => {
     if (!sheetRef.current) return;
+    // The whole tray header drags, not just the grabber tip — but content
+    // below it (tabs, checkboxes, sliders) must keep normal touch behavior.
+    const target = e.target as HTMLElement;
+    if (!target.closest('.rd-sheet-handle, .rd-fp-header')) return;
     drag.current = { startY: e.clientY, startH: sheetRef.current.offsetHeight };
     e.currentTarget.setPointerCapture(e.pointerId);
   };
@@ -67,16 +71,16 @@ export function MobileSheet({ children }: { children: ReactNode }) {
       ref={sheetRef}
       className={`rd-sheet ${SNAP_CLASS[snap]}${dragH != null ? ' rd-sheet--dragging' : ''}`}
       style={dragH != null ? { height: `${dragH}px` } : undefined}
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={onPointerUp}
+      onPointerCancel={onPointerUp}
     >
       <div
         className="rd-sheet-handle"
         role="slider"
         aria-label="Resize panel"
         aria-valuenow={snap === 'peek' ? 0 : snap === 'half' ? 50 : 100}
-        onPointerDown={onPointerDown}
-        onPointerMove={onPointerMove}
-        onPointerUp={onPointerUp}
-        onPointerCancel={onPointerUp}
       >
         <span className="rd-sheet-handle-bar" aria-hidden="true" />
       </div>

@@ -233,10 +233,17 @@ export const useStore = create<AppState>((set, get) => ({
       set((s) => ({
         view: { mode: 'fire', corneaId },
         ui: { ...s.ui, sidebarTab: 'overview', sheetSnap: 'half' },
+        // Per-fire view state starts clean on every fire switch (user
+        // feedback: carrying layer picks between fires was confusing). A
+        // shared URL's params re-apply AFTER this reset, so deep links keep
+        // working; the basemap persists — it's a viewing preference.
+        time: { ...s.time, currentTime: s.time.now, playing: false },
         layers: {
           ...s.layers,
-          // Off by default per feedback: the Show-on-map checkbox (or picking
-          // a product, which implies intent) turns it on.
+          spread: { ...s.layers.spread, visible: false },
+          weather: {},
+          hotspots: { visible: true },
+          perimeters: { visible: true },
           incidentMap: { mapId: null, series: null, opacity: s.layers.incidentMap.opacity },
           irFlight: { flightId: null },
         },
