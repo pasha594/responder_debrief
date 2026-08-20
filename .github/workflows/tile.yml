@@ -1,0 +1,74 @@
+name: Tile worker
+
+# Stateless parallel tiling: each shard tiles its slice of the pending-sheet
+# backlog straight from B2 and uploads tile trees + meta.json completion
+# markers. It never writes state or catalogs, so it needs NO slot in the
+# worker-b2-writes group — the serialized mirror runs adopt finished markers
+# into state and manifests. Hourly x 4 shards ≈ same-hour rendering of
+# everything the FTP produces.
+on:
+  schedule:
+    - cron: "13 * * * *"
+  workflow_dispatch:
+    inputs:
+      shards:
+        description: "Number of shards (must match the matrix to cover all)"
+        required: false
+        default: "4"
+
+concurrency:
+  # Per-shard group: an hourly run never piles onto a still-running self.
+  group: tile-worker-${{ github.event_name }}
+  cancel-in-progress: false
+
+jobs:
+  tile:
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3]
+    defaults:
+      run:
+        working-directory: worker
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install GDAL CLI tools
+        continue-on-error: true
+        timeout-minutes: 9
+        run: |
+          for attempt in 1 2 3 4; do
+            if [ "$attempt" = "3" ]; then
+              echo "azure mirror still failing — switching to archive.ubuntu.com"
+              sudo sed -i 's|azure.archive.ubuntu.com|archive.ubuntu.com|g' \
+                /etc/apt/sources.list /etc/apt/sources.list.d/* 2>/dev/null || true
+            fi
+            if sudo apt-get update -o Acquire::Retries=3 \
+               && sudo apt-get install -y --no-install-recommends -o Acquire::Retries=3 gdal-bin python3-gdal; then
+              break
+            fi
+            echo "apt attempt $attempt failed — retrying"
+            sleep 5
+          done
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+          enable-cache: true
+          cache-dependency-glob: "worker/uv.lock"
+
+      - name: Install dependencies
+        run: uv sync
+
+      - name: Tile shard
+        env:
+          B2_KEY_ID: ${{ secrets.B2_KEY_ID }}
+          B2_APP_KEY: ${{ secrets.B2_APP_KEY }}
+          B2_BUCKET: responder-debrief-data
+          B2_S3_ENDPOINT: ${{ vars.B2_S3_ENDPOINT }}
+          TILEW_MAX_SECONDS: ${{ vars.TILEW_MAX_SECONDS || '2700' }}
+        run: |
+          uv run python -m responder_worker.cli tile-worker \
+            --shard ${{ matrix.shard }} --shards 4

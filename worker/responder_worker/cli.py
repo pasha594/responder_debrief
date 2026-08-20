@@ -566,6 +566,89 @@ def _ir_flights(args, storage, fire, ir_by_flight: dict[str, dict]) -> list[dict
     return out
 
 
+def tile_meta_key(fire_slug: str, sha: str) -> str:
+    """Completion marker a stateless tile worker writes LAST: its existence
+    means the full tile tree for this sheet is on the bucket."""
+    return f"tiles/incidents/{fire_slug}/{sha}/meta.json"
+
+
+def _sha_in_shard(sha: str, shard: int, shards: int) -> bool:
+    try:
+        return int(sha[:8], 16) % shards == shard
+    except ValueError:
+        return shard == 0
+
+
+def _pending_sheets(state) -> list[tuple[str, str, str]]:
+    """(sha, fire_slug, rel) for every probed-georeferenced sheet still owed
+    tiles, deduped by sha (the same sheet can appear in several folders)."""
+    out: list[tuple[str, str, str]] = []
+    seen: set[str] = set()
+    for inc in state.get("incidents", {}).values():
+        fire_slug = inc.get("fire_slug")
+        if not fire_slug:
+            continue
+        for rel, meta in (inc.get("files") or {}).items():
+            sha = meta.get("sha16")
+            if not sha or sha in seen:
+                continue
+            rec = state["tiled"].get(sha)
+            if (not rec or rec.get("tiler_version") is not None
+                    or not (rec.get("geo") or {}).get("georeferenced")):
+                continue
+            seen.add(sha)
+            out.append((sha, fire_slug, rel))
+    return out
+
+
+def cmd_tile_worker(args) -> int:
+    """Stateless parallel tiler (tile.yml matrix): tiles pending sheets from
+    OUR bucket and uploads tree + meta.json. Never writes state or catalogs —
+    the serialized mirror run adopts finished markers — so any number of
+    shards run concurrently with everything else."""
+    storage = make_storage(args.dry_run, args.out)
+    state = state_mod.load_state(storage)  # read-only snapshot
+    frames.start_deadline(args.max_seconds)
+    if not geopdf.gdal_available():
+        log("[tilew] GDAL unavailable — nothing to do this run")
+        return 0
+
+    todo = [t for t in _pending_sheets(state)
+            if _sha_in_shard(t[0], args.shard, args.shards)]
+    log(f"[tilew] shard {args.shard}/{args.shards}: {len(todo)} pending sheet(s)")
+    done = 0
+    for sha, fire_slug, rel in todo:
+        if frames.deadline_passed():
+            log("[tilew] deadline — remaining sheets next run")
+            break
+        if storage.get_json(tile_meta_key(fire_slug, sha)):
+            continue  # another worker already finished this one
+        key = f"raw/incidents/{fire_slug}/{rel}"
+        parsed = cat.parse_product_filename(rel.rpartition("/")[2])
+        with tempfile.TemporaryDirectory(prefix="tilew_") as td:
+            local = Path(td) / "sheet.pdf"
+            if not storage.get_file(key, local):
+                continue
+            tiles_dir = Path(td) / "tiles"
+            r = geopdf.process_pdf(local, tiles_dir,
+                                   sheet=parsed.get("sheet"),
+                                   zoom_cap=args.zoom_cap)
+            if not r["tiles"]:
+                log(f"[tilew] {rel}: not tileable ({r.get('error')})")
+                continue
+            n = storage.put_tree(f"tiles/incidents/{fire_slug}/{sha}", tiles_dir)
+            storage.put_json(tile_meta_key(fire_slug, sha), {
+                "tiler_version": config.TILER_VERSION,
+                "georeferenced": True,
+                "projection": r["projection"],
+                "tiles": r["tiles"],
+            })
+            log(f"[tilew] {rel}: {n} tiles z{r['tiles']['minzoom']}-{r['tiles']['maxzoom']}")
+            done += 1
+    log(f"[tilew] shard {args.shard}/{args.shards}: tiled {done}")
+    return 0
+
+
 def _tile_backlog(storage, state, log, *, cap: int = 12,
                   zoom_cap: int | None = None) -> set[str]:
     """Tile sheets that were probed georeferenced but never got tiles.
@@ -593,6 +676,22 @@ def _tile_backlog(storage, state, log, *, cap: int = 12,
             if (not rec or rec.get("tiler_version") is not None
                     or not (rec.get("geo") or {}).get("georeferenced")):
                 continue
+            # A stateless tile worker may already have finished this sheet —
+            # adopt its marker (cheap) instead of re-tiling.
+            marker = storage.get_json(tile_meta_key(fire_slug, sha))
+            if marker and marker.get("tiles"):
+                geo = dict(rec.get("geo") or {})
+                geo["georeferenced"] = True
+                geo["projection"] = marker.get("projection")
+                geo["tiles"] = marker["tiles"]
+                state["tiled"][sha] = {
+                    "tiler_version": marker.get("tiler_version",
+                                                config.TILER_VERSION),
+                    "at": state_mod.now_iso(),
+                    "geo": geo,
+                }
+                touched.add(inc_key)
+                continue
             key = f"raw/incidents/{fire_slug}/{rel}"
             parsed = cat.parse_product_filename(rel.rpartition("/")[2])
             with tempfile.TemporaryDirectory(prefix="tilebk_") as td:
@@ -613,6 +712,12 @@ def _tile_backlog(storage, state, log, *, cap: int = 12,
                 if r["tiles"]:
                     n = storage.put_tree(
                         f"tiles/incidents/{fire_slug}/{sha}", tiles_dir)
+                    storage.put_json(tile_meta_key(fire_slug, sha), {
+                        "tiler_version": config.TILER_VERSION,
+                        "georeferenced": True,
+                        "projection": r["projection"],
+                        "tiles": r["tiles"],
+                    })
                     log(f"[geopdf] backlog {rel}: {n} tiles "
                         f"z{r['tiles']['minzoom']}-{r['tiles']['maxzoom']}")
                 state["tiled"][sha] = {
@@ -998,6 +1103,16 @@ def build_parser() -> argparse.ArgumentParser:
     sp = sub.add_parser("sync-incidents", help="FTP crawl + match + mirror + GeoPDF")
     incidents_args(sp)
     sp.set_defaults(func=cmd_sync_incidents)
+
+    sp = sub.add_parser("tile-worker",
+                        help="stateless parallel tiler (writes tiles + marker only)")
+    common(sp)
+    sp.add_argument("--shard", type=int, default=0)
+    sp.add_argument("--shards", type=int, default=1)
+    sp.add_argument("--max-seconds", type=int,
+                    default=int(os.environ.get("TILEW_MAX_SECONDS", "2900")))
+    sp.add_argument("--zoom-cap", type=int, default=None)
+    sp.set_defaults(func=cmd_tile_worker)
 
     sp = sub.add_parser("backfill", help="sync-incidents for one fire with --since")
     incidents_args(sp)
