@@ -460,8 +460,16 @@ def _tile_and_manifest(args, storage, state, fires_by_slug, mirrors) -> None:
                         "at": state_mod.now_iso(),
                         "geo": geo,
                     }
-            elif already_tiled:
+            elif tiled_state:
+                # Replayed file (local_path None): reuse whatever the state
+                # knows. tiler_version None = probed-georeferenced, tiles
+                # still owed — keep it PENDING so the tile backlog (and the
+                # UI) don't silently demote it to a flat sheet.
                 geo = tiled_state.get("geo", geo)
+                pending = (
+                    tiled_state.get("tiler_version") is None
+                    and bool(geo.get("georeferenced"))
+                )
 
             maps.append(cat.map_entry(
                 parsed=parsed, kind=mf.kind, sha_id=sha_id, fire_slug=fire_slug,
@@ -558,6 +566,67 @@ def _ir_flights(args, storage, fire, ir_by_flight: dict[str, dict]) -> list[dict
     return out
 
 
+def _tile_backlog(storage, state, log, *, cap: int = 12,
+                  zoom_cap: int | None = None) -> set[str]:
+    """Tile sheets that were probed georeferenced but never got tiles.
+
+    The mirror loop only tiles freshly-downloaded files; a sheet deferred by
+    the budget is replayed on later runs WITHOUT a local file, so low-priority
+    products (pio, transport) could stay "overlay rendering" forever. Their
+    bytes are in our bucket: download up to `cap` per run, tile, upload, and
+    return the incident keys whose manifests need a rebuild."""
+    if not geopdf.gdal_available():
+        return set()
+    touched: set[str] = set()
+    tiled = 0
+    for inc_key, inc in state.get("incidents", {}).items():
+        if tiled >= cap or frames.deadline_passed():
+            break
+        fire_slug = inc.get("fire_slug")
+        if not fire_slug:
+            continue
+        for rel, meta in (inc.get("files") or {}).items():
+            if tiled >= cap or frames.deadline_passed():
+                break
+            sha = meta.get("sha16")
+            rec = state["tiled"].get(sha) if sha else None
+            if (not rec or rec.get("tiler_version") is not None
+                    or not (rec.get("geo") or {}).get("georeferenced")):
+                continue
+            key = f"raw/incidents/{fire_slug}/{rel}"
+            parsed = cat.parse_product_filename(rel.rpartition("/")[2])
+            with tempfile.TemporaryDirectory(prefix="tilebk_") as td:
+                local = Path(td) / "sheet.pdf"
+                if not storage.get_file(key, local):
+                    continue
+                log(f"[geopdf] backlog tiling {rel} ...")
+                tiles_dir = Path(td) / "tiles"
+                r = geopdf.process_pdf(local, tiles_dir,
+                                       sheet=parsed.get("sheet"),
+                                       zoom_cap=zoom_cap)
+                geo = dict(rec.get("geo") or {})
+                geo["georeferenced"] = r["georeferenced"]
+                geo["projection"] = r["projection"]
+                geo["tiles"] = r["tiles"]
+                if r.get("error"):
+                    geo["error"] = r["error"]
+                if r["tiles"]:
+                    n = storage.put_tree(
+                        f"tiles/incidents/{fire_slug}/{sha}", tiles_dir)
+                    log(f"[geopdf] backlog {rel}: {n} tiles "
+                        f"z{r['tiles']['minzoom']}-{r['tiles']['maxzoom']}")
+                state["tiled"][sha] = {
+                    "tiler_version": config.TILER_VERSION,
+                    "at": state_mod.now_iso(),
+                    "geo": geo,
+                }
+                tiled += 1
+                touched.add(inc_key)
+    if tiled:
+        log(f"[geopdf] tile backlog: {tiled} sheet(s) this run")
+    return touched
+
+
 def _probe_backlog(storage, state, log, *, cap: int = 15) -> set[str]:
     """Classify already-mirrored PDFs that predate georeference detection.
 
@@ -638,7 +707,10 @@ def cmd_sync_incidents(args) -> int:
         # manifests already reflect the corrections.
         frames.start_deadline(int(os.environ.get(
             "MIRROR_MAX_SECONDS", str(config.MIRROR_MAX_SECONDS_DEFAULT))))
-        for inc_key in _probe_backlog(storage, state, log):
+        backlog_touched = _probe_backlog(storage, state, log)
+        backlog_touched |= _tile_backlog(storage, state, log,
+                                         zoom_cap=args.zoom_cap)
+        for inc_key in backlog_touched:
             # cleared mtime => the crawl re-syncs it (files replay from cache,
             # zero downloads) and rebuilds its manifest with the new geo state
             state["incidents"][inc_key]["dir_mtime"] = None

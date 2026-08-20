@@ -178,11 +178,7 @@ function MapRow({
             </button>
           )}
 
-          {/* The PDF is always reachable — it is the sheet of record, whether
-              or not the row can drape it on the map. */}
-          <a className="rd-pdf-pill" href={pdfHref} target="_blank" rel="noopener noreferrer">
-            PDF ↗
-          </a>
+
 
           {action === 'overlay' && active && (
             <>
@@ -216,10 +212,28 @@ function MapRow({
           )}
         </div>
 
-        {action === 'overlay-soon' && (
-          <div className="rd-pending-note">overlay rendering — check back shortly</div>
-        )}
       </div>
+
+      {/* The PDF is always reachable — the sheet of record, corner-anchored. */}
+      <a
+        className="rd-map-open"
+        href={pdfHref}
+        target="_blank"
+        rel="noopener noreferrer"
+        title="Open PDF in a new tab"
+        aria-label="Open PDF in a new tab"
+      >
+        <svg width="13" height="13" viewBox="0 0 13 13" aria-hidden="true">
+          <path
+            d="M5 2H2.5A1.5 1.5 0 0 0 1 3.5v7A1.5 1.5 0 0 0 2.5 12h7A1.5 1.5 0 0 0 11 10.5V8M7.5 1H12v4.5M12 1 6 7"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.4"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </svg>
+      </a>
     </div>
   );
 }

@@ -251,7 +251,7 @@ def process_pdf(pdf_path: Path, tiles_out_dir: Path, *, sheet: str | None = None
             tiles_out_dir.mkdir(parents=True, exist_ok=True)
             _run([
                 tiler, "--xyz", "--profile=mercator", "-r", "bilinear",
-                "-x", "-w", "none", "--processes=4",
+                "-w", "none", "--processes=4",  # no -x: sparse pyramids 404 under maplibre
                 "-z", f"{zmin}-{zmax}", str(merc_tif), str(tiles_out_dir),
             ])
             result["tiles"] = {"minzoom": zmin, "maxzoom": zmax, "bounds": bounds}

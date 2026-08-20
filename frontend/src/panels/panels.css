@@ -728,6 +728,7 @@
 }
 
 .rd-map-row {
+  position: relative; /* corner open-PDF icon anchors here */
   display: flex;
   gap: 10px;
   padding: 8px;
@@ -1521,4 +1522,25 @@
 .rd-tab {
   flex: none;
   white-space: nowrap;
+}
+
+/* Corner open-PDF icon on map rows. */
+.rd-map-open {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 26px;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius);
+  color: var(--color-text-muted);
+  border: 1px solid transparent;
+}
+
+.rd-map-open:hover {
+  color: var(--color-accent);
+  border-color: var(--color-border);
+  background: var(--color-hover-bg);
 }
