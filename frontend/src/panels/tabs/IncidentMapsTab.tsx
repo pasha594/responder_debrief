@@ -269,7 +269,7 @@ function IrFlightRow({ flight }: { flight: IrFlight }) {
           onClick={() => actions.setIrFlight(active ? null : flight.flight_id)}
         >
           <span className="rd-radio-dot" aria-hidden="true" />
-          {active ? 'Shown' : 'Show heat'}
+          {active ? 'Shown on map' : 'Show on map'}
         </button>
         {flight.pdf_url && (
           <a

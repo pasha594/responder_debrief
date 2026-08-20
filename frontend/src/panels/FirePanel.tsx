@@ -12,7 +12,7 @@ type Tab = AppState['ui']['sidebarTab'];
 
 const TABS: { id: Tab; label: string }[] = [
   { id: 'overview', label: 'Overview' },
-  { id: 'forecast', label: 'Forecast' },
+  { id: 'forecast', label: 'Layers' },
   { id: 'maps', label: 'Maps' },
   { id: 'draw', label: 'Draw' },
 ];

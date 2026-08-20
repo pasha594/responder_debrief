@@ -28,6 +28,7 @@ export const RD_LAYER_ORDER = [
   'rd-wind-arrows', // over the weather rasters + labels, under perimeters/pins
   'rd-ir-heat-fill',
   'rd-ir-heat-line',
+  'rd-ir-heat-pt',
   'rd-perimeter-fill',
   'rd-perimeter-line',
   'rd-hotspots',

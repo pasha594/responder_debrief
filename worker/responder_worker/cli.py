@@ -477,7 +477,7 @@ def _tile_and_manifest(args, storage, state, fires_by_slug, mirrors) -> None:
                 tiling_pending=pending, uploaded_lm=mf.lm,
             ))
 
-        ir_flights = _ir_flights(args, storage, fire, ir_by_flight)
+        ir_flights = _ir_flights(args, storage, state, fire, ir_by_flight)
 
         manifest = cat.build_incident_manifest(
             fire=fire,
@@ -506,7 +506,7 @@ def _tile_and_manifest(args, storage, state, fires_by_slug, mirrors) -> None:
             "flagged tiling_pending, picked up next run")
 
 
-def _ir_flights(args, storage, fire, ir_by_flight: dict[str, dict]) -> list[dict]:
+def _ir_flights(args, storage, state, fire, ir_by_flight: dict[str, dict]) -> list[dict]:
     out = []
     fire_slug = fire["fire_slug"]
     fire_name_norm = normalize_name(fire.get("post_title") or "").replace(" ", "")
@@ -522,13 +522,22 @@ def _ir_flights(args, storage, fire, ir_by_flight: dict[str, dict]) -> list[dict
         kmzs = [f for f in files if f.filename.lower().endswith(".kmz")]
         readmes = [f for f in files if "read_me" in f.filename.lower()]
 
-        flight_id = None
-        if zips:
-            stem = zips[0].filename.rsplit(".", 1)[0]
-            stem = stem[: -len("_Shapefiles")] if stem.endswith("_Shapefiles") else stem
+        def _stem_id(filename: str, *suffixes: str) -> str:
+            stem = filename.rsplit(".", 1)[0]
+            for suf in suffixes:
+                if stem.endswith(suf):
+                    stem = stem[: -len(suf)]
             toks = [t for t in stem.split("_")
                     if normalize_name(t).replace(" ", "") != fire_name_norm]
-            flight_id = "_".join(toks)
+            return "_".join(toks)
+
+        flight_id = None
+        if zips:
+            flight_id = _stem_id(zips[0].filename, "_Shapefiles")
+        elif pdfs:
+            flight_id = _stem_id(pdfs[0].filename, "_All")
+        elif kmzs:
+            flight_id = _stem_id(kmzs[0].filename, "_All")
 
         est_acres = None
         if readmes and readmes[0].local_path and readmes[0].local_path.exists():
@@ -537,20 +546,42 @@ def _ir_flights(args, storage, fire, ir_by_flight: dict[str, dict]) -> list[dict
 
         geojson_url = None
         heat_types: list[str] = []
-        if zips and flight_id and zips[0].local_path:
-            try:
-                with tempfile.TemporaryDirectory() as td:
-                    gj = Path(td) / f"{flight_id}.geojson"
-                    info = ir_vectors.process_ir_zip(
-                        zips[0].local_path, gj, flight_id=flight_id)
-                    key = f"vectors/ir/{fire_slug}/{flight_id}.geojson"
-                    storage.put_file(key, gj)
-                    geojson_url = f"/{key}"
-                    heat_types = info["heat_types"]
-                    log(f"[ir] {flight_id}: {info['feature_count']} features "
-                        f"({', '.join(heat_types)})")
-            except Exception as exc:
-                log(f"[ir] vectorization failed for {rel_dir}: {exc}")
+        if flight_id and (zips or kmzs):
+            key = f"vectors/ir/{fire_slug}/{flight_id}.geojson"
+            cache = state.setdefault("ir", {}).get(key)
+            if cache and cache.get("heat_types"):
+                # converted on a previous rebuild — reuse, no re-download
+                geojson_url = f"/{key}"
+                heat_types = cache["heat_types"]
+            elif cache and cache.get("failed"):
+                pass  # attempted before; the source file won't change
+            else:
+                try:
+                    with tempfile.TemporaryDirectory() as td:
+                        tdp = Path(td)
+                        # source: shapefiles preferred, KMZ fallback (some
+                        # teams publish KMZ only); replayed files have no
+                        # local copy but the bytes are in OUR bucket
+                        src_mf = zips[0] if zips else kmzs[0]
+                        local = src_mf.local_path
+                        if local is None:
+                            local = tdp / Path(src_mf.filename).name
+                            if not storage.get_file(src_mf.key, local):
+                                raise RuntimeError(f"missing raw object {src_mf.key}")
+                        gj = tdp / f"{flight_id}.geojson"
+                        if zips:
+                            info = ir_vectors.process_ir_zip(local, gj, flight_id=flight_id)
+                        else:
+                            info = ir_vectors.process_ir_kmz(local, gj, flight_id=flight_id)
+                        storage.put_file(key, gj)
+                        geojson_url = f"/{key}"
+                        heat_types = info["heat_types"]
+                        state["ir"][key] = {"heat_types": heat_types}
+                        log(f"[ir] {flight_id}: {info['feature_count']} features "
+                            f"({', '.join(heat_types)})")
+                except Exception as exc:
+                    state["ir"][key] = {"failed": True}
+                    log(f"[ir] vectorization failed for {rel_dir}: {exc}")
 
         out.append({
             "flight_date": flight_date_iso,

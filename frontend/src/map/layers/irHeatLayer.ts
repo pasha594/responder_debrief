@@ -11,6 +11,7 @@ import type { LayerManager } from '../layerTypes';
 const SRC = 'rd-ir-heat';
 const FILL = 'rd-ir-heat-fill';
 const LINE = 'rd-ir-heat-line';
+const PT = 'rd-ir-heat-pt';
 
 const EMPTY_FC: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features: [] };
 
@@ -98,6 +99,26 @@ export const irHeatLayer: LayerManager = {
         beforeIdFor(map, 'rd-ir-heat-line'),
       );
     }
+    if (!map.getLayer(PT)) {
+      // some IR products publish Isolated/Scattered heat as point
+      // placemarks (KMZ) rather than polygons — draw those as dots
+      map.addLayer(
+        {
+          id: PT,
+          type: 'circle',
+          source: SRC,
+          filter: ['==', ['geometry-type'], 'Point'],
+          paint: {
+            'circle-radius': 3.5,
+            'circle-color': FILL_COLOR,
+            'circle-opacity': 0.9,
+            'circle-stroke-width': 0.5,
+            'circle-stroke-color': 'rgba(0,0,0,0.4)',
+          },
+        },
+        beforeIdFor(map, 'rd-ir-heat-pt' as never),
+      );
+    }
   },
 
   update(map, ctx) {
@@ -137,6 +158,7 @@ export const irHeatLayer: LayerManager = {
   unmount(map) {
     appliedUrl = null;
     wantedUrl = null;
+    if (map.getLayer(PT)) map.removeLayer(PT);
     if (map.getLayer(LINE)) map.removeLayer(LINE);
     if (map.getLayer(FILL)) map.removeLayer(FILL);
     if (map.getSource(SRC)) map.removeSource(SRC);
