@@ -732,7 +732,7 @@ def _tile_backlog(storage, state, log, *, cap: int = 12,
     return touched
 
 
-def _probe_backlog(storage, state, log, *, cap: int = 15) -> set[str]:
+def _probe_backlog(storage, state, log, *, cap: int = 40) -> set[str]:
     """Classify already-mirrored PDFs that predate georeference detection.
 
     Sheets mirrored by early runs (or replayed by retention) have no
@@ -762,12 +762,16 @@ def _probe_backlog(storage, state, log, *, cap: int = 15) -> set[str]:
                 continue
             rec = state["tiled"].get(sha)
             if rec is not None:
-                # Repair pass: early runs classified some sheets with a
-                # failed/absent probe (flat, no preview) and marked them done
-                # forever. Re-probe those once; healthy records skip.
+                # Repair passes, each attempted once per sheet:
+                #  - broken records (no preview, no tiles) from failed probes
+                #  - flat records that predate graticule-text georeferencing
+                #    (a re-probe may now pin them down and queue tiling)
                 geo0 = rec.get("geo") or {}
-                broken = not geo0.get("preview") and not geo0.get("tiles")
-                if not broken or rec.get("repair_at"):
+                broken = (not geo0.get("preview") and not geo0.get("tiles")
+                          and not rec.get("repair_at"))
+                flat_regrat = (not geo0.get("georeferenced")
+                               and not rec.get("grat_at"))
+                if not broken and not flat_regrat:
                     continue
             key = f"raw/incidents/{fire_slug}/{rel}"
             with tempfile.TemporaryDirectory(prefix="probe_") as td:
@@ -791,6 +795,7 @@ def _probe_backlog(storage, state, log, *, cap: int = 15) -> set[str]:
                     log(f"[probe] preview failed for {rel}: {exc}")
                 state["tiled"][sha] = {
                     "repair_at": state_mod.now_iso(),
+                    "grat_at": state_mod.now_iso(),
                     # georeferenced sheets keep tiler_version None -> the
                     # normal tiling budget picks them up from B2 next runs
                     "tiler_version": None if probe["georeferenced"] else config.TILER_VERSION,

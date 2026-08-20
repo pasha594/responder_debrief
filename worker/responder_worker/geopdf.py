@@ -15,7 +15,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-from . import config
+from . import config, graticule
 
 WEBMERC_TOP_RES = 156543.03392804097  # m/px at z0
 
@@ -173,6 +173,13 @@ def probe_pdf(pdf_path: Path) -> dict:
         if is_georeferenced(info):
             out["georeferenced"] = True
             out["projection"] = projection_name(info)
+        else:
+            # No embedded georef — many sheets still carry their graticule
+            # labels as vector text, which pins them down to ~0.005 deg.
+            fit = graticule.solve(pdf_path)
+            if fit:
+                out["georeferenced"] = True
+                out["projection"] = f"Graticule fit (±{fit.rms_max:.3f}°)"
     except Exception as exc:  # never fatal — degrade to "not georeferenced"
         out["error"] = f"probe failed: {exc}"
     return out
@@ -200,10 +207,15 @@ def process_pdf(pdf_path: Path, tiles_out_dir: Path, *, sheet: str | None = None
     try:
         result["pages"] = page_count(pdf_path)
         info = gdalinfo_json(pdf_path)
-        if not is_georeferenced(info):
+        native = is_georeferenced(info)
+        grat_fit = None if native else graticule.solve(pdf_path)
+        if not native and grat_fit is None:
             return result
         result["georeferenced"] = True
-        result["projection"] = projection_name(info)
+        result["projection"] = (
+            projection_name(info) if native
+            else f"Graticule fit (±{grat_fit.rms_max:.3f}°)"
+        )
 
         dpi = dpi_for_sheet(sheet)
         with tempfile.TemporaryDirectory(prefix="geopdf_") as tmp:
@@ -218,23 +230,40 @@ def process_pdf(pdf_path: Path, tiles_out_dir: Path, *, sheet: str | None = None
             ])
 
             warp = ["gdalwarp", "-q", "-t_srs", "EPSG:3857", "-r", "bilinear", "-dstalpha"]
-            nl = neatline_wkt(info)
-            cutline = None
-            if nl:
+            if grat_fit is not None:
+                # Assign the graticule GCPs (page points -> raster pixels at
+                # dpi/72) and crop the warp to the map frame, which drops the
+                # title-block collar the way the native neatline path does.
+                px = dpi / 72.0
+                gcp_tif = tmpd / "gcp.tif"
+                gcp_args: list[str] = []
+                for x_pt, y_pt, lon, lat in grat_fit.gcps_points():
+                    gcp_args += ["-gcp", repr(x_pt * px), repr(y_pt * px),
+                                 repr(lon), repr(lat)]
+                _run(["gdal_translate", "-q", "-a_srs", "EPSG:4326",
+                      *gcp_args, str(page_tif), str(gcp_tif)])
+                from . import frames as _frames
+                te = _frames.bounds4326_to_3857(list(grat_fit.frame_bounds_4326()))
+                _run(warp + ["-te", *(repr(float(v)) for v in te),
+                             str(gcp_tif), str(merc_tif)])
+            else:
+                nl = neatline_wkt(info)
+                cutline = None
+                if nl:
+                    try:
+                        cutline = neatline_geojson(nl, None, tmpd / "neatline.json")
+                    except ValueError:
+                        cutline = None
                 try:
-                    cutline = neatline_geojson(nl, None, tmpd / "neatline.json")
-                except ValueError:
-                    cutline = None
-            try:
-                cmd = list(warp)
-                if cutline:
-                    # cutline is in the source SRS (map coords)
-                    cmd += ["-cutline", str(cutline), "-crop_to_cutline"]
-                _run(cmd + [str(page_tif), str(merc_tif)])
-            except subprocess.CalledProcessError:
-                # fallback chain: warp without cutline
-                merc_tif.unlink(missing_ok=True)
-                _run(warp + [str(page_tif), str(merc_tif)])
+                    cmd = list(warp)
+                    if cutline:
+                        # cutline is in the source SRS (map coords)
+                        cmd += ["-cutline", str(cutline), "-crop_to_cutline"]
+                    _run(cmd + [str(page_tif), str(merc_tif)])
+                except subprocess.CalledProcessError:
+                    # fallback chain: warp without cutline
+                    merc_tif.unlink(missing_ok=True)
+                    _run(warp + [str(page_tif), str(merc_tif)])
 
             merc_info = gdalinfo_json(merc_tif)
             native_res = abs(merc_info["geoTransform"][1])
