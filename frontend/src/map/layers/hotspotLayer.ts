@@ -65,11 +65,11 @@ const CIRCLE_RADIUS: ExpressionSpecification = [
   ['linear'],
   ['zoom'],
   5,
-  2,
+  1,
   9,
-  4.5,
+  2.25,
   13,
-  8,
+  4,
 ];
 
 /** Detections already acquired at tEff, and no older than the age cutoff. */
