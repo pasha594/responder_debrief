@@ -244,8 +244,11 @@ function MapRow({
 function IrFlightRow({ flight }: { flight: IrFlight }) {
   const activeId = useStore((s) => s.layers.irFlight.flightId);
   const actions = useStore((s) => s.actions);
-  const active = activeId === flight.flight_id;
-  const canShow = !!flight.geojson_url;
+  // A PDF-only flight has flight_id null — which must not match the store's
+  // null "nothing shown" sentinel (it rendered as a stuck, undismissable
+  // "Shown" pill on fires whose IR came without shapefiles).
+  const active = flight.flight_id != null && activeId === flight.flight_id;
+  const canShow = !!flight.geojson_url && flight.flight_id != null;
   return (
     <div className={`rd-ir-row${active ? ' rd-ir-row--active' : ''}`}>
       <div className="rd-ir-row-main">

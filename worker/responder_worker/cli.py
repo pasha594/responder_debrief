@@ -652,10 +652,18 @@ def _probe_backlog(storage, state, log, *, cap: int = 15) -> set[str]:
             if probed >= cap or frames.deadline_passed():
                 break
             sha = meta.get("sha16")
-            if (not sha or sha in state["tiled"]
-                    or not rel.lower().endswith(".pdf")
+            if (not sha or not rel.lower().endswith(".pdf")
                     or meta.get("kind") == "mobile"):
                 continue
+            rec = state["tiled"].get(sha)
+            if rec is not None:
+                # Repair pass: early runs classified some sheets with a
+                # failed/absent probe (flat, no preview) and marked them done
+                # forever. Re-probe those once; healthy records skip.
+                geo0 = rec.get("geo") or {}
+                broken = not geo0.get("preview") and not geo0.get("tiles")
+                if not broken or rec.get("repair_at"):
+                    continue
             key = f"raw/incidents/{fire_slug}/{rel}"
             with tempfile.TemporaryDirectory(prefix="probe_") as td:
                 local = Path(td) / "sheet.pdf"
@@ -677,6 +685,7 @@ def _probe_backlog(storage, state, log, *, cap: int = 15) -> set[str]:
                 except Exception as exc:
                     log(f"[probe] preview failed for {rel}: {exc}")
                 state["tiled"][sha] = {
+                    "repair_at": state_mod.now_iso(),
                     # georeferenced sheets keep tiler_version None -> the
                     # normal tiling budget picks them up from B2 next runs
                     "tiler_version": None if probe["georeferenced"] else config.TILER_VERSION,
