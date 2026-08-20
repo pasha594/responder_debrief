@@ -38,7 +38,12 @@ export function MobileSheet({ children }: { children: ReactNode }) {
     const target = e.target as HTMLElement;
     if (!target.closest('.rd-sheet-handle, .rd-fp-header')) return;
     drag.current = { startY: e.clientY, startH: sheetRef.current.offsetHeight };
-    e.currentTarget.setPointerCapture(e.pointerId);
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } catch {
+      // a pointer that already ended (fast tap) can't be captured — the
+      // drag simply won't track, which is fine
+    }
   };
 
   const onPointerMove = (e: PointerEvent<HTMLDivElement>) => {
