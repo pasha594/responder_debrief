@@ -9,7 +9,16 @@
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useStore } from '../state/store';
-import { latestRun, useFire, useMasterCatalog, usePerimeterIndex, usePyrecastRuns } from '../api/queries';
+import {
+  latestRun,
+  latestWeatherRun,
+  useFire,
+  useMasterCatalog,
+  usePerimeterIndex,
+  usePyrecastRuns,
+  useWeatherRuns,
+} from '../api/queries';
+import { weatherHours } from './framePlan';
 import { useFireHotspots } from '../api/useFireHotspots';
 import { useIncidentManifest } from '../api/queries';
 import { seriesVersions } from '../utils/incidentMaps';
@@ -183,6 +192,27 @@ export function TimelineTrack() {
     }));
   }, [incidentSeries, incidentManifest, scale, width, tz]);
 
+  // HRRR coverage band: while any HRRR layer is on the map, show exactly
+  // which stretch of the timeline has rendered frames — the layer simply
+  // has nothing to draw beyond it.
+  const weatherLayers = useStore((st) => st.layers.weather);
+  const anyHrrrOn = Object.values(weatherLayers).some((l) => l?.visible);
+  const { data: weatherRuns } = useWeatherRuns();
+  const hrrrBand = useMemo(() => {
+    if (!anyHrrrOn || width <= 0) return null;
+    const run = latestWeatherRun(weatherRuns);
+    const hours = weatherHours(run ?? null);
+    if (hours.length < 2) return null;
+    const t0 = Date.parse(hours[0]);
+    const t1 = Date.parse(hours[hours.length - 1]);
+    if (!Number.isFinite(t0) || !Number.isFinite(t1)) return null;
+    return {
+      x0: scale.timeToX(t0),
+      x1: scale.timeToX(t1),
+      title: `HRRR frames available ${formatDateTime(t0, tz)} – ${formatDateTime(t1, tz)} ${tzAbbreviation(t1, tz)}`,
+    };
+  }, [anyHrrrOn, weatherRuns, scale, width, tz]);
+
   const versionMarks = useMemo(() => {
     if (!perimeterIndex?.length || width <= 0) return [];
     return perimeterIndex.map((item) => {
@@ -267,6 +297,16 @@ export function TimelineTrack() {
       {ticks.hours.map((h, i) => (
         <div key={`h${i}`} className="rd-tick-hour" style={{ left: h.x }} />
       ))}
+
+      {hrrrBand && hrrrBand.x1 > hrrrBand.x0 + 2 && (
+        <div
+          className="rd-hrrr-band"
+          style={{ left: hrrrBand.x0, width: hrrrBand.x1 - hrrrBand.x0 }}
+          title={hrrrBand.title}
+        >
+          <span className="rd-hrrr-band-label">HRRR</span>
+        </div>
+      )}
 
       {nowInDomain && (
         <>

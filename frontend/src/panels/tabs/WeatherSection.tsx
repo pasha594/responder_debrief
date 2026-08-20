@@ -114,7 +114,7 @@ export function WeatherSection() {
         return (
           <div key={modelId}>
             <h3 className="rd-section-title">
-              {usable.length > 1 ? model.label : 'Weather'}
+              {usable.length > 1 ? model.label : 'HRRR Forecast'}
               <span className="rd-title-meta">
                 {stale
                   ? `Run ${formatDateTime(run.run_time, 'UTC')} — refreshing hourly`

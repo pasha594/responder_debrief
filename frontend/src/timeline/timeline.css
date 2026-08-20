@@ -453,3 +453,25 @@
 .rd-map-mark:hover::after {
   transform: scale(1.35);
 }
+
+/* HRRR frame-coverage band: the stretch of timeline the HRRR layers can
+   actually draw (they vanish beyond it). */
+.rd-hrrr-band {
+  position: absolute;
+  top: 15px;
+  height: 5px;
+  background: linear-gradient(90deg, rgba(120, 180, 220, 0.55), rgba(120, 180, 220, 0.85));
+  border-radius: 3px;
+  z-index: 1;
+}
+
+.rd-hrrr-band-label {
+  position: absolute;
+  left: 4px;
+  top: -1px;
+  font-size: 7.5px;
+  line-height: 7px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: rgba(16, 12, 16, 0.9);
+}
