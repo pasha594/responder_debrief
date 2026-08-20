@@ -69,6 +69,8 @@ export interface AppState {
     domain: [number, number];
     now: number; // sampled every 60 s; past/future seam
     playing: boolean;
+    /** Current playback step interval (ms) — the dial glides across it. */
+    stepMs: number;
     speed: number; // model-hours per wall-second
     buffering: boolean;
   };
@@ -137,6 +139,7 @@ export interface AppState {
     selectFire(corneaId: string): void;
     backToDirectory(): void;
     setTime(t: number): void;
+    setStepMs(stepMs: number): void;
     setDomain(domain: [number, number], opts?: { clampCurrent?: boolean }): void;
     sampleNow(): void;
     play(): void;
@@ -190,6 +193,7 @@ export const useStore = create<AppState>((set, get) => ({
     domain: [now - 7 * 24 * 3600 * 1000, now + 48 * 3600 * 1000],
     now,
     playing: false,
+    stepMs: 0,
     speed: DEFAULT_PLAYBACK_SPEED,
     buffering: false,
   },
@@ -250,6 +254,7 @@ export const useStore = create<AppState>((set, get) => ({
         },
       })),
 
+    setStepMs: (stepMs) => set((s) => ({ time: { ...s.time, stepMs } })),
     setTime: (t) =>
       set((s) => ({
         time: {

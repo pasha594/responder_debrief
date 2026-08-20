@@ -97,6 +97,7 @@ export function usePlayback(): void {
       }
       const gapHours = (frameTimes[next] - t) / 3600_000;
       const delayMs = Math.max(MIN_STEP_MS, (gapHours * 1000) / speed);
+      actions.setStepMs(delayMs);
       timer = setTimeout(() => advance(next), delayMs);
     };
 

@@ -55,6 +55,7 @@ export function Timeline() {
   usePlayback();
 
   const playing = useStore((s) => s.time.playing);
+  const stepMs = useStore((s) => s.time.stepMs);
   const buffering = useStore((s) => s.time.buffering);
   const currentTime = useStore((s) => s.time.currentTime);
   const actions = useStore((s) => s.actions);
@@ -226,7 +227,16 @@ export function Timeline() {
       >
         <div
           className="rd-tl-content"
-          style={{ width: contentW || undefined, transform: `translateX(${translateX}px)` }}
+          style={{
+            width: contentW || undefined,
+            transform: `translateX(${translateX}px)`,
+            // During playback the content glides linearly across each step
+            // instead of snapping; drags stay immediate.
+            transition:
+              playing && !dragging && stepMs > 0
+                ? `transform ${stepMs}ms linear`
+                : undefined,
+          }}
         >
           <TimelineTrack />
           <div className="rd-wx-row">

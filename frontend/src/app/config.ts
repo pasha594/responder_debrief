@@ -12,7 +12,7 @@ export const BASEMAP_STYLE_DARK = 'https://tiles.openfreemap.org/styles/dark';
 export const BASEMAP_STYLE_LIGHT = 'https://tiles.openfreemap.org/styles/positron';
 
 /** Playback speed default: model-hours advanced per wall-clock second. */
-export const DEFAULT_PLAYBACK_SPEED = 2;
+export const DEFAULT_PLAYBACK_SPEED = 5;
 
 /** Hotspot fetch settings. */
 export const HOTSPOT_LIMIT = 50000;
