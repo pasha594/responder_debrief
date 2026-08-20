@@ -1,5 +1,6 @@
 /** Selected-fire panel: header, badge, stats strip, tab bar + active tab. */
 import { useMemo } from 'react';
+import { DisclaimerFooter } from './DisclaimerFooter';
 import { useFire, useMasterCatalog } from '../api/queries';
 import { useStore, type AppState } from '../state/store';
 import { formatAcresValue, formatPct } from '../utils/format';
@@ -103,6 +104,7 @@ export function FirePanel({ corneaId }: { corneaId: string }) {
         {activeTab === 'forecast' && <ForecastTab corneaId={corneaId} />}
         {activeTab === 'maps' && <IncidentMapsTab corneaId={corneaId} />}
         {activeTab === 'draw' && <DrawTab />}
+        <DisclaimerFooter />
       </div>
     </div>
   );

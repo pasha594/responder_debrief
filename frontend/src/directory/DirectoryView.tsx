@@ -4,6 +4,7 @@
  * the single-fire map shell.
  */
 import { useEffect, useLayoutEffect, useMemo, useRef } from 'react';
+import { DisclaimerFooter } from '../panels/DisclaimerFooter';
 import { useFires, useMasterCatalog } from '../api/queries';
 import { useStore } from '../state/store';
 import { useIsDesktop } from '../utils/useMediaQuery';
@@ -223,6 +224,7 @@ export function DirectoryView() {
         {!failed && !loading && !hasRows && (
           <div className="rd-empty">No active fires are listed right now.</div>
         )}
+        <DisclaimerFooter />
       </div>
     </div>
   );

@@ -1,51 +1,12 @@
+/* Open Sans (variable, latin) — matches cornea.is. Their headings use
+   UniNeue, a commercial face we can't bundle; Open Sans at heavier weights
+   stands in. */
 @font-face {
-  font-family: 'Newsreader';
+  font-family: 'Open Sans';
   font-style: normal;
-  font-weight: 400;
+  font-weight: 400 800;
   font-display: swap;
-  src: url('/fonts/newsreader-400.woff2') format('woff2');
-}
-@font-face {
-  font-family: 'Newsreader';
-  font-style: normal;
-  font-weight: 600;
-  font-display: swap;
-  src: url('/fonts/newsreader-600.woff2') format('woff2');
-}
-@font-face {
-  font-family: 'Newsreader';
-  font-style: normal;
-  font-weight: 800;
-  font-display: swap;
-  src: url('/fonts/newsreader-800.woff2') format('woff2');
-}
-@font-face {
-  font-family: 'Public Sans';
-  font-style: normal;
-  font-weight: 400;
-  font-display: swap;
-  src: url('/fonts/public-sans-400.woff2') format('woff2');
-}
-@font-face {
-  font-family: 'Public Sans';
-  font-style: normal;
-  font-weight: 500;
-  font-display: swap;
-  src: url('/fonts/public-sans-500.woff2') format('woff2');
-}
-@font-face {
-  font-family: 'Public Sans';
-  font-style: normal;
-  font-weight: 600;
-  font-display: swap;
-  src: url('/fonts/public-sans-600.woff2') format('woff2');
-}
-@font-face {
-  font-family: 'Public Sans';
-  font-style: normal;
-  font-weight: 700;
-  font-display: swap;
-  src: url('/fonts/public-sans-700.woff2') format('woff2');
+  src: url('/fonts/open-sans-latin.woff2') format('woff2');
 }
 
 /* Design tokens — cornea (fires.cornea.is) palette, verbatim where possible. */
@@ -85,8 +46,8 @@
   --pin-wildfire: #ffbb56;
   --pin-prescribed: #c3b392;
 
-  --font-serif: 'Newsreader', Georgia, serif;
-  --font-sans: 'Public Sans', -apple-system, system-ui, sans-serif;
+  --font-serif: 'Open Sans', -apple-system, system-ui, sans-serif;
+  --font-sans: 'Open Sans', -apple-system, system-ui, sans-serif;
   --radius: 4px;
   --sidebar-w: 380px;
   --timeline-wx-h: 46px; /* weather strip lane above the track */

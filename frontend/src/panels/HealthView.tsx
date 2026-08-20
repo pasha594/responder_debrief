@@ -7,6 +7,7 @@
  *  - The published catalogs' generated_at stamps: end-to-end data freshness.
  */
 import { useQuery } from '@tanstack/react-query';
+import { DisclaimerFooter } from './DisclaimerFooter';
 import { HREF_DIRECTORY } from '../app/router';
 import { useHealth, useImsr, useMasterCatalog, useWeatherRuns } from '../api/queries';
 import { formatBytes, formatRelative } from '../utils/format';
@@ -274,6 +275,7 @@ export function HealthView() {
           <div className="rd-empty">Publishes after the next catalogs run.</div>
         )}
       </section>
+      <DisclaimerFooter />
     </div>
   );
 }
