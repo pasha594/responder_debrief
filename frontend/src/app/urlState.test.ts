@@ -98,3 +98,33 @@ describe('urlState buildSearch/decodeSearch', () => {
     expect(decodeSearch('?map=abc&mv=ops%7CSheet%7Cportrait').series).toBe('ops|Sheet|portrait');
   });
 });
+
+describe('fireUrl slug resolution', () => {
+  it('resolves slugs case-insensitively and passes GUIDs through', async () => {
+    const { corneaIdForUrlId, urlIdForFire, isCorneaId, registerFires, firesLoaded, resetFiresForTest } =
+      await import('./fireUrl');
+    resetFiresForTest();
+    expect(isCorneaId('{6B0C72B3-0E12-4695-9022-E1113C0AA8D1}')).toBe(true);
+    expect(isCorneaId('c9cacf3a-a0b7-41ae-9090-6fe2781f45ae')).toBe(true);
+    expect(isCorneaId('2026-07-23-or-big-grass')).toBe(false);
+
+    // before the index loads: GUIDs resolve, slugs wait
+    expect(corneaIdForUrlId('{ABC12345-0E12-4695-9022-E1113C0AA8D1}'))
+      .toBe('{ABC12345-0E12-4695-9022-E1113C0AA8D1}');
+    expect(firesLoaded()).toBe(false);
+    expect(corneaIdForUrlId('2026-07-23-or-big-grass')).toBeNull();
+
+    registerFires([
+      { cornea_id: '{6B0C}', unique_slug: '2026-07-23-OR-BIG-GRASS' },
+      { cornea_id: 'bare-uuid', unique_slug: '2026-08-20-CA-Chia' },
+    ] as never);
+    expect(firesLoaded()).toBe(true);
+    expect(corneaIdForUrlId('2026-07-23-or-big-grass')).toBe('{6B0C}');
+    expect(corneaIdForUrlId('2026-07-23-OR-BIG-GRASS')).toBe('{6B0C}');
+    expect(corneaIdForUrlId('2026-01-01-zz-gone')).toBeNull();
+
+    expect(urlIdForFire('{6B0C}')).toBe('2026-07-23-or-big-grass');
+    expect(urlIdForFire('{not-in-index}')).toBe('{not-in-index}');
+    resetFiresForTest();
+  });
+});

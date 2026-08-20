@@ -17,7 +17,9 @@ import { LegendBar } from '../panels/LegendBar';
 import { ErrorBoundary } from '../utils/ErrorBoundary';
 import { useTimelineDomain } from '../timeline/useTimelineDomain';
 import { DirectoryView } from '../directory/DirectoryView';
-import { navNotify, parseLocation, routePath, sameRoute, useRoute, type Route } from './router';
+import { navNotify, parseLocation, routePath, useRoute, type Route } from './router';
+import { corneaIdForUrlId, firesLoaded, registerFires, urlIdForFire } from './fireUrl';
+import { useFires } from '../api/queries';
 import { applyViewState, buildSearch, decodeSearch } from './urlState';
 
 function MapLayerBridge() {
@@ -27,21 +29,35 @@ function MapLayerBridge() {
 }
 
 /**
- * Two-way sync between the URL path and store.view. (Legacy '#/…' links are
- * rewritten to their path form by App — it must also cover the health route,
- * where PathSync never mounts.)
+ * Two-way sync between the URL path and store.view. URLs speak the
+ * human-readable fire slug (see fireUrl.ts); the store speaks cornea_id.
+ * (Legacy '#/…' links are rewritten to their path form by App — it must
+ * also cover the health route, where PathSync never mounts.)
  */
 function PathSync() {
   const view = useStore((s) => s.view);
   const actions = useStore((s) => s.actions);
+  const { data: firesData } = useFires();
+  registerFires(firesData?.fires);
 
-  // URL → store (also runs once on mount for deep links)
+  // URL → store (also runs once on mount for deep links, and again when the
+  // fires index arrives so slug deep links can finally resolve)
   useEffect(() => {
     const apply = () => {
       const route = parseLocation();
       const cur = useStore.getState().view;
-      if (route.name === 'fire' && (cur.mode !== 'fire' || cur.corneaId !== route.id)) {
-        actions.selectFire(route.id);
+      if (route.name === 'fire') {
+        const cornea = corneaIdForUrlId(route.id);
+        if (cornea) {
+          if (cur.mode !== 'fire' || cur.corneaId !== cornea) actions.selectFire(cornea);
+        } else if (firesLoaded()) {
+          // The index is here and doesn't know this slug — stale share link.
+          actions.showToast('Fire not found — it may no longer be active');
+          history.replaceState(null, '', routePath({ name: 'directory' }));
+          navNotify();
+          if (cur.mode !== 'directory') actions.backToDirectory();
+        }
+        // else: index still loading — this effect re-runs when it lands.
       } else if (route.name === 'directory' && cur.mode !== 'directory') {
         actions.backToDirectory();
       }
@@ -50,7 +66,7 @@ function PathSync() {
     apply();
     window.addEventListener('popstate', apply);
     return () => window.removeEventListener('popstate', apply);
-  }, [actions]);
+  }, [actions, firesData]);
 
   // store → URL (row clicks, map pin clicks, back button)
   //
@@ -63,15 +79,30 @@ function PathSync() {
   useEffect(() => {
     const cur = parseLocation();
     if (cur.name === 'health') return; // the health page owns the URL
+    const curCornea = cur.name === 'fire' ? corneaIdForUrlId(cur.id) : null;
+    // A fire URL that can't be resolved yet belongs to the URL → store
+    // effect (still loading, or about to bounce to the directory) — writing
+    // over it here would clobber the deep link.
+    if (cur.name === 'fire' && curCornea === null) return;
     const v = useStore.getState().view;
     const want: Route =
-      v.mode === 'fire' ? { name: 'fire', id: v.corneaId } : { name: 'directory' };
-    if (!sameRoute(cur, want)) {
+      v.mode === 'fire'
+        ? { name: 'fire', id: urlIdForFire(v.corneaId) }
+        : { name: 'directory' };
+    const same =
+      cur.name === want.name &&
+      (want.name !== 'fire' || (v.mode === 'fire' && curCornea === v.corneaId));
+    if (!same) {
       // Route changes drop the query — view state is per-fire.
       history.pushState(null, '', routePath(want));
       navNotify();
+    } else if (cur.name === 'fire' && cur.id !== (want as { id: string }).id) {
+      // Same fire, uglier spelling (legacy GUID link, or the index landed
+      // after the first write) — canonicalize to the slug, keeping the query.
+      history.replaceState(null, '', routePath(want) + window.location.search);
+      navNotify();
     }
-  }, [view]);
+  }, [view, firesData]);
 
   return null;
 }
@@ -108,7 +139,10 @@ function UrlStateSync() {
         const search = buildSearch(st);
         if (search === last) return;
         last = search;
-        history.replaceState(null, '', routePath({ name: 'fire', id: st.view.corneaId }) + search);
+        history.replaceState(
+          null, '',
+          routePath({ name: 'fire', id: urlIdForFire(st.view.corneaId) }) + search,
+        );
       }, delay);
     };
 
