@@ -101,18 +101,41 @@ def _classify_kmz_layer(name: str) -> str | None:
     return None
 
 
-def _kmz_layers(kmz_path: Path) -> list[str]:
-    """Layer names via `ogrinfo -q` ("N: Name (Geometry)" lines)."""
-    res = subprocess.run(["ogrinfo", "-q", str(kmz_path)],
+# Bump to retry KMZs whose conversion failed under an older converter —
+# the failure cache in worker state is keyed on this.
+KMZ_CONVERTER_VERSION = 2
+
+
+def _list_layers(path: Path) -> tuple[list[str], str | None]:
+    """Layer names via `ogrinfo -q` ("N: Name (Geometry)" lines), plus the
+    error text when GDAL can't open the file at all."""
+    res = subprocess.run(["ogrinfo", "-q", str(path)],
                          capture_output=True, text=True, timeout=120)
     if res.returncode != 0:
-        return []
+        return [], (res.stderr or res.stdout).strip()[:300] or "ogrinfo failed"
     out = []
     for line in res.stdout.splitlines():
         m = re.match(r"^\d+:\s+(.*?)(?:\s+\([^)]*\))?\s*$", line.strip())
         if m and m.group(1):
             out.append(m.group(1))
-    return out
+    return out, None
+
+
+def _extract_kml(kmz_path: Path, tmpd: Path) -> Path | None:
+    """A KMZ is a zip around a .kml. GDAL built without LIBKML (some CI
+    images) can't open the archive but reads the inner file fine with the
+    classic KML driver — so extract it with stdlib zipfile."""
+    try:
+        with zipfile.ZipFile(kmz_path) as zf:
+            name = next((n for n in zf.namelist()
+                         if n.lower().endswith(".kml")), None)
+            if not name:
+                return None
+            out = tmpd / "doc.kml"
+            out.write_bytes(zf.read(name))
+            return out
+    except Exception:
+        return None
 
 
 def process_ir_kmz(kmz_path: Path, out_geojson: Path, *, flight_id: str) -> dict:
@@ -126,7 +149,18 @@ def process_ir_kmz(kmz_path: Path, out_geojson: Path, *, flight_id: str) -> dict
     heat_types: list[str] = []
     with tempfile.TemporaryDirectory(prefix="irkmz_") as tmp:
         tmpd = Path(tmp)
-        for layer in _kmz_layers(kmz_path):
+        src = kmz_path
+        layers, err = _list_layers(src)
+        if not any(_classify_kmz_layer(n) for n in layers):
+            kml = _extract_kml(kmz_path, tmpd)
+            if kml is not None:
+                src = kml
+                layers, err = _list_layers(src)
+        if not any(_classify_kmz_layer(n) for n in layers):
+            raise RuntimeError(
+                f"no heat-class layers in KMZ (layers={layers[:12]!r}"
+                + (f", gdal: {err}" if err else "") + ")")
+        for layer in layers:
             heat = _classify_kmz_layer(layer)
             if heat is None:
                 continue
@@ -134,7 +168,7 @@ def process_ir_kmz(kmz_path: Path, out_geojson: Path, *, flight_id: str) -> dict
             try:
                 subprocess.run(
                     ["ogr2ogr", "-f", "GeoJSON", "-t_srs", "EPSG:4326",
-                     str(out_tmp), str(kmz_path), layer],
+                     str(out_tmp), str(src), layer],
                     capture_output=True, text=True, timeout=300, check=True)
             except subprocess.CalledProcessError:
                 continue
@@ -153,7 +187,7 @@ def process_ir_kmz(kmz_path: Path, out_geojson: Path, *, flight_id: str) -> dict
                 features.append(f)
 
     if not features:
-        raise RuntimeError("no heat-class layers found in KMZ")
+        raise RuntimeError("heat-class layers present but produced no features")
     out_geojson.parent.mkdir(parents=True, exist_ok=True)
     out_geojson.write_text(json.dumps(
         {"type": "FeatureCollection", "features": features}

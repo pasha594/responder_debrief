@@ -329,6 +329,12 @@ def _tile_and_manifest(args, storage, state, fires_by_slug, mirrors) -> None:
         "TILE_MAX_SECONDS", str(config.TILE_MAX_SECONDS_DEFAULT))))
     tiles_deferred = 0
 
+    # Several FTP incident dirs can map to ONE fire (e.g. the fire's own dir
+    # plus a complex/event dir carrying its sheets). Their manifests share a
+    # single key, so accumulate per fire and publish the union — last-writer-
+    # wins silently dropped half of Bear Trap's maps.
+    by_fire: dict[str, dict] = {}
+
     for inc_key, bundle in mirrors.items():
         fire = bundle["fire"]
         fire_slug = fire["fire_slug"]
@@ -479,26 +485,57 @@ def _tile_and_manifest(args, storage, state, fires_by_slug, mirrors) -> None:
 
         ir_flights = _ir_flights(args, storage, state, fire, ir_by_flight)
 
+        agg = by_fire.setdefault(fire_slug, {
+            "fire": fire, "maps": {}, "ir": {}, "meta": None, "meta_rank": -1,
+        })
+        for m in maps:
+            k = m["id"] if m.get("id") and m["id"] != "unknown" \
+                else f"{inc_key}:{m.get('filename')}"
+            agg["maps"].setdefault(k, m)
+        for f in ir_flights:
+            k = f.get("flight_id") or f.get("flight_date") or repr(f)
+            prev = agg["ir"].get(k)
+            # prefer the copy that actually converted, then the richer one
+            def _rank(x):
+                return (x.get("geojson_url") is not None,
+                        sum(x.get(u) is not None for u in ("pdf_url", "kmz_url")))
+            if prev is None or _rank(f) > _rank(prev):
+                agg["ir"][k] = f
+        if len(maps) > agg["meta_rank"]:
+            agg["meta_rank"] = len(maps)
+            agg["meta"] = {
+                "region": bundle["candidate"].region,
+                "source_dir": bundle["candidate"].dir_url,
+                "unit_incident": (bundle["match"].token or "")
+                .replace("2026-", "", 1).replace("-", "")
+                if bundle["match"].token else None,
+            }
+
+        merged_maps = list(agg["maps"].values())
+        merged_ir = sorted(agg["ir"].values(),
+                           key=lambda f: f.get("flight_date") or "", reverse=True)
         manifest = cat.build_incident_manifest(
             fire=fire,
-            region=bundle["candidate"].region,
-            source_dir=bundle["candidate"].dir_url,
-            unit_incident=(bundle["match"].token or "").replace("2026-", "", 1).replace("-", "")
-            if bundle["match"].token else None,
-            maps=maps,
-            ir_flights=ir_flights,
+            region=agg["meta"]["region"],
+            source_dir=agg["meta"]["source_dir"],
+            unit_incident=agg["meta"]["unit_incident"],
+            maps=merged_maps,
+            ir_flights=merged_ir,
         )
         storage.put_json(f"catalogs/incidents/{fire_slug}.json", manifest)
         log(f"[incidents] manifest written: catalogs/incidents/{fire_slug}.json "
-            f"(maps={len(maps)}, ir_flights={len(ir_flights)})")
+            f"(maps={len(merged_maps)}, ir_flights={len(merged_ir)}"
+            + (f", merged from {sum(1 for b in mirrors.values() if b['fire']['fire_slug'] == fire_slug)} dirs"
+               if agg["meta_rank"] != len(maps) or len(merged_maps) != len(maps) else "")
+            + ")")
 
         # Directory-view summary in catalog.json, so the fire list can show
         # file counts without fetching every per-fire manifest.
-        upload_dates = [m["op_date"] for m in maps if m.get("op_date")]
-        upload_dates += [f["flight_date"] for f in ir_flights if f.get("flight_date")]
+        upload_dates = [m["op_date"] for m in merged_maps if m.get("op_date")]
+        upload_dates += [f["flight_date"] for f in merged_ir if f.get("flight_date")]
         inc_state = state["incidents"].setdefault(inc_key, {})
-        inc_state["map_count"] = len(maps)
-        inc_state["ir_count"] = len(ir_flights)
+        inc_state["map_count"] = len(merged_maps)
+        inc_state["ir_count"] = len(merged_ir)
         inc_state["latest_upload"] = max(upload_dates) if upload_dates else None
 
     if tiles_deferred:
@@ -553,8 +590,11 @@ def _ir_flights(args, storage, state, fire, ir_by_flight: dict[str, dict]) -> li
                 # converted on a previous rebuild — reuse, no re-download
                 geojson_url = f"/{key}"
                 heat_types = cache["heat_types"]
-            elif cache and cache.get("failed"):
-                pass  # attempted before; the source file won't change
+            elif (cache and cache.get("failed")
+                  and cache.get("v") == ir_vectors.KMZ_CONVERTER_VERSION):
+                pass  # attempted before under THIS converter — don't loop
+            elif frames.deadline_passed():
+                pass  # out of wall-clock; unrecorded, so the next run retries
             else:
                 try:
                     with tempfile.TemporaryDirectory() as td:
@@ -580,7 +620,8 @@ def _ir_flights(args, storage, state, fire, ir_by_flight: dict[str, dict]) -> li
                         log(f"[ir] {flight_id}: {info['feature_count']} features "
                             f"({', '.join(heat_types)})")
                 except Exception as exc:
-                    state["ir"][key] = {"failed": True}
+                    state["ir"][key] = {
+                        "failed": True, "v": ir_vectors.KMZ_CONVERTER_VERSION}
                     log(f"[ir] vectorization failed for {rel_dir}: {exc}")
 
         out.append({

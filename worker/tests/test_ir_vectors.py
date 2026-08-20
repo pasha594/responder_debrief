@@ -40,3 +40,23 @@ def test_ir_backlog_flags_unconverted_flights():
     state["ir"]["vectors/ir/bear-trap/20260819_c0800_Aircraft3.geojson"] = {
         "failed": True}
     assert _ir_backlog(state, lambda *_: None) == set()
+
+
+def test_extract_kml_fallback(tmp_path):
+    import zipfile
+
+    from responder_worker import ir_vectors
+
+    kml = ('<?xml version="1.0"?><kml xmlns="http://www.opengis.net/kml/2.2">'
+           '<Document><Folder><name>Isolated Fires</name></Folder></Document></kml>')
+    kmz = tmp_path / "flight.kmz"
+    with zipfile.ZipFile(kmz, "w") as zf:
+        zf.writestr("files/legend.png", b"png")
+        zf.writestr("doc.kml", kml)
+    out = ir_vectors._extract_kml(kmz, tmp_path)
+    assert out is not None and out.read_text() == kml
+
+    assert ir_vectors._extract_kml(tmp_path / "flight.kmz", tmp_path) is not None
+    bad = tmp_path / "not.kmz"
+    bad.write_bytes(b"not a zip")
+    assert ir_vectors._extract_kml(bad, tmp_path) is None
