@@ -158,7 +158,8 @@ export function HealthView() {
         </h3>
         {ghErr && <div className="rd-empty">GitHub API unreachable (rate limit?) — see Actions ↗</div>}
         <PipelineRuns runs={byWorkflow('Sync catalogs')} title="Catalogs (hourly)" />
-        <PipelineRuns runs={byWorkflow('Mirror incidents')} title="FTP mirror (4×/day)" />
+        <PipelineRuns runs={byWorkflow('Mirror incidents')} title="FTP mirror (hourly)" />
+        <PipelineRuns runs={byWorkflow('Tile worker')} title="Tile workers (event + hourly)" />
         <PipelineRuns runs={byWorkflow('Deploy frontend (GitHub Pages)')} title="Site deploy" />
       </section>
 
@@ -185,8 +186,8 @@ export function HealthView() {
         <FreshnessRow
           label="FTP mirror heartbeat"
           iso={m?.finished_at}
-          okMs={7 * HOUR}
-          warnMs={10 * HOUR}
+          okMs={2.5 * HOUR}
+          warnMs={5 * HOUR}
         />
         <FreshnessRow
           label="Sit report (IMSR)"

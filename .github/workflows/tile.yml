@@ -2,23 +2,24 @@ name: Tile worker
 
 # Stateless parallel tiling: each shard tiles its slice of the pending-sheet
 # backlog straight from B2 and uploads tile trees + meta.json completion
-# markers. It never writes state or catalogs, so it needs NO slot in the
-# worker-b2-writes group — the serialized mirror runs adopt finished markers
-# into state and manifests. Hourly x 4 shards ≈ same-hour rendering of
-# everything the FTP produces.
+# markers. Shards never write state or catalogs, so they need NO slot in the
+# worker-b2-writes group.
+#
+# Event chain for near-instant overlays: a completed mirror run triggers this
+# workflow; if any shard tiled sheets, the adopt job (serialized in the
+# writer group) immediately folds the markers into state + manifests instead
+# of waiting for the next hourly mirror. The hourly cron is a safety net —
+# cron-triggered runs skip adoption and leave it to the next mirror.
 on:
   schedule:
     - cron: "13 * * * *"
+  workflow_run:
+    workflows: ["Mirror incidents"]
+    types: [completed]
   workflow_dispatch:
-    inputs:
-      shards:
-        description: "Number of shards (must match the matrix to cover all)"
-        required: false
-        default: "4"
 
 concurrency:
-  # Per-shard group: an hourly run never piles onto a still-running self.
-  group: tile-worker-${{ github.event_name }}
+  group: tile-worker
   cancel-in-progress: false
 
 jobs:
@@ -63,6 +64,7 @@ jobs:
         run: uv sync
 
       - name: Tile shard
+        id: t
         env:
           B2_KEY_ID: ${{ secrets.B2_KEY_ID }}
           B2_APP_KEY: ${{ secrets.B2_APP_KEY }}
@@ -71,4 +73,94 @@ jobs:
           TILEW_MAX_SECONDS: ${{ vars.TILEW_MAX_SECONDS || '2700' }}
         run: |
           uv run python -m responder_worker.cli tile-worker \
-            --shard ${{ matrix.shard }} --shards 4
+            --shard ${{ matrix.shard }} --shards 4 2>&1 | tee tilew.log
+          test "${PIPESTATUS[0]}" -eq 0
+          n=$(grep -oE 'tiled [0-9]+$' tilew.log | tail -1 | grep -oE '[0-9]+' || echo 0)
+          echo "tiled=$n" >> "$GITHUB_OUTPUT"
+          mkdir -p /tmp/tiled-flag && echo "$n" > "/tmp/tiled-flag/shard-${{ matrix.shard }}"
+
+      - name: Flag tiled work for the adopt job
+        if: steps.t.outputs.tiled != '0'
+        uses: actions/upload-artifact@v4
+        with:
+          name: tiled-flag-${{ matrix.shard }}
+          path: /tmp/tiled-flag/
+          retention-days: 1
+
+  # Fold finished markers into state + manifests right away (only for
+  # mirror-triggered runs that actually tiled something — cron runs leave
+  # adoption to the next hourly mirror).
+  adopt:
+    needs: tile
+    if: github.event_name == 'workflow_run'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    concurrency:
+      group: worker-b2-writes
+      cancel-in-progress: false
+    defaults:
+      run:
+        working-directory: worker
+    steps:
+      - name: Check whether any shard tiled
+        id: gate
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          pattern: tiled-flag-*
+          path: /tmp/flags
+
+      - name: Decide
+        id: decide
+        run: |
+          if ls /tmp/flags/*/shard-* >/dev/null 2>&1; then
+            echo "go=yes" >> "$GITHUB_OUTPUT"
+          else
+            echo "go=no" >> "$GITHUB_OUTPUT"
+            echo "no shards tiled — skipping adoption"
+          fi
+        working-directory: /
+
+      - uses: actions/checkout@v4
+        if: steps.decide.outputs.go == 'yes'
+
+      - name: Install GDAL CLI tools
+        if: steps.decide.outputs.go == 'yes'
+        continue-on-error: true
+        timeout-minutes: 9
+        run: |
+          for attempt in 1 2 3 4; do
+            if [ "$attempt" = "3" ]; then
+              sudo sed -i 's|azure.archive.ubuntu.com|archive.ubuntu.com|g' \
+                /etc/apt/sources.list /etc/apt/sources.list.d/* 2>/dev/null || true
+            fi
+            if sudo apt-get update -o Acquire::Retries=3 \
+               && sudo apt-get install -y --no-install-recommends -o Acquire::Retries=3 gdal-bin python3-gdal; then
+              break
+            fi
+            sleep 5
+          done
+
+      - uses: astral-sh/setup-uv@v5
+        if: steps.decide.outputs.go == 'yes'
+        with:
+          python-version: "3.12"
+          enable-cache: true
+          cache-dependency-glob: "worker/uv.lock"
+
+      - name: Install dependencies
+        if: steps.decide.outputs.go == 'yes'
+        run: uv sync
+
+      - name: Adopt markers (sync-incidents)
+        if: steps.decide.outputs.go == 'yes'
+        env:
+          B2_KEY_ID: ${{ secrets.B2_KEY_ID }}
+          B2_APP_KEY: ${{ secrets.B2_APP_KEY }}
+          B2_BUCKET: responder-debrief-data
+          B2_S3_ENDPOINT: ${{ vars.B2_S3_ENDPOINT }}
+          TILE_BUDGET: "40"
+          MIRROR_MAX_SECONDS: ${{ vars.MIRROR_MAX_SECONDS || '1200' }}
+          PRIORITY_FIRES: ${{ vars.PRIORITY_FIRES || 'big-grass' }}
+          TILE_MAX_SECONDS: ${{ vars.TILE_MAX_SECONDS || '900' }}
+        run: uv run python -m responder_worker.cli sync-incidents

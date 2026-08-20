@@ -1,10 +1,12 @@
 name: Mirror incidents
 
-# 4x/day: FTP crawl -> match to active fires -> mirror PDFs -> GeoPDF tiles +
-# IR vectors -> B2. Odd minute to dodge the GH scheduler rush.
+# Hourly: FTP crawl -> match to active fires -> mirror PDFs -> GeoPDF tiles +
+# IR vectors -> B2. Cheap when nothing changed (state skips unchanged dirs in
+# milliseconds); hourly polling is what makes fresh sheets land near-publish.
+# Odd minute, offset from catalogs (:07) and tile (:13).
 on:
   schedule:
-    - cron: "25 1,7,13,19 * * *"
+    - cron: "41 * * * *"
   workflow_dispatch:
     inputs:
       fire:
