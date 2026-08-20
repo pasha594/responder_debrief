@@ -131,6 +131,15 @@ def cmd_sync_catalogs(args) -> int:
                     inc["ir_count"] = len(irs)
                     inc["latest_upload"] = max(dates) if dates else None
                     healed += 1
+                else:
+                    # Matched+mirrored but its manifest never published (a
+                    # deadline can land between mirroring and the manifest
+                    # upload). Advertising the path would 404 (and B2 error
+                    # responses carry no CORS headers, spamming the console).
+                    # Clear the mtime so the next mirror run republishes from
+                    # cache, and leave the fire un-advertised until then.
+                    inc["dir_mtime"] = None
+                    continue
             incident_matches[inc["fire_slug"]] = {
                 "method": m.get("method"),
                 "confidence": m.get("confidence"),

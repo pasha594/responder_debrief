@@ -95,6 +95,8 @@ export const basemapUnderlay: LayerManager = {
     appliedFor = null;
     hidden = [];
     unsubscribe = useStore.subscribe((state, prev) => {
+      const gone = map as unknown as { style?: unknown; _removed?: boolean };
+      if (gone._removed || !gone.style) return; // map died — unmount releases us
       if (state.ui.basemap !== prev.ui.basemap) {
         try {
           apply(map);

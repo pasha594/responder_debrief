@@ -205,12 +205,13 @@ export function useMapLayerSync(): void {
     return () => {
       if (mountedOn.current !== map) return;
       mountedOn.current = null;
-      // Leaving fire mode deletes this whole subtree, and React tears the
-      // PARENT (MapRoot, which calls map.remove()) down first — so by the time
-      // we get here the style may already be gone. Skip the layer teardown in
-      // that case: maplibre has released everything anyway, and an exception
-      // raised inside an unmount effect would blank the app.
-      if (!isMapUsable(map)) return;
+      // Leaving fire mode deletes this whole subtree, and the style may be
+      // gone by the time we get here (MapRoot's map.remove() can precede us).
+      // Managers must STILL unmount: several hold store subscriptions and
+      // map/DOM listeners, and a leaked subscription later rendering into a
+      // removed map crashes the NEXT map ("reading 'getSource'" on first
+      // fire entry). Style-touching teardown throws harmlessly into the
+      // per-manager catch.
       for (const m of MANAGERS) {
         try {
           m.unmount(map);
@@ -221,9 +222,10 @@ export function useMapLayerSync(): void {
     };
   }, [map]);
 
-  // Drive updates.
+  // Drive updates. A ctx tick can land after map.remove() mid-transition —
+  // updating a dead map throws deep inside maplibre, so gate on usability.
   useEffect(() => {
-    if (!map || mountedOn.current !== map) return;
+    if (!map || mountedOn.current !== map || !isMapUsable(map)) return;
     for (const m of MANAGERS) m.update(map, ctx);
   }, [map, ctx]);
 

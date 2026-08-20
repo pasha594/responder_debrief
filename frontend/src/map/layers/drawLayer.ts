@@ -368,6 +368,8 @@ export const drawLayer: LayerManager = {
 
     // Self-driven: draw-slice changes re-render without a LayerContext pass.
     unsubscribe = useStore.subscribe((state, prev) => {
+      const gone = map as unknown as { style?: unknown; _removed?: boolean };
+      if (gone._removed || !gone.style) return; // map died — unmount releases us
       if (state.draw !== prev.draw) {
         render(map);
         setCursor(map);
