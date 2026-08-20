@@ -39,6 +39,8 @@ interface Cells {
   perimeterClass: string;
   perimeterTitle: string | undefined;
   forecastRun: string | null;
+  forecastClass: string;
+  forecastTitle: string | undefined;
   files: string;
   upload: string | null;
 }
@@ -65,9 +67,13 @@ function cells(row: Row, nowMs: number): Cells {
       : undefined,
     forecastRun: row.hasForecast
       ? row.spreadLatestRun
-        ? `run ${formatRelative(row.spreadLatestRun, nowMs)}`
-        : null
+        ? formatRelative(row.spreadLatestRun, nowMs)
+        : 'available'
       : null,
+    forecastClass: `rd-dir-fresh rd-dir-fresh--${perimeterFreshness(row.spreadLatestRun, nowMs)}`,
+    forecastTitle: row.spreadLatestRun
+      ? `Latest forecast run ${new Date(row.spreadLatestRun).toISOString().replace('T', ' ').slice(0, 16)} UTC`
+      : undefined,
     files,
     upload: row.latestUpload,
   };
@@ -92,14 +98,12 @@ function Containment({ row }: { row: Row }) {
   );
 }
 
-function ForecastCell({ row, run }: { row: Row; run: string | null }) {
-  if (!row.hasForecast) return <span className="rd-muted">{DASH}</span>;
+// Same presentation as the perimeter cell: relative age, freshness-colored.
+function ForecastCell({ c }: { c: Cells }) {
+  if (!c.forecastRun) return <span className="rd-muted">{DASH}</span>;
   return (
-    <span className="rd-dir-yes" title="Pyrecast spread forecast available">
-      <span className="rd-dir-check" aria-hidden="true">
-        ✓
-      </span>
-      <span className="rd-dir-sub">{run ?? 'available'}</span>
+    <span className={c.forecastClass} title={c.forecastTitle}>
+      {c.forecastRun}
     </span>
   );
 }
@@ -188,7 +192,7 @@ function DirectoryRowImpl({ row, nowMs, variant, onOpen }: DirectoryRowProps) {
         </span>
       </td>
       <td className="rd-dir-c-fcst">
-        <ForecastCell row={row} run={c.forecastRun} />
+        <ForecastCell c={c} />
       </td>
       <td className="rd-dir-c-ftp">
         {c.files === DASH ? (
