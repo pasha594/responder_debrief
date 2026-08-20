@@ -1,9 +1,10 @@
 /**
- * App shell. Two modes, one hash router:
- *   ''            → the fire directory (no map is mounted)
- *   '#/fire/{id}' → the full-screen map shell, scoped to that one fire
+ * App shell. Three path routes (see router.ts):
+ *   {base}          → the fire directory (no map is mounted)
+ *   {base}fire/{id} → the full-screen map shell, scoped to that one fire
+ *   {base}health    → ingestion observability
  */
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef } from 'react';
 import { MapRoot } from '../map/MapRoot';
 import { useMapLayerSync } from '../map/useMapLayerSync';
 import { useStore } from '../state/store';
@@ -16,6 +17,8 @@ import { LegendBar } from '../panels/LegendBar';
 import { ErrorBoundary } from '../utils/ErrorBoundary';
 import { useTimelineDomain } from '../timeline/useTimelineDomain';
 import { DirectoryView } from '../directory/DirectoryView';
+import { navNotify, parseLocation, routePath, sameRoute, useRoute, type Route } from './router';
+import { applyViewState, buildSearch, decodeSearch } from './urlState';
 
 function MapLayerBridge() {
   useMapLayerSync();
@@ -23,58 +26,118 @@ function MapLayerBridge() {
   return null;
 }
 
-function parseHash(): string | null {
-  const m = /^#\/fire\/(.+)$/.exec(window.location.hash);
-  return m ? decodeURIComponent(m[1]) : null;
-}
-
 /**
- * Two-way sync between the URL hash (#/fire/{corneaId}) and store.view; no
- * hash (or '#/') is the directory. Hash routing keeps GitHub Pages deploys
- * trivial (no 404 fallback needed) and costs no router dependency.
+ * Two-way sync between the URL path and store.view. (Legacy '#/…' links are
+ * rewritten to their path form by App — it must also cover the health route,
+ * where PathSync never mounts.)
  */
-function HashSync() {
+function PathSync() {
   const view = useStore((s) => s.view);
   const actions = useStore((s) => s.actions);
 
-  // hash → store (also runs once on mount for deep links)
+  // URL → store (also runs once on mount for deep links)
   useEffect(() => {
     const apply = () => {
-      const id = parseHash();
+      const route = parseLocation();
       const cur = useStore.getState().view;
-      if (id && (cur.mode !== 'fire' || cur.corneaId !== id)) {
-        actions.selectFire(id);
-      } else if (!id && cur.mode !== 'directory') {
+      if (route.name === 'fire' && (cur.mode !== 'fire' || cur.corneaId !== route.id)) {
+        actions.selectFire(route.id);
+      } else if (route.name === 'directory' && cur.mode !== 'directory') {
         actions.backToDirectory();
       }
+      // 'health' renders over whatever store mode is current — no store change.
     };
     apply();
-    window.addEventListener('hashchange', apply);
-    return () => window.removeEventListener('hashchange', apply);
+    window.addEventListener('popstate', apply);
+    return () => window.removeEventListener('popstate', apply);
   }, [actions]);
 
-  // store → hash (row clicks, map pin clicks, back button)
+  // store → URL (row clicks, map pin clicks, back button)
   //
-  // Both effects run on mount, and this one sees the INITIAL view (directory)
-  // in that first pass — so on a cold load of a #/fire/{id} deep link it used
-  // to strip the hash before the hash → store effect could apply it, dumping
-  // the visitor on the directory. Skip until the hash has been read once.
-  const hydrated = useRef(false);
+  // Read the view FRESH from the store here, never from the render closure:
+  // on a cold deep-link load (and again on StrictMode's dev double-mount)
+  // this effect fires while the closure still holds the initial directory
+  // view — acting on that would push the directory path over the deep link,
+  // stripping the shared ?query. The URL → store effect above always runs
+  // first and zustand updates synchronously, so getState() is truthful.
   useEffect(() => {
-    if (!hydrated.current) {
-      hydrated.current = true;
-      if (parseHash()) return; // a deep link is being applied — do not clobber it
-      if (window.location.hash === '#/health') return; // health page owns the hash
-    }
-    const want = view.mode === 'fire' ? `#/fire/${encodeURIComponent(view.corneaId)}` : '';
-    const cur = window.location.hash;
-    if (want && cur !== want) {
-      window.location.hash = want;
-    } else if (!want && cur && cur !== '#/') {
-      // Clear without adding a history entry for the empty state.
-      history.pushState(null, '', window.location.pathname + window.location.search);
+    const cur = parseLocation();
+    if (cur.name === 'health') return; // the health page owns the URL
+    const v = useStore.getState().view;
+    const want: Route =
+      v.mode === 'fire' ? { name: 'fire', id: v.corneaId } : { name: 'directory' };
+    if (!sameRoute(cur, want)) {
+      // Route changes drop the query — view state is per-fire.
+      history.pushState(null, '', routePath(want));
+      navNotify();
     }
   }, [view]);
+
+  return null;
+}
+
+/**
+ * Shareable view state ⇄ query string (fire mode only — mounted inside
+ * FireMapView). On mount the query is decoded into the store; afterwards the
+ * relevant slices are debounced back into the URL via replaceState, so the
+ * address bar always reproduces the current view.
+ */
+function UrlStateSync() {
+  const actions = useStore((s) => s.actions);
+
+  // A shared playhead may point outside the initial timeline domain (the
+  // real domain arrives with catalog data). Keep re-applying until it fits.
+  const pendingT = useRef<number | null>(null);
+
+  useEffect(() => {
+    pendingT.current = applyViewState(
+      decodeSearch(window.location.search), useStore.getState(), actions);
+    const expiry = setTimeout(() => { pendingT.current = null; }, 30_000);
+
+    let last = '';
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const write = (delay: number) => {
+      if (timer) return;
+      timer = setTimeout(() => {
+        timer = null;
+        // Hold while a shared playhead waits for the real domain — writing
+        // now would strip its t param before it ever applied.
+        if (pendingT.current != null) return;
+        const st = useStore.getState();
+        if (st.view.mode !== 'fire') return;
+        const search = buildSearch(st);
+        if (search === last) return;
+        last = search;
+        history.replaceState(null, '', routePath({ name: 'fire', id: st.view.corneaId }) + search);
+      }, delay);
+    };
+
+    let prevTime = useStore.getState().time.currentTime;
+    const unsub = useStore.subscribe((s) => {
+      if (pendingT.current != null) {
+        const [d0, d1] = s.time.domain;
+        if (pendingT.current >= d0 && pendingT.current <= d1) {
+          const t = pendingT.current;
+          pendingT.current = null;
+          if (Math.abs(s.time.currentTime - t) > 1000) actions.setTime(t);
+        } else if (s.time.playing || s.time.currentTime !== prevTime) {
+          // The user moved the playhead (or hit play) first — their intent
+          // wins over the shared link's.
+          pendingT.current = null;
+        }
+      }
+      prevTime = s.time.currentTime;
+      write(1000);
+    });
+    // Carried-over state (weather picks, basemap) should reach the URL right
+    // away, not only after the next store change.
+    write(50);
+    return () => {
+      clearTimeout(expiry);
+      if (timer) clearTimeout(timer);
+      unsub();
+    };
+  }, [actions]);
 
   return null;
 }
@@ -103,6 +166,7 @@ function FireMapView() {
   return (
     <MapRoot>
       <MapLayerBridge />
+      <UrlStateSync />
       <BackControl />
       <BasemapControl />
       <ErrorBoundary label="Fire panel">
@@ -118,21 +182,20 @@ function FireMapView() {
   );
 }
 
-/** Raw location.hash, live — for routes outside store.view (#/health). */
-function useHash(): string {
-  const [hash, setHash] = useState(window.location.hash);
-  useEffect(() => {
-    const onChange = () => setHash(window.location.hash);
-    window.addEventListener('hashchange', onChange);
-    return () => window.removeEventListener('hashchange', onChange);
-  }, []);
-  return hash;
-}
-
 export function App() {
   const mode = useStore((s) => s.view.mode);
-  const hash = useHash();
-  if (hash === '#/health') {
+  const route = useRoute();
+
+  // Legacy '#/…' links rewrite to the path form here — above the health
+  // early-return, because PathSync never mounts on the health route.
+  useEffect(() => {
+    if (window.location.hash.startsWith('#/')) {
+      history.replaceState(null, '', routePath(parseLocation()));
+      navNotify();
+    }
+  }, []);
+
+  if (route.name === 'health') {
     return (
       <div className="rd-app">
         <HealthView />
@@ -141,7 +204,7 @@ export function App() {
   }
   return (
     <div className="rd-app">
-      <HashSync />
+      <PathSync />
       <NowSampler />
       {mode === 'fire' ? (
         <FireMapView />

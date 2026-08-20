@@ -4,6 +4,7 @@
  * the single-fire map shell.
  */
 import { useEffect, useLayoutEffect, useMemo, useRef } from 'react';
+import { HREF_HEALTH } from '../app/router';
 import { useFires, useMasterCatalog } from '../api/queries';
 import { useStore } from '../state/store';
 import { useIsDesktop } from '../utils/useMediaQuery';
@@ -128,7 +129,7 @@ export function DirectoryView() {
       <header className="rd-dir-header">
         <div className="rd-dir-brand">
           <h1 className="rd-dir-wordmark">Responder Brief</h1>
-          <a href="#/health" className="rd-dir-health-link" title="Ingestion health">
+          <a href={HREF_HEALTH} className="rd-dir-health-link" title="Ingestion health">
             Health
           </a>
           <div className="rd-dir-subtitle">{subtitle}</div>

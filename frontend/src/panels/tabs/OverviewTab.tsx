@@ -1,7 +1,6 @@
 /** Fire overview: stats, detail rows, AI summary, structure exposure. */
 import { useFire } from '../../api/queries';
 import type { StructureExposureBuffer } from '../../api/types';
-import { formatRelative } from '../../utils/format';
 import { useImsr, useMasterCatalog } from '../../api/queries';
 import { Markdown } from '../../utils/markdown';
 
@@ -131,9 +130,7 @@ export function OverviewTab({ corneaId }: { corneaId: string }) {
 
       {fire.latest_summary && (
         <section className="rd-ai-card">
-          <div className="rd-ai-head">
-            AI summary • {formatRelative(fire.latest_summary.created_at)}
-          </div>
+          <div className="rd-ai-head">AI summary</div>
           <Markdown>{fire.latest_summary.summary_text}</Markdown>
           <div className="rd-disclaimer">AI-generated from official sources</div>
         </section>

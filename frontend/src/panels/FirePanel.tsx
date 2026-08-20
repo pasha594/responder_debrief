@@ -46,15 +46,7 @@ export function FirePanel({ corneaId }: { corneaId: string }) {
       <header className="rd-fp-header">
         <div className="rd-fp-titlerow">
           <h2 className="rd-fp-name">{fire?.post_title ?? '…'}</h2>
-          {fire &&
-            (contained ? (
-              <span className="rd-badge rd-badge-contained">Contained</span>
-            ) : fire.active ? (
-              <span className="rd-badge rd-badge-active">
-                <span className="rd-pulse-dot" aria-hidden="true" />
-                Active
-              </span>
-            ) : null)}
+          {fire && contained && <span className="rd-badge rd-badge-contained">Contained</span>}
         </div>
         {fire && (
           <div className="rd-fp-state">

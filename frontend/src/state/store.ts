@@ -277,7 +277,19 @@ export const useStore = create<AppState>((set, get) => ({
         };
       }),
 
-    sampleNow: () => set((s) => ({ time: { ...s.time, now: Date.now() } })),
+    sampleNow: () =>
+      set((s) => {
+        const now = Date.now();
+        // A playhead sitting on "now" follows it (so an idle page keeps
+        // showing the present, and the shared-URL codec never mistakes the
+        // drift between samples for a user scrub). A scrubbed or playing
+        // playhead stays put.
+        const pinned =
+          !s.time.playing && Math.abs(s.time.currentTime - s.time.now) < 2 * 60_000;
+        return {
+          time: { ...s.time, now, currentTime: pinned ? now : s.time.currentTime },
+        };
+      }),
 
     play: () => set((s) => ({ time: { ...s.time, playing: true } })),
     pause: () => set((s) => ({ time: { ...s.time, playing: false, buffering: false } })),

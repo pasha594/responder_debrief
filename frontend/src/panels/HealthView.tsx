@@ -7,6 +7,7 @@
  *  - The published catalogs' generated_at stamps: end-to-end data freshness.
  */
 import { useQuery } from '@tanstack/react-query';
+import { HREF_DIRECTORY } from '../app/router';
 import { useHealth, useImsr, useMasterCatalog, useWeatherRuns } from '../api/queries';
 import { formatBytes, formatRelative } from '../utils/format';
 
@@ -137,7 +138,7 @@ export function HealthView() {
   return (
     <div className="rd-health">
       <header className="rd-health-head">
-        <a href="#/" className="rd-back">
+        <a href={HREF_DIRECTORY} className="rd-back">
           ← All fires
         </a>
         <h2>Ingestion health</h2>
