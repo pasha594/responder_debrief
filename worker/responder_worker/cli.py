@@ -12,6 +12,7 @@ import os
 import shutil
 import sys
 import tempfile
+from types import SimpleNamespace
 from collections import Counter
 from datetime import datetime
 from pathlib import Path
@@ -31,7 +32,7 @@ from .matching import (
     match_candidate,
     normalize_name,
 )
-from .mirror import IncidentMirror, MirroredFile
+from .mirror import IncidentMirror, MirroredFile, MirrorResult
 
 DEFAULT_OUT = Path(__file__).resolve().parent.parent / "out"
 
@@ -1023,6 +1024,36 @@ def cmd_sync_incidents(args) -> int:
         if deferred:
             log(f"[incidents] download deadline reached — {deferred} candidate dirs "
                 "deferred to the next scheduled run")
+
+        # A fire's manifest is the UNION of all its incident dirs (a complex/
+        # event dir can carry the same fire's sheets). When only one dir
+        # changed this run, its rebuild would drop the unchanged siblings'
+        # sheets — so hand those siblings to the manifest phase as pure state
+        # replays: no FTP work, files come from the per-incident cache.
+        rebuilt_slugs = {b["fire"]["fire_slug"] for b in mirrors.values()}
+        for inc_key, rec in list(state["incidents"].items()):
+            slug = rec.get("fire_slug")
+            if (inc_key in mirrors or slug not in rebuilt_slugs
+                    or not rec.get("files")):
+                continue
+            fire = fires_by_slug.get(slug)
+            if fire is None:
+                continue
+            m = rec.get("match") or {}
+            dir_url = rec.get("dir_url") or ""
+            region = ""
+            parts = dir_url.split("/incident_specific_maps/", 1)
+            if len(parts) == 2:
+                region = parts[1].split("/", 1)[0]
+            mirrors[inc_key] = {
+                "fire": fire,
+                "candidate": SimpleNamespace(region=region, dir_url=dir_url),
+                "match": SimpleNamespace(token=m.get("token")),
+                "result": MirrorResult(),
+            }
+            log(f"[incidents] {inc_key}: unchanged sibling of a rebuilt fire "
+                f"({slug}) — replaying into the manifest union")
+
         _tile_and_manifest(args, storage, state, fires_by_slug, mirrors)
         state_mod.save_state(storage, state)  # tiling records before manifests
 
