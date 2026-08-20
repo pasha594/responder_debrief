@@ -193,3 +193,65 @@ export function rowAction(entry: IncidentMapEntry): RowAction {
   if (entry.georeferenced) return 'overlay-soon';
   return 'view';
 }
+
+
+// ---------- map version series (the "Timeline" button) ----------
+
+/**
+ * Series identity: every sheet with the same product/sheet/orientation is a
+ * version of "the same map" published on different operational periods.
+ */
+export function seriesKey(entry: IncidentMapEntry): string {
+  return `${entry.product}|${entry.sheet ?? ''}|${entry.orientation ?? ''}`;
+}
+
+/**
+ * The instant a version belongs to on the timeline: upload time when known,
+ * else the filename's generation stamp (fire-local wall time parsed as UTC —
+ * hours off at worst, fine for ordering versions a day apart), else the
+ * op date at UTC noon.
+ */
+export function mapVersionTime(entry: IncidentMapEntry): number | null {
+  if (entry.uploaded_at) {
+    const t = Date.parse(entry.uploaded_at);
+    if (Number.isFinite(t)) return t;
+  }
+  if (entry.generated_at_local) {
+    const t = Date.parse(entry.generated_at_local + ':00Z');
+    if (Number.isFinite(t)) return t;
+  }
+  if (entry.op_date) {
+    const t = Date.parse(entry.op_date + 'T12:00:00Z');
+    if (Number.isFinite(t)) return t;
+  }
+  return null;
+}
+
+/** Overlayable versions of a series, oldest first. */
+export function seriesVersions(
+  maps: IncidentMapEntry[],
+  key: string,
+): { entry: IncidentMapEntry; ts: number }[] {
+  return maps
+    .filter((m) => m.tiles && seriesKey(m) === key)
+    .map((entry) => ({ entry, ts: mapVersionTime(entry) ?? 0 }))
+    .filter((v) => v.ts > 0)
+    .sort((a, b) => a.ts - b.ts);
+}
+
+/**
+ * The version the scrub time selects: newest published at-or-before t,
+ * else the earliest (scrubbing before the first version still shows one).
+ */
+export function resolveSeriesVersion(
+  versions: { entry: IncidentMapEntry; ts: number }[],
+  t: number,
+): IncidentMapEntry | null {
+  if (!versions.length) return null;
+  let pick = versions[0];
+  for (const v of versions) {
+    if (v.ts <= t) pick = v;
+    else break;
+  }
+  return pick.entry;
+}

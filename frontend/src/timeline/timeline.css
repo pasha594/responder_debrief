@@ -412,3 +412,32 @@
     bottom: 2px;
   }
 }
+
+/* Map-version pins (Maps tab "Timeline" button): amber squares above the
+   perimeter diamonds' lane. */
+.rd-map-mark {
+  position: absolute;
+  bottom: 18px;
+  width: 16px;
+  height: 16px;
+  margin-left: -8px;
+  background: transparent;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2;
+  cursor: pointer;
+}
+
+.rd-map-mark::after {
+  content: '';
+  width: 7px;
+  height: 7px;
+  border-radius: 2px;
+  background: var(--color-accent);
+  border: 1px solid rgba(20, 16, 20, 0.7);
+}
+
+.rd-map-mark:hover::after {
+  transform: scale(1.35);
+}

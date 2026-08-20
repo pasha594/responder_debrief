@@ -11,6 +11,8 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useStore } from '../state/store';
 import { latestRun, useFire, useMasterCatalog, usePerimeterIndex, usePyrecastRuns } from '../api/queries';
 import { useFireHotspots } from '../api/useFireHotspots';
+import { useIncidentManifest } from '../api/queries';
+import { seriesVersions } from '../utils/incidentMaps';
 import { useIsDesktop } from '../utils/useMediaQuery';
 import { makeLinearScale, type TimeScale } from './timeScale';
 import { activitySamples, hotspotActivity, sparklinePath } from './hotspotActivity';
@@ -164,6 +166,23 @@ export function TimelineTrack() {
     [ticks.days],
   );
 
+  const incidentSeries = useStore((st) => st.layers.incidentMap.series);
+  const catalogFireEntry = catalog?.fires.find((f) => f.cornea_id === corneaId) ?? null;
+  const { data: incidentManifest } = useIncidentManifest(
+    incidentSeries ? (catalogFireEntry?.incident_manifest ?? null) : null,
+  );
+
+  // Map-version pins (the Maps tab's "Timeline" button): one per overlayable
+  // version of the active series; clicking snaps to that publication.
+  const mapMarks = useMemo(() => {
+    if (!incidentSeries || !incidentManifest || width <= 0) return [];
+    return seriesVersions(incidentManifest.maps, incidentSeries).map((v) => ({
+      ts: v.ts,
+      x: scale.timeToX(v.ts),
+      title: `${v.entry.product_label} — uploaded ${formatDateTime(v.ts, tz)} ${tzAbbreviation(v.ts, tz)}`,
+    }));
+  }, [incidentSeries, incidentManifest, scale, width, tz]);
+
   const versionMarks = useMemo(() => {
     if (!perimeterIndex?.length || width <= 0) return [];
     return perimeterIndex.map((item) => {
@@ -284,6 +303,19 @@ export function TimelineTrack() {
           </svg>
         </div>
       )}
+
+      {mapMarks.map((v, i) => (
+        <button
+          key={`m${i}`}
+          type="button"
+          className="rd-map-mark"
+          style={{ left: v.x }}
+          title={v.title}
+          aria-label={v.title}
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={() => actions.setTime(v.ts)}
+        />
+      ))}
 
       {versionMarks.map((v, i) => (
         <button

@@ -95,7 +95,12 @@ export interface AppState {
     perimeters: { visible: boolean };
     /** Retired with the directory pivot; kept for nationalPerimetersLayer. */
     nationalPerimeters: { visible: boolean };
-    incidentMap: { mapId: string | null; opacity: number };
+    incidentMap: {
+      mapId: string | null;
+      /** Version-series key: scrubbing resolves which sheet is overlaid. */
+      series: string | null;
+      opacity: number;
+    };
     irFlight: { flightId: string | null };
   };
 
@@ -148,6 +153,8 @@ export interface AppState {
     toggleHotspots(): void;
     togglePerimeters(): void;
     setIncidentMap(mapId: string | null): void;
+    /** Put a whole version series on the timeline (clears single-map mode). */
+    setIncidentMapSeries(series: string | null): void;
     setIncidentMapOpacity(opacity: number): void;
     setIrFlight(flightId: string | null): void;
     setTheme(theme: 'dark' | 'light'): void;
@@ -189,7 +196,7 @@ export const useStore = create<AppState>((set, get) => ({
 
   layers: {
     spread: {
-      visible: true,
+      visible: false,
       product: 'time-of-arrival',
       percentile: 50,
       opacity: 0.8,
@@ -200,7 +207,7 @@ export const useStore = create<AppState>((set, get) => ({
     hotspots: { visible: true },
     perimeters: { visible: true },
     nationalPerimeters: { visible: true },
-    incidentMap: { mapId: null, opacity: 0.75 },
+    incidentMap: { mapId: null, series: null, opacity: 0.75 },
     irFlight: { flightId: null },
   },
 
@@ -224,11 +231,9 @@ export const useStore = create<AppState>((set, get) => ({
         ui: { ...s.ui, sidebarTab: 'overview', sheetSnap: 'half' },
         layers: {
           ...s.layers,
-          // No UI can turn the forecast layer off, so entering a fire always
-          // re-arms it — a stale `false` from an older session would leave the
-          // Forecast tab with nothing on the map and no way to fix it.
-          spread: { ...s.layers.spread, visible: true },
-          incidentMap: { mapId: null, opacity: s.layers.incidentMap.opacity },
+          // Off by default per feedback: the Show-on-map checkbox (or picking
+          // a product, which implies intent) turns it on.
+          incidentMap: { mapId: null, series: null, opacity: s.layers.incidentMap.opacity },
           irFlight: { flightId: null },
         },
       })),
@@ -240,7 +245,7 @@ export const useStore = create<AppState>((set, get) => ({
         layers: {
           ...s.layers,
           spread: { ...s.layers.spread },
-          incidentMap: { mapId: null, opacity: s.layers.incidentMap.opacity },
+          incidentMap: { mapId: null, series: null, opacity: s.layers.incidentMap.opacity },
           irFlight: { flightId: null },
         },
       })),
@@ -311,7 +316,17 @@ export const useStore = create<AppState>((set, get) => ({
 
     setIncidentMap: (mapId) =>
       set((s) => ({
-        layers: { ...s.layers, incidentMap: { ...s.layers.incidentMap, mapId } },
+        layers: {
+          ...s.layers,
+          incidentMap: { ...s.layers.incidentMap, mapId, series: null },
+        },
+      })),
+    setIncidentMapSeries: (series) =>
+      set((s) => ({
+        layers: {
+          ...s.layers,
+          incidentMap: { ...s.layers.incidentMap, mapId: null, series },
+        },
       })),
     setIncidentMapOpacity: (opacity) =>
       set((s) => ({

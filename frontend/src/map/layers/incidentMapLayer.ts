@@ -8,6 +8,7 @@ import { dataUrl } from '../../api/catalogs';
 import type { IncidentMapEntry } from '../../api/types';
 import { beforeIdFor } from '../zOrder';
 import type { LayerManager } from '../layerTypes';
+import { resolveSeriesVersion, seriesVersions } from '../../utils/incidentMaps';
 
 const SRC = 'rd-incident-map';
 const LYR = 'rd-incident-map';
@@ -34,8 +35,16 @@ export const incidentMapLayer: LayerManager = {
   },
 
   update(map, ctx) {
-    const mapId = ctx.layers.incidentMap.mapId;
-    const entry = mapId ? findEntry(ctx, mapId) : null;
+    const { mapId, series } = ctx.layers.incidentMap;
+    // Series mode: the scrub time picks which version of the sheet shows.
+    const entry = series
+      ? resolveSeriesVersion(
+          seriesVersions(ctx.incidentManifest?.maps ?? [], series),
+          ctx.currentTime,
+        )
+      : mapId
+        ? findEntry(ctx, mapId)
+        : null;
     const tiles = entry?.tiles ?? null;
 
     if (!entry || !tiles) {

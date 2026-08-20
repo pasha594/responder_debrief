@@ -234,6 +234,8 @@ function FireForecastSection({ corneaId }: { corneaId: string }) {
         <span>Show on map</span>
       </label>
 
+      {!spread.visible ? null : (
+        <>
       <div className="rd-field">
         <span className="rd-field-label">Product</span>
         <select
@@ -313,6 +315,8 @@ function FireForecastSection({ corneaId }: { corneaId: string }) {
           <GradientLegend stops={meta.legend_stops} units={meta.units ?? undefined} />
         ) : null}
       </div>
+        </>
+      )}
     </>
   );
 }

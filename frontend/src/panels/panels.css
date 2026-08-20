@@ -1507,3 +1507,18 @@
   color: var(--color-text-muted);
   line-height: 1.5;
 }
+
+/* Tab bar scrolls horizontally as tabs accumulate. */
+.rd-tabbar {
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.rd-tabbar::-webkit-scrollbar {
+  display: none;
+}
+
+.rd-tab {
+  flex: none;
+  white-space: nowrap;
+}

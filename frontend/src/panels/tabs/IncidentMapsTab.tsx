@@ -16,6 +16,7 @@ import {
   groupMapsByDate,
   localToday,
   rowAction,
+  seriesKey,
 } from '../../utils/incidentMaps';
 import { MapLightbox } from '../MapLightbox';
 
@@ -101,7 +102,9 @@ function MapRow({
   const map = useMap();
   const incident = useStore((s) => s.layers.incidentMap);
   const actions = useStore((s) => s.actions);
-  const active = incident.mapId === entry.id;
+  const key = seriesKey(entry);
+  const onTimeline = incident.series === key;
+  const active = incident.mapId === entry.id || onTimeline;
   const pdfHref = dataUrl(entry.pdf_url) + '?v=' + entry.rev;
   const action = rowAction(entry);
 
@@ -140,7 +143,19 @@ function MapRow({
               onClick={() => actions.setIncidentMap(active ? null : entry.id)}
             >
               <span className="rd-radio-dot" aria-hidden="true" />
-              {active ? 'Shown on map' : 'Show on map'}
+              {onTimeline ? 'On timeline' : active ? 'Shown on map' : 'Show on map'}
+            </button>
+          )}
+
+          {action === 'overlay' && (
+            <button
+              type="button"
+              className={`rd-toggle-btn${onTimeline ? ' rd-toggle-btn--on' : ''}`}
+              aria-pressed={onTimeline}
+              title="Pin every version of this map to the timeline — scrubbing swaps the overlay"
+              onClick={() => actions.setIncidentMapSeries(onTimeline ? null : key)}
+            >
+              ⧗ Timeline
             </button>
           )}
 
@@ -323,15 +338,21 @@ export function IncidentMapsTab({ corneaId }: { corneaId: string }) {
  * Sidebar (position: fixed over the map, bottom-left above the legend).
  */
 export function IncidentMapChip() {
-  const mapId = useStore((s) => s.layers.incidentMap.mapId);
+  const { mapId, series } = useStore((s) => s.layers.incidentMap);
   const view = useStore((s) => s.view);
   const actions = useStore((s) => s.actions);
   const corneaId = view.mode === 'fire' ? view.corneaId : null;
   const { data: manifest } = useManifestForFire(corneaId);
 
-  if (!mapId) return null;
-  const entry = manifest?.maps.find((m) => m.id === mapId);
-  const title = entry ? entryTitle(entry) : 'Incident map';
+  if (!mapId && !series) return null;
+  const entry = mapId
+    ? manifest?.maps.find((m) => m.id === mapId)
+    : manifest?.maps.find((m) => seriesKey(m) === series);
+  const title = entry
+    ? series
+      ? `${entry.product_label} — scrub the timeline`
+      : entryTitle(entry)
+    : 'Incident map';
 
   return (
     <div className="rd-map-chip">
