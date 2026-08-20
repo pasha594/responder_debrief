@@ -106,24 +106,24 @@ describe('fireUrl slug resolution', () => {
     resetFiresForTest();
     expect(isCorneaId('{6B0C72B3-0E12-4695-9022-E1113C0AA8D1}')).toBe(true);
     expect(isCorneaId('c9cacf3a-a0b7-41ae-9090-6fe2781f45ae')).toBe(true);
-    expect(isCorneaId('2026-07-23-or-big-grass')).toBe(false);
+    expect(isCorneaId('big-grass-or-2026-07-23')).toBe(false);
 
     // before the index loads: GUIDs resolve, slugs wait
     expect(corneaIdForUrlId('{ABC12345-0E12-4695-9022-E1113C0AA8D1}'))
       .toBe('{ABC12345-0E12-4695-9022-E1113C0AA8D1}');
     expect(firesLoaded()).toBe(false);
-    expect(corneaIdForUrlId('2026-07-23-or-big-grass')).toBeNull();
+    expect(corneaIdForUrlId('big-grass-or-2026-07-23')).toBeNull();
 
     registerFires([
       { cornea_id: '{6B0C}', unique_slug: '2026-07-23-OR-BIG-GRASS' },
       { cornea_id: 'bare-uuid', unique_slug: '2026-08-20-CA-Chia' },
     ] as never);
     expect(firesLoaded()).toBe(true);
-    expect(corneaIdForUrlId('2026-07-23-or-big-grass')).toBe('{6B0C}');
-    expect(corneaIdForUrlId('2026-07-23-OR-BIG-GRASS')).toBe('{6B0C}');
-    expect(corneaIdForUrlId('2026-01-01-zz-gone')).toBeNull();
+    expect(corneaIdForUrlId('big-grass-or-2026-07-23')).toBe('{6B0C}');
+    expect(corneaIdForUrlId('BIG-GRASS-OR-2026-07-23')).toBe('{6B0C}');
+    expect(corneaIdForUrlId('gone-zz-2026-01-01')).toBeNull();
 
-    expect(urlIdForFire('{6B0C}')).toBe('2026-07-23-or-big-grass');
+    expect(urlIdForFire('{6B0C}')).toBe('big-grass-or-2026-07-23');
     expect(urlIdForFire('{not-in-index}')).toBe('{not-in-index}');
     resetFiresForTest();
   });
