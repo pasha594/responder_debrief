@@ -841,6 +841,35 @@ def _probe_backlog(storage, state, log, *, cap: int = 40) -> set[str]:
     return touched
 
 
+def _ir_backlog(state: dict, log) -> set[str]:
+    """Incidents holding IR flights that were mirrored before conversion
+    existed for their format (e.g. KMZ-only flights, pre-KMZ-fallback code).
+    State-only scan, zero network: any flight dir with a convertible source
+    but no attempt recorded in state["ir"] marks the incident for a manifest
+    rebuild, which runs the conversion (results cached either way)."""
+    touched: set[str] = set()
+    attempted_by_fire: dict[str, int] = {}
+    for key in state.get("ir", {}):
+        slug = key.split("/")[2] if key.count("/") >= 3 else ""
+        attempted_by_fire[slug] = attempted_by_fire.get(slug, 0) + 1
+    for inc_key, rec in state.get("incidents", {}).items():
+        fire_slug = rec.get("fire_slug")
+        if not fire_slug:
+            continue
+        flights = set()
+        for rel in rec.get("files", {}):
+            parts = rel.split("/")
+            if (len(parts) >= 3 and parts[0] == "ir"
+                    and rel.lower().endswith(("shapefiles.zip", ".kmz"))):
+                flights.add(parts[1])
+        if len(flights) > attempted_by_fire.get(fire_slug, 0):
+            touched.add(inc_key)
+    if touched:
+        log(f"[incidents] IR backlog: {len(touched)} incidents have "
+            "unconverted flights — queuing manifest rebuilds")
+    return touched
+
+
 def cmd_sync_incidents(args) -> int:
     job_started = cat.now_iso()
     storage = make_storage(args.dry_run, args.out)
@@ -860,6 +889,7 @@ def cmd_sync_incidents(args) -> int:
         backlog_touched = _probe_backlog(storage, state, log)
         backlog_touched |= _tile_backlog(storage, state, log,
                                          zoom_cap=args.zoom_cap)
+        backlog_touched |= _ir_backlog(state, log)
         for inc_key in backlog_touched:
             # cleared mtime => the crawl re-syncs it (files replay from cache,
             # zero downloads) and rebuilds its manifest with the new geo state
