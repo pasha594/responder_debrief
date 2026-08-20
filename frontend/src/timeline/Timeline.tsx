@@ -193,6 +193,17 @@ export function Timeline() {
   };
   const scrubbing = dragging || wheeling;
 
+  // The readout lingers after scrubbing ends, fading out via CSS before it
+  // unmounts.
+  const [lingering, setLingering] = useState(false);
+  const lingerTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  useEffect(() => {
+    clearTimeout(lingerTimer.current);
+    if (scrubbing) setLingering(true);
+    else lingerTimer.current = setTimeout(() => setLingering(false), 1400);
+    return () => clearTimeout(lingerTimer.current);
+  }, [scrubbing]);
+
   return (
     <div
       className={`rd-timeline${wxReveal > 0 ? ' rd-timeline--wx-open' : ''}${
@@ -230,8 +241,11 @@ export function Timeline() {
           <div className="rd-playhead-line" />
           <div className="rd-playhead-handle" />
         </div>
-        {scrubbing && (
-          <div className="rd-dial-readout" aria-live="polite">
+        {(scrubbing || lingering) && (
+          <div
+            className={`rd-dial-readout${scrubbing ? '' : ' rd-dial-readout--fade'}`}
+            aria-live="polite"
+          >
             {formatDateTime(currentTime, tz)} {tzAbbreviation(currentTime, tz)}
           </div>
         )}
