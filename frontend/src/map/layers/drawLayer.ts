@@ -70,6 +70,7 @@ let unsubscribe: (() => void) | null = null;
 let hydratedFor: string | null = null;
 /** In-flight freehand stroke (not yet committed). */
 let stroke: [number, number][] | null = null;
+let lastRenderedFeatures: unknown = null;
 
 const LINE_PAINT = {
   'line-color': ['coalesce', ['get', 'color'], DRAW_LINE_COLOR],
@@ -371,6 +372,7 @@ export const drawLayer: LayerManager = {
       const gone = map as unknown as { style?: unknown; _removed?: boolean };
       if (gone._removed || !gone.style) return; // map died — unmount releases us
       if (state.draw !== prev.draw) {
+        lastRenderedFeatures = state.draw.features;
         render(map);
         setCursor(map);
         const cid = state.view.mode === 'fire' ? state.view.corneaId : null;
@@ -392,8 +394,14 @@ export const drawLayer: LayerManager = {
       hydratedFor = cid;
       useStore.getState().actions.drawHydrate(loadPersisted(cid));
     }
-    render(map);
-    setCursor(map);
+    // ctx ticks every playback frame — only re-render when the draw slice
+    // actually changed (the store subscription covers live edits).
+    const features = useStore.getState().draw.features;
+    if (features !== lastRenderedFeatures) {
+      lastRenderedFeatures = features;
+      render(map);
+      setCursor(map);
+    }
   },
 
   unmount(map) {

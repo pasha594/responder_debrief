@@ -17,6 +17,7 @@ const PERIMETER_COLOR = '#CC0000'; // tokens.css --perimeter
 const EMPTY_FC: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features: [] };
 
 let lastFeature: PerimeterFeature | null = null;
+let lastFireKey: string | null = null;
 let lastVisible: boolean | null = null;
 
 export const perimeterLayer: LayerManager = {
@@ -53,10 +54,20 @@ export const perimeterLayer: LayerManager = {
   update(map, ctx) {
     if (!map.getLayer(FILL) || !map.getLayer(LINE)) return;
 
-    const feature =
-      ctx.view.mode === 'fire' && ctx.layers.perimeters.visible
-        ? (ctx.perimeterFeature ?? null)
-        : null;
+    const on = ctx.view.mode === 'fire' && ctx.layers.perimeters.visible;
+    const fireKey = ctx.view.mode === 'fire' ? ctx.view.corneaId : null;
+    if (fireKey !== lastFireKey) {
+      // New fire: never show the previous fire's shape, even for a frame.
+      lastFireKey = fireKey;
+      lastFeature = null;
+      (map.getSource(SRC) as GeoJSONSource | undefined)?.setData(EMPTY_FC);
+    }
+
+    // ctx.perimeterFeature goes undefined for a beat every time playback
+    // crosses a version boundary (the next version is still fetching).
+    // HOLD the current shape through that gap instead of strobing — only an
+    // explicit hide or fire switch clears it.
+    const feature = on ? (ctx.perimeterFeature ?? lastFeature) : null;
     const visible = feature !== null;
 
     if (visible !== lastVisible) {
@@ -75,6 +86,7 @@ export const perimeterLayer: LayerManager = {
 
   unmount(map) {
     lastFeature = null;
+    lastFireKey = null;
     lastVisible = null;
     if (map.getLayer(LINE)) map.removeLayer(LINE);
     if (map.getLayer(FILL)) map.removeLayer(FILL);
