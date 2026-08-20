@@ -112,6 +112,8 @@ export function Timeline() {
   // 0 = tucked, 1 = fully out. Null when no vertical drag is in flight.
   const [wxDrag, setWxDrag] = useState<number | null>(null);
   const [dragging, setDragging] = useState(false);
+  const [wheeling, setWheeling] = useState(false);
+  const wheelTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const gesture = useRef<{
     startX: number;
     startY: number;
@@ -182,8 +184,14 @@ export function Timeline() {
   useEffect(() => () => setRootLaneVars(null), []);
   const onWheel = (e: React.WheelEvent) => {
     const d = Math.abs(e.deltaX) >= Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
-    if (d) actions.setTime(useStore.getState().time.currentTime + d * msPerPx);
+    if (d) {
+      actions.setTime(useStore.getState().time.currentTime + d * msPerPx);
+      setWheeling(true);
+      clearTimeout(wheelTimer.current);
+      wheelTimer.current = setTimeout(() => setWheeling(false), 900);
+    }
   };
+  const scrubbing = dragging || wheeling;
 
   return (
     <div
@@ -222,9 +230,11 @@ export function Timeline() {
           <div className="rd-playhead-line" />
           <div className="rd-playhead-handle" />
         </div>
-      </div>
-      <div className="rd-time-readout">
-        {formatDateTime(currentTime, tz)} {tzAbbreviation(currentTime, tz)}
+        {scrubbing && (
+          <div className="rd-dial-readout" aria-live="polite">
+            {formatDateTime(currentTime, tz)} {tzAbbreviation(currentTime, tz)}
+          </div>
+        )}
       </div>
     </div>
   );

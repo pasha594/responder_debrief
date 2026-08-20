@@ -10,7 +10,7 @@
   border-top: 1px solid var(--color-border);
   z-index: 30;
   display: grid;
-  grid-template-columns: auto 1fr auto;
+  grid-template-columns: auto 1fr; /* track takes the old readout column */
   align-items: center;
   gap: 10px;
   padding: 0 12px;
@@ -325,13 +325,22 @@
 
 /* ---- readout ---- */
 
-.rd-time-readout {
-  min-width: 130px;
-  font-size: 12px;
+/* Scrub-time pill floating above the fixed playhead. */
+.rd-dial-readout {
+  position: absolute;
+  top: 3px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 2px 9px;
+  font-size: 11.5px;
   font-variant-numeric: tabular-nums;
-  text-align: right;
-  color: var(--color-text);
   white-space: nowrap;
+  color: var(--color-text);
+  background: var(--color-surface);
+  border: 1px solid var(--color-accent);
+  border-radius: 999px;
+  pointer-events: none;
+  z-index: 5;
 }
 
 /* ---- mobile ---- */
@@ -369,10 +378,6 @@
   }
 
   .rd-wx-row {
-    display: none;
-  }
-
-  .rd-time-readout {
     display: none;
   }
 
