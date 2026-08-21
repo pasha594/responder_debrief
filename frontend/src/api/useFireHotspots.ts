@@ -42,11 +42,23 @@ export function useFireHotspotQuery(corneaId: string | null): HotspotQuery | nul
   return useMemo(() => {
     if (!corneaId) return null;
     // run.bbox is back-filled client-side after the first tif decode (v2
-    // catalogs omit it); until then fall back to a centroid-padded box.
+    // catalogs omit it). The model domain can be SMALLER than the fire
+    // itself, so never let it clip the box: union it with a generous
+    // centroid-padded rectangle.
     const center = spreadRun?.centroid ?? catalogFire?.coordinates ?? null;
+    const centerBox: Bounds4326 | null = center
+      ? [center[0] - 0.5, center[1] - 0.4, center[0] + 0.5, center[1] + 0.4]
+      : null;
+    const run = spreadRun?.bbox ?? null;
     const base: Bounds4326 | null =
-      spreadRun?.bbox ??
-      (center ? [center[0] - 0.5, center[1] - 0.4, center[0] + 0.5, center[1] + 0.4] : null);
+      run && centerBox
+        ? [
+            Math.min(run[0], centerBox[0]),
+            Math.min(run[1], centerBox[1]),
+            Math.max(run[2], centerBox[2]),
+            Math.max(run[3], centerBox[3]),
+          ]
+        : (run ?? centerBox);
     if (!base) return null;
     const created = fire ? Date.parse(fire.created_on) : NaN;
     const sinceDays = Number.isFinite(created)

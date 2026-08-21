@@ -66,14 +66,56 @@ export interface HotspotQuery {
 }
 
 /** Fetch hotspots and stamp acq_ts + conf_norm onto each feature at ingest. */
-export async function fetchHotspots(q: HotspotQuery): Promise<HotspotFeatureCollection> {
+function hotspotKey(f: HotspotFeatureCollection['features'][number]): string {
+  const [lon, lat] = f.geometry.coordinates;
+  const p = f.properties;
+  return `${lon}|${lat}|${p.acq_date}|${p.acq_time}|${p.source}`;
+}
+
+/** One page of /hotspots. */
+async function fetchHotspotPage(
+  q: HotspotQuery,
+  since: string | undefined,
+  limit: number,
+): Promise<HotspotFeatureCollection> {
   const params = new URLSearchParams({ bbox: bboxParam(q.bbox) });
-  if (q.since) params.set('since', q.since);
-  params.set('limit', String(q.limit ?? HOTSPOT_LIMIT));
-  const fc = await getJson<HotspotFeatureCollection>(`${FIRE_API}/hotspots?${params}`);
-  for (const f of fc.features) {
+  if (since) params.set('since', since);
+  params.set('limit', String(limit));
+  return getJson<HotspotFeatureCollection>(`${FIRE_API}/hotspots?${params}`);
+}
+
+/**
+ * Full hotspot history for the box. The API caps a response at 50k features
+ * and serves OLDEST first with no order/offset params — a long-lived fire
+ * blows the cap and silently loses its NEWEST detections (observed: a
+ * 35-day fire whose "current" hotspots ended two weeks early). When a page
+ * comes back full, re-request from the newest day it reached and stitch,
+ * deduping the boundary day.
+ */
+export async function fetchHotspots(q: HotspotQuery): Promise<HotspotFeatureCollection> {
+  const limit = q.limit ?? HOTSPOT_LIMIT;
+  const MAX_PAGES = 8; // 400k features — far beyond any real single-fire box
+  const seen = new Set<string>();
+  const features: HotspotFeatureCollection['features'] = [];
+  let since = q.since;
+  for (let page = 0; page < MAX_PAGES; page++) {
+    const fc = await fetchHotspotPage(q, since, limit);
+    let newest: string | null = null;
+    for (const f of fc.features) {
+      const key = hotspotKey(f);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      features.push(f);
+      const d = f.properties.acq_date;
+      if (d && (!newest || d > newest)) newest = d;
+    }
+    if (fc.features.length < limit) break; // no cap hit — history complete
+    if (!newest || newest === since) break; // cannot advance (degenerate)
+    since = newest;
+  }
+  for (const f of features) {
     f.properties.acq_ts = hotspotAcqTs(f.properties.acq_date, f.properties.acq_time);
     f.properties.conf_norm = normalizeConfidence(f.properties.confidence);
   }
-  return fc;
+  return { type: 'FeatureCollection', features };
 }
