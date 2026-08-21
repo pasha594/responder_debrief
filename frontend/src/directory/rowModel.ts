@@ -269,8 +269,13 @@ function sortValue(row: DirectoryRow, key: DirectorySortKey): string | number | 
     case 'forecast':
       if (!row.hasForecast) return null;
       return row.spreadLatestRun ? (orNull(Date.parse(row.spreadLatestRun)) ?? 0) : 0;
-    case 'files':
-      return row.mapCount + row.irCount || null;
+    case 'files': {
+      // Sort by freshness like the other data columns. A fire with files
+      // but an unknown upload time still ranks above one with none at all.
+      if (!(row.mapCount + row.irCount)) return null;
+      const ts = row.latestUploadTs ?? row.latestUpload;
+      return ts ? (orNull(Date.parse(ts)) ?? 0) : 0;
+    }
   }
 }
 

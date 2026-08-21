@@ -381,3 +381,15 @@ describe('matchesQuery two-letter queries', () => {
     expect(matchesQuery(row({ name: 'X', state: 'IN' }), 'in')).toBe(true);
   });
 });
+
+describe('files column sorts by upload time', () => {
+  it('orders by latest upload, files-without-time above no-files', () => {
+    const a = row({ name: 'A', mapCount: 5, latestUploadTs: '2026-08-21T10:00:00Z' });
+    const b = row({ name: 'B', mapCount: 90, latestUploadTs: '2026-08-19T10:00:00Z' });
+    const c = row({ name: 'C', mapCount: 3, latestUploadTs: null, latestUpload: null });
+    const d = row({ name: 'D', mapCount: 0, irCount: 0 });
+    const sort = { key: 'files' as const, dir: 'desc' as const };
+    const out = [d, c, b, a].sort((x, y) => compareRows(x, y, sort)).map((r) => r.name);
+    expect(out).toEqual(['A', 'B', 'C', 'D']);
+  });
+});
