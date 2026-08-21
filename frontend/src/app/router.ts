@@ -16,6 +16,7 @@ const BASE = import.meta.env.BASE_URL; // '/' in dev, '/responder_debrief/' on P
 export type Route =
   | { name: 'directory' }
   | { name: 'health' }
+  | { name: 'sources' }
   | { name: 'fire'; id: string };
 
 /** decodeURIComponent that survives malformed %-encoding (truncated links
@@ -40,6 +41,7 @@ export function parseLocation(
   let p = pathname.startsWith(BASE) ? pathname.slice(BASE.length) : pathname.replace(/^\//, '');
   p = p.replace(/\/+$/, '');
   if (p === 'health') return { name: 'health' };
+  if (p === 'sources') return { name: 'sources' };
   const m = /^fire\/(.+)$/.exec(p);
   if (m) return { name: 'fire', id: safeDecode(m[1]) };
   return { name: 'directory' };
@@ -47,6 +49,7 @@ export function parseLocation(
 
 export function routePath(route: Route): string {
   if (route.name === 'health') return `${BASE}health`;
+  if (route.name === 'sources') return `${BASE}sources`;
   if (route.name === 'fire') return `${BASE}fire/${encodeURIComponent(route.id)}`;
   return BASE;
 }
@@ -80,3 +83,4 @@ export function useRoute(): Route {
 /** Href helpers for plain anchors (full page loads are fine for these). */
 export const HREF_DIRECTORY = BASE;
 export const HREF_HEALTH = `${BASE}health`;
+export const HREF_SOURCES = `${BASE}sources`;

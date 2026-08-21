@@ -12,6 +12,7 @@ import { Sidebar } from '../panels/Sidebar';
 import { BackControl } from '../panels/BackControl';
 import { BasemapControl } from '../panels/BasemapControl';
 import { HealthView } from '../panels/HealthView';
+import { SourcesView } from '../panels/SourcesView';
 import { Timeline } from '../timeline/Timeline';
 import { LegendBar } from '../panels/LegendBar';
 import { ErrorBoundary } from '../utils/ErrorBoundary';
@@ -78,7 +79,7 @@ function PathSync() {
   // first and zustand updates synchronously, so getState() is truthful.
   useEffect(() => {
     const cur = parseLocation();
-    if (cur.name === 'health') return; // the health page owns the URL
+    if (cur.name === 'health' || cur.name === 'sources') return; // static pages own the URL
     const curCornea = cur.name === 'fire' ? corneaIdForUrlId(cur.id) : null;
     // A fire URL that can't be resolved yet belongs to the URL → store
     // effect (still loading, or about to bounce to the directory) — writing
@@ -233,6 +234,13 @@ export function App() {
     return (
       <div className="rd-app">
         <HealthView />
+      </div>
+    );
+  }
+  if (route.name === 'sources') {
+    return (
+      <div className="rd-app">
+        <SourcesView />
       </div>
     );
   }
