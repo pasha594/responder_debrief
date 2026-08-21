@@ -11,6 +11,10 @@ from pathlib import Path
 # ---------------------------------------------------------------------------
 
 FIRE_API = "https://fire-api-prod.web.app"
+# Bulk/backfill traffic (hotspot archive pulls, perimeter-count sweeps) goes
+# to the DEV instance so it never competes with live-site users on prod.
+# Prod stays for the light hourly fires-index fetch (must match the site).
+FIRE_API_DEV = "https://fire-api-dev.web.app"
 GS01_OWS = "https://geoserver-usw1.pyrecast.org/geoserver01/ows"
 FTP_BASE = "https://ftp.wildfire.gov/public/incident_specific_maps"
 

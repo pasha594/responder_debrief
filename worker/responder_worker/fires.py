@@ -92,7 +92,8 @@ def fetch_active_fires(client: httpx.Client) -> list[dict]:
 def fetch_perimeter_count(client: httpx.Client, cornea_id: str) -> int | None:
     """Number of published perimeter versions for one fire (index length)."""
     try:
-        r = client.get(f"{config.FIRE_API}/fires/{cornea_id}/perimeters",
+        # bulk sweep -> dev instance (prod is reserved for live-site traffic)
+        r = client.get(f"{config.FIRE_API_DEV}/fires/{cornea_id}/perimeters",
                        timeout=15)
         r.raise_for_status()
         d = r.json()

@@ -177,7 +177,7 @@ def sync_fire(client, storage, rec: dict, fire: dict,
         if deadline_passed():
             break
         r = client.get(
-            f"{config.FIRE_API}/hotspots",
+            f"{config.FIRE_API_DEV}/hotspots",
             params={"bbox": f"{s},{w},{n},{e}",  # LAT-FIRST
                     "since": cursor, "limit": PAGE_LIMIT},
             timeout=60,
