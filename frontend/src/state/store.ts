@@ -4,6 +4,7 @@
  * TanStack Query — never duplicated here.
  */
 import { create } from 'zustand';
+import { resetScope, track, trackOncePer } from '../app/analytics';
 import { DEFAULT_PLAYBACK_SPEED } from '../app/config';
 import type { Percentile, SpreadProduct, WeatherProduct } from '../api/types';
 import { TOA_DEFAULT_WITHIN_HOURS } from '../spread/toaBands';
@@ -229,7 +230,8 @@ export const useStore = create<AppState>((set, get) => ({
   },
 
   actions: {
-    selectFire: (corneaId) =>
+    selectFire: (corneaId) => {
+      resetScope('fire-view');
       set((s) => ({
         view: { mode: 'fire', corneaId },
         ui: { ...s.ui, sidebarTab: 'overview', sheetSnap: 'half' },
@@ -247,7 +249,8 @@ export const useStore = create<AppState>((set, get) => ({
           incidentMap: { mapId: null, series: null, opacity: s.layers.incidentMap.opacity },
           irFlight: { flightId: null },
         },
-      })),
+      }));
+    },
 
     backToDirectory: () =>
       set((s) => ({
@@ -298,7 +301,10 @@ export const useStore = create<AppState>((set, get) => ({
         };
       }),
 
-    play: () => set((s) => ({ time: { ...s.time, playing: true } })),
+    play: () => {
+      trackOncePer('fire-view', 'playback_started');
+      set((s) => ({ time: { ...s.time, playing: true } }));
+    },
     pause: () => set((s) => ({ time: { ...s.time, playing: false, buffering: false } })),
     setSpeed: (speed) => set((s) => ({ time: { ...s.time, speed } })),
     setBuffering: (buffering) => set((s) => ({ time: { ...s.time, buffering } })),
@@ -318,7 +324,11 @@ export const useStore = create<AppState>((set, get) => ({
     setToaWithinHours: (toaWithinHours) =>
       set((s) => ({ layers: { ...s.layers, spread: { ...s.layers.spread, toaWithinHours } } })),
 
-    setWeatherLayer: (product, state) =>
+    setWeatherLayer: (product, state) => {
+      if (state.visible !== undefined
+          && state.visible !== (get().layers.weather[product]?.visible ?? false)) {
+        track('layer_toggled', { layer: product, on: state.visible });
+      }
       set((s) => {
         const prev = s.layers.weather[product] ?? { visible: false, opacity: 0.7 };
         return {
@@ -327,37 +337,48 @@ export const useStore = create<AppState>((set, get) => ({
             weather: { ...s.layers.weather, [product]: { ...prev, ...state } },
           },
         };
-      }),
+      });
+    },
 
-    toggleHotspots: () =>
+    toggleHotspots: () => {
+      track('layer_toggled', { layer: 'hotspots', on: !get().layers.hotspots.visible });
       set((s) => ({
         layers: { ...s.layers, hotspots: { visible: !s.layers.hotspots.visible } },
-      })),
-    togglePerimeters: () =>
+      }));
+    },
+    togglePerimeters: () => {
+      track('layer_toggled', { layer: 'perimeters', on: !get().layers.perimeters.visible });
       set((s) => ({
         layers: { ...s.layers, perimeters: { visible: !s.layers.perimeters.visible } },
-      })),
+      }));
+    },
 
-    setIncidentMap: (mapId) =>
+    setIncidentMap: (mapId) => {
+      if (mapId) track('map_overlay_shown', { kind: 'sheet' });
       set((s) => ({
         layers: {
           ...s.layers,
           incidentMap: { ...s.layers.incidentMap, mapId, series: null },
         },
-      })),
-    setIncidentMapSeries: (series) =>
+      }));
+    },
+    setIncidentMapSeries: (series) => {
+      if (series) track('map_overlay_shown', { kind: 'series' });
       set((s) => ({
         layers: {
           ...s.layers,
           incidentMap: { ...s.layers.incidentMap, mapId: null, series },
         },
-      })),
+      }));
+    },
     setIncidentMapOpacity: (opacity) =>
       set((s) => ({
         layers: { ...s.layers, incidentMap: { ...s.layers.incidentMap, opacity } },
       })),
-    setIrFlight: (flightId) =>
-      set((s) => ({ layers: { ...s.layers, irFlight: { flightId } } })),
+    setIrFlight: (flightId) => {
+      if (flightId) track('map_overlay_shown', { kind: 'ir' });
+      set((s) => ({ layers: { ...s.layers, irFlight: { flightId } } }));
+    },
 
     setTheme: (theme) => {
       document.documentElement.dataset.theme = theme;
@@ -370,8 +391,16 @@ export const useStore = create<AppState>((set, get) => ({
     },
     setSidebarTab: (sidebarTab) => set((s) => ({ ui: { ...s.ui, sidebarTab } })),
     setSidebarCollapsed: (sidebarCollapsed) => set((s) => ({ ui: { ...s.ui, sidebarCollapsed } })),
-    setBasemap: (basemap) => set((s) => ({ ui: { ...s.ui, basemap } })),
-    setDrawTool: (tool) => set((s) => ({ draw: { ...s.draw, tool } })),
+    setBasemap: (basemap) => {
+      track('basemap_changed', { basemap });
+      set((s) => ({ ui: { ...s.ui, basemap } }));
+    },
+    setDrawTool: (tool) => {
+      if (tool !== 'none' && tool !== 'erase') {
+        trackOncePer('fire-view', 'draw_used', { tool: tool.split(':')[0] });
+      }
+      set((s) => ({ draw: { ...s.draw, tool } }));
+    },
     drawCommit: (features) =>
       set((s) => ({
         draw: {
