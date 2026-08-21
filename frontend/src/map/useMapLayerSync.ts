@@ -28,6 +28,7 @@ import {
   parseFireCoordinates,
   snapBoundsOut,
   type Bounds4326,
+  geometryBounds,
 } from '../api/geo';
 import { resolvePerimeterVersion } from '../timeline/framePlan';
 import type { LayerContext, LayerManager } from './layerTypes';
@@ -234,15 +235,53 @@ export function useMapLayerSync(): void {
     for (const m of MANAGERS) m.update(map, ctx);
   }, [map, ctx]);
 
-  // Fly to the selected fire when it changes.
+  // Initial camera. Best framing is the NEWEST PERIMETER with padding — the
+  // forecast-domain bbox or a fixed zoom is often far too wide. The
+  // perimeter loads async, so: fly to the best target available now, then
+  // upgrade ONCE to the perimeter fit when it arrives — unless the user has
+  // already taken the camera somewhere themselves.
   const flownTo = useRef<string | null>(null);
+  const perimeterFit = useRef<string | null>(null);
+  const userMoved = useRef(false);
+  useEffect(() => {
+    if (!map) return;
+    const onUserMove = (e: { originalEvent?: unknown }) => {
+      if (e.originalEvent) userMoved.current = true;
+    };
+    map.on('movestart', onUserMove);
+    return () => {
+      map.off('movestart', onUserMove);
+    };
+  }, [map]);
+
   useEffect(() => {
     if (!map) return;
     if (view.mode !== 'fire') {
       flownTo.current = null;
+      perimeterFit.current = null;
+      return;
+    }
+    if (flownTo.current !== view.corneaId) {
+      userMoved.current = false;
+      perimeterFit.current = null;
+    }
+    const FIT_PADDING = { top: 60, bottom: 120, left: 60, right: 420 };
+
+    const perimBox = perimeterFeature ? geometryBounds(perimeterFeature.geometry) : null;
+    if (perimBox && perimeterFit.current !== view.corneaId && !userMoved.current) {
+      flownTo.current = view.corneaId;
+      perimeterFit.current = view.corneaId;
+      map.fitBounds(
+        [
+          [perimBox[0], perimBox[1]],
+          [perimBox[2], perimBox[3]],
+        ],
+        { padding: FIT_PADDING, duration: 1200, maxZoom: 12 },
+      );
       return;
     }
     if (flownTo.current === view.corneaId) return;
+
     const target = spreadRun?.bbox ?? null;
     if (target) {
       flownTo.current = view.corneaId;
@@ -251,7 +290,7 @@ export function useMapLayerSync(): void {
           [target[0], target[1]],
           [target[2], target[3]],
         ],
-        { padding: { top: 60, bottom: 120, left: 60, right: 420 }, duration: 1200 },
+        { padding: FIT_PADDING, duration: 1200 },
       );
       return;
     }
@@ -265,5 +304,5 @@ export function useMapLayerSync(): void {
       flownTo.current = view.corneaId;
       map.flyTo({ center, zoom: 10, duration: 1200 });
     }
-  }, [map, view, spreadRun, catalogFire, fires]);
+  }, [map, view, spreadRun, catalogFire, fires, perimeterFeature]);
 }

@@ -115,3 +115,25 @@ export function hotspotAcqTs(acqDate: string, acqTime: string): number {
   const mm = hhmm.slice(2, 4);
   return Date.parse(`${acqDate}T${hh}:${mm}:00Z`);
 }
+
+/** [w, s, e, n] of any GeoJSON geometry (positions walked recursively). */
+export function geometryBounds(
+  geometry: { type: string; coordinates: unknown } | null | undefined,
+): [number, number, number, number] | null {
+  if (!geometry?.coordinates) return null;
+  let w = Infinity, s = Infinity, e = -Infinity, n = -Infinity;
+  const walk = (c: unknown): void => {
+    if (!Array.isArray(c)) return;
+    if (typeof c[0] === 'number' && typeof c[1] === 'number') {
+      const lon = c[0] as number, lat = c[1] as number;
+      if (lon < w) w = lon;
+      if (lon > e) e = lon;
+      if (lat < s) s = lat;
+      if (lat > n) n = lat;
+      return;
+    }
+    for (const child of c) walk(child);
+  };
+  walk(geometry.coordinates);
+  return Number.isFinite(w) ? [w, s, e, n] : null;
+}

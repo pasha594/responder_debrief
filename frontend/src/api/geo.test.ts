@@ -9,6 +9,7 @@ import {
   padBounds,
   parseFireCoordinates,
   snapBoundsOut,
+  geometryBounds,
 } from './geo';
 
 describe('parseFireCoordinates', () => {
@@ -89,5 +90,20 @@ describe('hotspotAcqTs', () => {
     expect(hotspotAcqTs('2026-08-16', '421.0')).toBe(Date.parse('2026-08-16T04:21:00Z'));
     expect(hotspotAcqTs('2026-08-16', '1735.0')).toBe(Date.parse('2026-08-16T17:35:00Z'));
     expect(hotspotAcqTs('2026-08-16', '0.0')).toBe(Date.parse('2026-08-16T00:00:00Z'));
+  });
+});
+
+describe('geometryBounds', () => {
+  it('walks polygons and multipolygons', () => {
+    expect(geometryBounds({
+      type: 'Polygon',
+      coordinates: [[[-120, 48], [-119, 48.5], [-119.5, 47.5], [-120, 48]]],
+    })).toEqual([-120, 47.5, -119, 48.5]);
+    expect(geometryBounds({
+      type: 'MultiPolygon',
+      coordinates: [[[[-1, -1], [1, 1], [0, 2]]], [[[5, 5], [6, 4], [5.5, 6]]]],
+    })).toEqual([-1, -1, 6, 6]);
+    expect(geometryBounds(null)).toBeNull();
+    expect(geometryBounds({ type: 'Polygon', coordinates: [] })).toBeNull();
   });
 });

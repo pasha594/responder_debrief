@@ -41,9 +41,9 @@ const ICON_SIZE: ExpressionSpecification = [
   ['linear'],
   ['zoom'],
   3,
-  ['*', 0.5, ACRES_BOOST],
+  ['*', 0.25, ACRES_BOOST],
   10,
-  ['*', 0.9, ACRES_BOOST],
+  ['*', 0.45, ACRES_BOOST],
 ];
 
 function iconImageExpr(selectedId: string | null): ExpressionSpecification {
