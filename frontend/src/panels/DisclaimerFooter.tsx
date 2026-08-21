@@ -6,7 +6,7 @@ export function DisclaimerFooter() {
     && window.location.pathname.endsWith('/sources');
   return (
     <footer className="rd-site-disclaimer">
-      Incibrief is for information purposes only. It is not a replacement for
+      Incibrief is for informational purposes only. It is not a replacement for
       official government sources. It is currently in development and makes no
       guarantees about data accuracy or uptime.
       {!onSources && (
