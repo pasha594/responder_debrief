@@ -320,3 +320,41 @@ class TestRetainDrawableRun:
     def test_legacy_runs_without_frames_block_count_as_drawable(self):
         w = self._weather([{"workspace": "hrrr_18"}])
         assert catalogs.retain_drawable_run(w, self._weather([])) is False
+
+
+def test_valid_day_filters_garbage_dates():
+    from responder_worker.cli import _valid_day
+
+    assert _valid_day("2026-08-20")
+    assert _valid_day("2026-12-31")
+    assert not _valid_day("2026-17-00")
+    assert not _valid_day("2026-00-01")
+    assert not _valid_day(None)
+    assert not _valid_day("20260820")
+
+
+def test_build_catalog_counts_and_legacy_spread_index():
+    from responder_worker import catalogs as cat
+
+    fires = [{"fire_slug": "a", "cornea_id": "{X}", "post_title": "A"}]
+    out = cat.build_catalog(
+        fires, version=1,
+        spread_index={"a": {"latest": "2026-08-20T00:00:00Z", "count": 4}},
+        perimeter_counts={"a": 79},
+        incident_matches={"a": {"method": "unit_id", "confidence": 1.0,
+                                "dir_url": "u", "synced_at": None,
+                                "map_count": 86, "ir_count": 2,
+                                "latest_upload": "2026-08-20",
+                                "latest_upload_ts": "2026-08-20T21:48:00Z"}},
+    )
+    f = out["fires"][0]
+    assert f["perimeter_count"] == 79
+    assert f["spread_run_count"] == 4
+    assert f["spread_latest_run"] == "2026-08-20T00:00:00Z"
+    assert f["incident_latest_upload_ts"] == "2026-08-20T21:48:00Z"
+
+    legacy = cat.build_catalog(fires, version=2,
+                               spread_index={"a": "2026-08-19T00:00:00Z"})
+    g = legacy["fires"][0]
+    assert g["spread_latest_run"] == "2026-08-19T00:00:00Z"
+    assert g["spread_run_count"] is None

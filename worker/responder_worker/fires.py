@@ -87,3 +87,15 @@ def fetch_active_fires(client: httpx.Client) -> list[dict]:
         f["fire_slug"] = slug
         out.append(f)
     return out
+
+
+def fetch_perimeter_count(client: httpx.Client, cornea_id: str) -> int | None:
+    """Number of published perimeter versions for one fire (index length)."""
+    try:
+        r = client.get(f"{config.FIRE_API}/fires/{cornea_id}/perimeters",
+                       timeout=15)
+        r.raise_for_status()
+        d = r.json()
+        return len(d) if isinstance(d, list) else None
+    except Exception:
+        return None

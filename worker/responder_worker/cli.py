@@ -11,7 +11,9 @@ import argparse
 import os
 import shutil
 import sys
+import re
 import tempfile
+import time
 from types import SimpleNamespace
 from collections import Counter
 from datetime import datetime
@@ -22,7 +24,7 @@ import httpx
 from . import archives, catalogs as cat, health, imsr
 from . import config, frames, geopdf, hrrr, ir_vectors, pyrecast, state as state_mod
 from .b2 import make_storage
-from .fires import fetch_active_fires
+from .fires import fetch_active_fires, fetch_perimeter_count
 from .ftp_index import list_dir
 from .http import get_optional, make_client
 from .matching import (
@@ -39,6 +41,15 @@ DEFAULT_OUT = Path(__file__).resolve().parent.parent / "out"
 
 def log(msg: str) -> None:
     print(msg, flush=True)
+
+
+# Filenames occasionally parse into impossible dates ("2026-17-00"); only
+# real calendar days may become a fire's latest_upload.
+_DAY_RE = re.compile(r"^20\d{2}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$")
+
+
+def _valid_day(s) -> bool:
+    return bool(s and _DAY_RE.match(s))
 
 
 # ===========================================================================
@@ -63,6 +74,36 @@ def cmd_sync_catalogs(args) -> int:
         log("[catalogs] fetching active fires ...")
         fires = fetch_active_fires(client)
         log(f"[catalogs] active wildfires: {len(fires)}")
+
+        # Perimeter version counts for the directory. One tiny index GET per
+        # fire, but cached on poly_last_updated so steady-state syncs only
+        # refetch fires whose perimeter actually changed. Wall-clock capped:
+        # stragglers keep their cached count until a later run.
+        log("[catalogs] refreshing perimeter version counts ...")
+        pc_state = state.setdefault("perim_counts", {})
+        perimeter_counts: dict[str, int] = {}
+        pc_deadline = time.monotonic() + 240
+        pc_fetched = 0
+        for f in fires:
+            slug = f["fire_slug"]
+            cached = pc_state.get(slug)
+            poly = f.get("poly_last_updated")
+            if cached and cached.get("poly") == poly and cached.get("count") is not None:
+                perimeter_counts[slug] = cached["count"]
+                continue
+            if time.monotonic() > pc_deadline:
+                if cached and cached.get("count") is not None:
+                    perimeter_counts[slug] = cached["count"]
+                continue
+            n = fetch_perimeter_count(client, f.get("cornea_id") or "")
+            pc_fetched += 1
+            if n is not None:
+                perimeter_counts[slug] = n
+                pc_state[slug] = {"count": n, "poly": poly}
+            elif cached and cached.get("count") is not None:
+                perimeter_counts[slug] = cached["count"]
+        log(f"[catalogs] perimeter counts: {len(perimeter_counts)} fires "
+            f"({pc_fetched} fetched, rest cached)")
 
         log("[catalogs] fetching forecast-archive manifest + fire matches ...")
         pyre = archives.sync(client, storage, state, fires,
@@ -105,7 +146,7 @@ def cmd_sync_catalogs(args) -> int:
                 "drawable run forward so weather layers stay live")
 
     spread_index = {
-        slug: entry["runs"][0]["run_time"]
+        slug: {"latest": entry["runs"][0]["run_time"], "count": len(entry["runs"])}
         for slug, entry in pyre["fires"].items()
         if entry["runs"]
     }
@@ -126,11 +167,13 @@ def cmd_sync_catalogs(args) -> int:
                 maps = man.get("maps") or []
                 irs = man.get("ir_flights") or []
                 if maps or irs:
-                    dates = [x.get("op_date") for x in maps if x.get("op_date")]
-                    dates += [x.get("flight_date") for x in irs if x.get("flight_date")]
+                    dates = [x.get("op_date") for x in maps if _valid_day(x.get("op_date"))]
+                    dates += [x.get("flight_date") for x in irs if _valid_day(x.get("flight_date"))]
+                    ts = [x.get("uploaded_at") for x in maps if x.get("uploaded_at")]
                     inc["map_count"] = len(maps)
                     inc["ir_count"] = len(irs)
                     inc["latest_upload"] = max(dates) if dates else None
+                    inc["latest_upload_ts"] = max(ts) if ts else None
                     healed += 1
                 else:
                     # Matched+mirrored but its manifest never published (a
@@ -149,6 +192,7 @@ def cmd_sync_catalogs(args) -> int:
                 "map_count": inc.get("map_count"),
                 "ir_count": inc.get("ir_count"),
                 "latest_upload": inc.get("latest_upload"),
+                "latest_upload_ts": inc.get("latest_upload_ts"),
             }
 
     if healed:
@@ -158,6 +202,7 @@ def cmd_sync_catalogs(args) -> int:
     catalog = cat.build_catalog(
         fires, version=version,
         incident_matches=incident_matches, spread_index=spread_index,
+        perimeter_counts=perimeter_counts,
         national_layers=national_layers,
     )
 
@@ -532,11 +577,13 @@ def _tile_and_manifest(args, storage, state, fires_by_slug, mirrors) -> None:
 
         # Directory-view summary in catalog.json, so the fire list can show
         # file counts without fetching every per-fire manifest.
-        upload_dates = [m["op_date"] for m in merged_maps if m.get("op_date")]
-        upload_dates += [f["flight_date"] for f in merged_ir if f.get("flight_date")]
+        upload_dates = [m["op_date"] for m in merged_maps if _valid_day(m.get("op_date"))]
+        upload_dates += [f["flight_date"] for f in merged_ir if _valid_day(f.get("flight_date"))]
+        upload_ts = [m.get("uploaded_at") for m in merged_maps if m.get("uploaded_at")]
         inc_state = state["incidents"].setdefault(inc_key, {})
         inc_state["map_count"] = len(merged_maps)
         inc_state["ir_count"] = len(merged_ir)
+        inc_state["latest_upload_ts"] = max(upload_ts) if upload_ts else None
         inc_state["latest_upload"] = max(upload_dates) if upload_dates else None
 
     if tiles_deferred:
@@ -1070,19 +1117,27 @@ def cmd_sync_incidents(args) -> int:
                     "map_count": inc.get("map_count"),
                     "ir_count": inc.get("ir_count"),
                     "latest_upload": inc.get("latest_upload"),
+                    "latest_upload_ts": inc.get("latest_upload_ts"),
                 }
         # Preserve forecast fields owned by sync-catalogs: rebuild them from the
         # previously published catalog so this job never blanks them.
         prev_catalog = storage.get_json("catalogs/catalog.json") or {}
         spread_index = {
-            f["fire_slug"]: f["spread_latest_run"]
+            f["fire_slug"]: {"latest": f["spread_latest_run"],
+                             "count": f.get("spread_run_count")}
             for f in prev_catalog.get("fires", [])
             if f.get("has_spread_forecast") and f.get("spread_latest_run")
+        }
+        perimeter_counts = {
+            slug: rec["count"]
+            for slug, rec in (state.get("perim_counts") or {}).items()
+            if rec.get("count") is not None
         }
         version = int(state.get("catalog_version", 0)) + 1
         catalog = cat.build_catalog(fires, version=version,
                                     incident_matches=incident_matches,
                                     spread_index=spread_index,
+                                    perimeter_counts=perimeter_counts,
                                     national_layers=prev_catalog.get("national_layers"))
         storage.put_json(f"catalogs/versions/catalog.{version}.json", catalog)
         storage.put_json("catalogs/catalog.json", catalog)

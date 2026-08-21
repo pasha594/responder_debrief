@@ -121,6 +121,9 @@ export interface CatalogFire {
   incident_last_synced?: string | null;
   /** FTP map sheets mirrored for this fire. */
   incident_map_count?: number | null;
+  incident_latest_upload_ts?: string | null;
+  perimeter_count?: number | null;
+  spread_run_count?: number | null;
   /** IR flight packages mirrored for this fire. */
   incident_ir_count?: number | null;
   /** YYYY-MM-DD of the newest FTP upload. */

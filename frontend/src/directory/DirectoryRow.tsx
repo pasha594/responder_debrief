@@ -38,16 +38,22 @@ interface Cells {
   perimeter: string;
   perimeterClass: string;
   perimeterTitle: string | undefined;
+  perimeterSub: string | null;
   forecastRun: string | null;
   forecastClass: string;
   forecastTitle: string | undefined;
+  forecastSub: string | null;
+  ftp: string | null;
+  ftpClass: string;
+  ftpSub: string | null;
   files: string;
-  upload: string | null;
 }
 
 function cells(row: Row, nowMs: number): Cells {
   const days = daysSince(row.createdOn, nowMs);
   const bucket = perimeterFreshness(row.polyLastUpdated, nowMs);
+  // Prefer the full upload timestamp; date-only values parse as UTC midnight.
+  const ftpTs = row.latestUploadTs ?? row.latestUpload;
   // A fire can be mirrored before its counts are known (a run that skipped it
   // as unchanged records no map_count). "—" would read as "no maps", so show a
   // check until the next catalog sync backfills the number.
@@ -65,6 +71,10 @@ function cells(row: Row, nowMs: number): Cells {
     perimeterTitle: row.polyLastUpdated
       ? `Newest perimeter ${new Date(row.polyLastUpdated).toISOString().replace('T', ' ').slice(0, 16)} UTC`
       : undefined,
+    perimeterSub:
+      row.perimeterCount != null && row.perimeterCount > 0
+        ? `${row.perimeterCount} ${row.perimeterCount === 1 ? 'version' : 'versions'}`
+        : null,
     forecastRun: row.hasForecast
       ? row.spreadLatestRun
         ? formatRelative(row.spreadLatestRun, nowMs)
@@ -74,8 +84,18 @@ function cells(row: Row, nowMs: number): Cells {
     forecastTitle: row.spreadLatestRun
       ? `Latest forecast run ${new Date(row.spreadLatestRun).toISOString().replace('T', ' ').slice(0, 16)} UTC`
       : undefined,
+    forecastSub:
+      row.spreadRunCount != null && row.spreadRunCount > 0
+        ? `${row.spreadRunCount} ${row.spreadRunCount === 1 ? 'run' : 'runs'}`
+        : null,
+    ftp: ftpTs ? formatRelative(ftpTs, nowMs) : null,
+    ftpClass: `rd-dir-fresh rd-dir-fresh--${perimeterFreshness(ftpTs, nowMs)}`,
+    ftpSub:
+      row.mapCount || row.irCount
+        ? `${row.mapCount} ${row.mapCount === 1 ? 'file' : 'files'}` +
+          (row.irCount ? ` · ${row.irCount} IR` : '')
+        : null,
     files,
-    upload: row.latestUpload,
   };
 }
 
@@ -98,13 +118,17 @@ function Containment({ row }: { row: Row }) {
   );
 }
 
-// Same presentation as the perimeter cell: relative age, freshness-colored.
+// Same presentation as the perimeter cell: relative age, freshness-colored,
+// with the run count beneath in the sub style.
 function ForecastCell({ c }: { c: Cells }) {
   if (!c.forecastRun) return <span className="rd-muted">{DASH}</span>;
   return (
-    <span className={c.forecastClass} title={c.forecastTitle}>
-      {c.forecastRun}
-    </span>
+    <>
+      <span className={c.forecastClass} title={c.forecastTitle}>
+        {c.forecastRun}
+      </span>
+      {c.forecastSub && <div className="rd-dir-sub">{c.forecastSub}</div>}
+    </>
   );
 }
 
@@ -190,17 +214,18 @@ function DirectoryRowImpl({ row, nowMs, variant, onOpen }: DirectoryRowProps) {
         <span className={c.perimeterClass} title={c.perimeterTitle}>
           {c.perimeter}
         </span>
+        {c.perimeterSub && <div className="rd-dir-sub">{c.perimeterSub}</div>}
       </td>
       <td className="rd-dir-c-fcst">
         <ForecastCell c={c} />
       </td>
       <td className="rd-dir-c-ftp">
-        {c.files === DASH ? (
+        {!c.ftp && c.files === DASH ? (
           <span className="rd-muted">{DASH}</span>
         ) : (
           <>
-            <span className="rd-dir-files">{c.files}</span>
-            {c.upload && <div className="rd-dir-sub">{c.upload}</div>}
+            <span className={c.ftp ? c.ftpClass : 'rd-dir-files'}>{c.ftp ?? c.files}</span>
+            {c.ftpSub && <div className="rd-dir-sub">{c.ftpSub}</div>}
           </>
         )}
       </td>

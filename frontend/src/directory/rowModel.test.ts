@@ -101,6 +101,9 @@ function row(over: Partial<DirectoryRow> = {}): DirectoryRow {
     mapCount: 0,
     irCount: 0,
     latestUpload: null,
+    latestUploadTs: null,
+    perimeterCount: null,
+    spreadRunCount: null,
     ...over,
   };
 }

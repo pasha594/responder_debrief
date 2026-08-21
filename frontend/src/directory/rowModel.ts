@@ -35,6 +35,10 @@ export interface DirectoryRow {
   irCount: number;
   /** YYYY-MM-DD of the newest FTP upload. */
   latestUpload: string | null;
+  /** Full ISO timestamp of the newest FTP upload (when the catalog has it). */
+  latestUploadTs: string | null;
+  perimeterCount: number | null;
+  spreadRunCount: number | null;
 }
 
 function num(v: unknown): number | null {
@@ -71,6 +75,9 @@ function fromCatalog(f: CatalogFire): DirectoryRow {
     mapCount: maps,
     irCount: ir,
     latestUpload: str(f.incident_latest_upload),
+    latestUploadTs: str(f.incident_latest_upload_ts),
+    perimeterCount: num(f.perimeter_count),
+    spreadRunCount: num(f.spread_run_count),
   };
 }
 
@@ -93,6 +100,9 @@ function fromSummary(f: FireSummary): DirectoryRow {
     mapCount: 0,
     irCount: 0,
     latestUpload: null,
+    latestUploadTs: null,
+    perimeterCount: null,
+    spreadRunCount: null,
   };
 }
 
