@@ -15,6 +15,7 @@ function mkState(): AppState {
       weather: {},
       hotspots: { visible: true },
       perimeters: { visible: true },
+      historicPerimeters: { visible: false },
       incidentMap: { mapId: null, series: null, opacity: 0.75 },
       irFlight: { flightId: null },
     },
@@ -128,5 +129,17 @@ describe('fireUrl slug resolution', () => {
     expect(urlIdForFire('{6B0C}')).toBe('big-grass-or-2026-07-23');
     expect(urlIdForFire('{not-in-index}')).toBe('{not-in-index}');
     resetFiresForTest();
+  });
+});
+
+describe('historic perimeters url param', () => {
+  it('round-trips hist=1', () => {
+    const s = mkState();
+    (s.layers as { historicPerimeters: { visible: boolean } }).historicPerimeters =
+      { visible: true };
+    const search = buildSearch(s);
+    expect(search).toContain('hist=1');
+    expect(decodeSearch(search).historic).toBe(true);
+    expect(decodeSearch('?').historic).toBeUndefined();
   });
 });

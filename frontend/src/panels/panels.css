@@ -1640,3 +1640,19 @@
 @keyframes rd-resolving-pulse {
   50% { opacity: 0.25; }
 }
+
+/* Historic-perimeters mini legend */
+.rd-hist-legend {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--color-muted);
+  padding: 2px 0 4px 26px;
+}
+.rd-hist-chip {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  display: inline-block;
+}

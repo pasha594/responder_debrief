@@ -96,6 +96,8 @@ export interface AppState {
     weather: Partial<Record<WeatherProduct, WeatherLayerState>>;
     hotspots: { visible: boolean };
     perimeters: { visible: boolean };
+    /** NIFC burn-scar context (last 10 years), lazy-fetched when shown. */
+    historicPerimeters: { visible: boolean };
     /** Retired with the directory pivot; kept for nationalPerimetersLayer. */
     nationalPerimeters: { visible: boolean };
     incidentMap: {
@@ -156,6 +158,7 @@ export interface AppState {
     setWeatherLayer(product: WeatherProduct, state: Partial<WeatherLayerState>): void;
     toggleHotspots(): void;
     togglePerimeters(): void;
+    toggleHistoricPerimeters(): void;
     setIncidentMap(mapId: string | null): void;
     /** Put a whole version series on the timeline (clears single-map mode). */
     setIncidentMapSeries(series: string | null): void;
@@ -211,6 +214,7 @@ export const useStore = create<AppState>((set, get) => ({
     weather: {},
     hotspots: { visible: true },
     perimeters: { visible: true },
+    historicPerimeters: { visible: false },
     nationalPerimeters: { visible: true },
     incidentMap: { mapId: null, series: null, opacity: 0.75 },
     irFlight: { flightId: null },
@@ -246,6 +250,7 @@ export const useStore = create<AppState>((set, get) => ({
           weather: {},
           hotspots: { visible: true },
           perimeters: { visible: true },
+          historicPerimeters: { visible: false },
           incidentMap: { mapId: null, series: null, opacity: s.layers.incidentMap.opacity },
           irFlight: { flightId: null },
         },
@@ -350,6 +355,17 @@ export const useStore = create<AppState>((set, get) => ({
       track('layer_toggled', { layer: 'perimeters', on: !get().layers.perimeters.visible });
       set((s) => ({
         layers: { ...s.layers, perimeters: { visible: !s.layers.perimeters.visible } },
+      }));
+    },
+
+    toggleHistoricPerimeters: () => {
+      track('layer_toggled', { layer: 'historic_perimeters',
+                              on: !get().layers.historicPerimeters.visible });
+      set((s) => ({
+        layers: {
+          ...s.layers,
+          historicPerimeters: { visible: !s.layers.historicPerimeters.visible },
+        },
       }));
     },
 

@@ -324,6 +324,7 @@ function FireForecastSection({ corneaId }: { corneaId: string }) {
 function MapLayerToggles() {
   const hotspots = useStore((s) => s.layers.hotspots.visible);
   const perimeters = useStore((s) => s.layers.perimeters.visible);
+  const historic = useStore((s) => s.layers.historicPerimeters.visible);
   const actions = useStore((s) => s.actions);
   return (
     <section className="rd-section">
@@ -335,6 +336,22 @@ function MapLayerToggles() {
         <input type="checkbox" checked={perimeters} onChange={() => actions.togglePerimeters()} />
         <span>Perimeters</span>
       </label>
+      <label className="rd-field--row">
+        <input
+          type="checkbox"
+          checked={historic}
+          onChange={() => actions.toggleHistoricPerimeters()}
+        />
+        <span>Historic perimeters</span>
+        <span className="rd-title-meta">NIFC, last 10 yr</span>
+      </label>
+      {historic && (
+        <div className="rd-hist-legend" aria-hidden="true">
+          <span className="rd-hist-chip" style={{ background: '#e0a24a' }} /> recent
+          <span className="rd-hist-chip" style={{ background: '#a5875a' }} /> ~5 yr
+          <span className="rd-hist-chip" style={{ background: '#6f675f' }} /> 10 yr
+        </div>
+      )}
     </section>
   );
 }

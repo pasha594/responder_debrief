@@ -20,6 +20,7 @@ import {
   fetchWeatherRuns,
 } from './catalogs';
 import type { PerimeterIndexItem, PyrecastRun, WeatherRun } from './types';
+import { fetchHistoricPerimeters } from './nifcHistory';
 
 export const useFires = () =>
   useQuery({
@@ -93,6 +94,21 @@ export const useHotspots = (q: HotspotQuery | null) =>
     enabled: !!q,
     staleTime: 300_000,
     placeholderData: (prev) => prev,
+  });
+
+/** NIFC historic perimeters near a fire — lazy (enabled only when the
+ * layer is on) and cached forever (history is immutable). */
+export const useHistoricPerimeters = (
+  bbox: [number, number, number, number] | null,
+  excludeCorneaId: string | null,
+  enabled: boolean,
+) =>
+  useQuery({
+    queryKey: ['nifc-history', bbox, excludeCorneaId],
+    queryFn: () => fetchHistoricPerimeters(bbox!, excludeCorneaId),
+    enabled: enabled && !!bbox,
+    staleTime: Infinity,
+    gcTime: 30 * 60_000,
   });
 
 /** Worker-archived hotspot history (daily chunks; index revalidates). */

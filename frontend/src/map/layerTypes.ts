@@ -31,6 +31,7 @@ export interface LayerContext {
   /** Version resolved for currentTime, already fetched (or undefined while loading). */
   perimeterFeature: PerimeterFeature | undefined;
   hotspots: HotspotFeatureCollection | undefined;
+  historicPerimeters: import('../api/nifcHistory').HistoricPerimeterFC | undefined;
   catalog: MasterCatalog | undefined;
   spreadRun: PyrecastRun | null;
   weatherRun: WeatherRun | null;

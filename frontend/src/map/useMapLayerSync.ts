@@ -35,6 +35,7 @@ import type { LayerContext, LayerManager } from './layerTypes';
 
 import { firePinsLayer } from './layers/firePinsLayer';
 import { perimeterLayer } from './layers/perimeterLayer';
+import { useHistoricPerimeters } from '../api/queries';
 import { hotspotLayer } from './layers/hotspotLayer';
 import { spreadForecastLayer } from './layers/spreadForecastLayer';
 import { weatherLayers } from './layers/weatherLayers';
@@ -45,6 +46,7 @@ import { basemapUnderlay } from './layers/basemapUnderlay';
 import { drawLayer } from './layers/drawLayer';
 import { terrainControl } from './layers/terrainControl';
 import { irHeatLayer } from './layers/irHeatLayer';
+import { historicPerimetersLayer } from './layers/historicPerimetersLayer';
 
 // The directory pivot retired nationalPerimetersLayer: the map now only ever
 // shows one incident, so the CONUS perimeter raster has nowhere to render.
@@ -55,6 +57,7 @@ const MANAGERS: LayerManager[] = [
   spreadForecastLayer,
   windArrowsLayer,
   irHeatLayer,
+  historicPerimetersLayer,
   perimeterLayer,
   hotspotLayer,
   firePinsLayer,
@@ -136,6 +139,15 @@ export function useMapLayerSync(): void {
     catalogFire?.incident_manifest ?? null,
   );
 
+  // Historic burn scars: lazy — the query runs only once the layer is on.
+  const histBox = useMemo<[number, number, number, number] | null>(() => {
+    const c = catalogFire?.coordinates;
+    return c ? [c[0] - 0.6, c[1] - 0.5, c[0] + 0.6, c[1] + 0.5] : null;
+  }, [catalogFire]);
+  const { data: historicPerimeters } = useHistoricPerimeters(
+    histBox, corneaId, view.mode === 'fire' && layers.historicPerimeters.visible,
+  );
+
   // Perimeter version resolved for the scrub time, fetched via verbatim path.
   const versionItem = useMemo(
     () => resolvePerimeterVersion(perimeterIndex, currentTime),
@@ -173,6 +185,7 @@ export function useMapLayerSync(): void {
       perimeterIndex,
       perimeterFeature,
       hotspots,
+      historicPerimeters,
       catalog,
       spreadRun,
       weatherRun,
@@ -195,6 +208,7 @@ export function useMapLayerSync(): void {
       perimeterIndex,
       perimeterFeature,
       hotspots,
+      historicPerimeters,
       catalog,
       spreadRun,
       weatherRun,
