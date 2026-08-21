@@ -356,3 +356,19 @@ describe('FTP files when counts are not yet known', () => {
     expect(rows[0].mapCount).toBe(0);
   });
 });
+
+describe('matchesQuery state names', () => {
+  it('matches full state names and exact abbreviations', () => {
+    const or = row({ name: 'BIG GRASS', state: 'OR' });
+    expect(matchesQuery(or, 'oregon')).toBe(true);
+    expect(matchesQuery(or, 'Oreg')).toBe(true);
+    expect(matchesQuery(or, 'or')).toBe(true);
+    expect(matchesQuery(or, 'wash')).toBe(false);
+    const wa = row({ name: 'LITTLE GIANT', state: 'WA' });
+    expect(matchesQuery(wa, 'washington')).toBe(true);
+    expect(matchesQuery(wa, 'giant')).toBe(true);
+    // "or" as a query still matches OR fires but not a WA fire whose name
+    // lacks it
+    expect(matchesQuery(wa, 'or')).toBe(false);
+  });
+});

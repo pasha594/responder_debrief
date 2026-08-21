@@ -206,11 +206,32 @@ export function matchesFilter(row: DirectoryRow, filter: DirectoryFilter): boole
   }
 }
 
-/** Name/state substring match, case-insensitive; blank query matches all. */
+/** Full state names, so "oregon" finds OR fires (abbrs already match). */
+const STATE_NAMES: Record<string, string> = {
+  AL: 'alabama', AK: 'alaska', AZ: 'arizona', AR: 'arkansas', CA: 'california',
+  CO: 'colorado', CT: 'connecticut', DE: 'delaware', FL: 'florida', GA: 'georgia',
+  HI: 'hawaii', ID: 'idaho', IL: 'illinois', IN: 'indiana', IA: 'iowa',
+  KS: 'kansas', KY: 'kentucky', LA: 'louisiana', ME: 'maine', MD: 'maryland',
+  MA: 'massachusetts', MI: 'michigan', MN: 'minnesota', MS: 'mississippi',
+  MO: 'missouri', MT: 'montana', NE: 'nebraska', NV: 'nevada',
+  NH: 'new hampshire', NJ: 'new jersey', NM: 'new mexico', NY: 'new york',
+  NC: 'north carolina', ND: 'north dakota', OH: 'ohio', OK: 'oklahoma',
+  OR: 'oregon', PA: 'pennsylvania', RI: 'rhode island', SC: 'south carolina',
+  SD: 'south dakota', TN: 'tennessee', TX: 'texas', UT: 'utah', VT: 'vermont',
+  VA: 'virginia', WA: 'washington', WV: 'west virginia', WI: 'wisconsin',
+  WY: 'wyoming', DC: 'district of columbia', PR: 'puerto rico',
+};
+
+/** Name/state substring match, case-insensitive; blank query matches all.
+ * States match by abbreviation ("OR") or full name ("oregon"). */
 export function matchesQuery(row: DirectoryRow, query: string): boolean {
   const q = query.trim().toLowerCase();
   if (!q) return true;
-  return row.name.toLowerCase().includes(q) || row.state.toLowerCase().includes(q);
+  if (row.name.toLowerCase().includes(q)) return true;
+  const abbr = row.state.toLowerCase();
+  if (abbr === q) return true; // exact abbr ("or" must not substring-match names it isn't in
+  const full = STATE_NAMES[row.state.toUpperCase()];
+  return full ? full.includes(q) : abbr.includes(q);
 }
 
 // ---------- sorting ----------
