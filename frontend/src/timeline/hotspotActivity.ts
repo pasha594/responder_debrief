@@ -143,11 +143,20 @@ export function bucketHotspotsByDay(
 }
 
 /** counts → 0..1 against the busiest day. All-zero (or empty) → []. */
+/**
+ * Only a day with literally ZERO detections may sit on the baseline. Any
+ * active day gets at least this fraction of the amplitude, so a fire whose
+ * current activity is dwarfed by its own historical peak still visibly
+ * reads as "burning" (user feedback: thousands of hotspots rendered while
+ * the line hugged zero).
+ */
+export const ACTIVE_FLOOR = 0.12;
+
 export function normalizeCounts(counts: number[]): number[] {
   let max = 0;
   for (const c of counts) if (c > max) max = c;
   if (!(max > 0)) return [];
-  return counts.map((c) => c / max);
+  return counts.map((c) => (c > 0 ? Math.max(ACTIVE_FLOOR, c / max) : 0));
 }
 
 export interface ActivityDay extends DayCell {

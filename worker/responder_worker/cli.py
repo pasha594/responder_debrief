@@ -21,7 +21,7 @@ from pathlib import Path
 
 import httpx
 
-from . import archives, catalogs as cat, health, imsr
+from . import archives, hotspots, catalogs as cat, health, imsr
 from . import config, frames, geopdf, hrrr, ir_vectors, pyrecast, state as state_mod
 from .b2 import make_storage
 from .fires import fetch_active_fires, fetch_perimeter_count
@@ -108,6 +108,40 @@ def cmd_sync_catalogs(args) -> int:
         log("[catalogs] fetching forecast-archive manifest + fire matches ...")
         pyre = archives.sync(client, storage, state, fires,
                              force=args.force, log=log)
+
+        # Per-fire hotspot archives (daily chunks on B2, increments only).
+        # Deadline-capped: big backfills advance a few pages per run and
+        # converge across hourly syncs. Ordered stalest-first so no fire
+        # starves behind the backfill of another.
+        log("[hotspots] syncing per-fire archives ...")
+        hs_state = state.setdefault("hotspot_archive", {})
+        hs_deadline = time.monotonic() + int(os.environ.get(
+            "HOTSPOT_SYNC_MAX_SECONDS", "240"))
+        hs_order = sorted(
+            fires,
+            key=lambda f: ((hs_state.get(f["fire_slug"]) or {}).get("last_day") or "",
+                           -(f.get("acres") or 0)),
+        )
+        hs_written = 0
+        hs_deadline_passed = lambda: time.monotonic() > hs_deadline  # noqa: E731
+        for f in hs_order:
+            if hs_deadline_passed():
+                log("[hotspots] wall-clock reached — remaining fires next run")
+                break
+            slug = f["fire_slug"]
+            entry = pyre["fires"].get(slug) or {}
+            runs = entry.get("runs") or []
+            # run records carry a centroid, never a bbox (that is decoded
+            # client-side from the tif) — the box builder rects around it
+            run_centroid = runs[0].get("centroid") if runs else None
+            rec = hs_state.setdefault(slug, {})
+            try:
+                if hotspots.sync_fire(client, storage, rec, f, run_centroid,
+                                      log, deadline_passed=hs_deadline_passed):
+                    hs_written += 1
+            except Exception as exc:
+                log(f"[hotspots] {slug}: sync failed ({exc}) — next run retries")
+        log(f"[hotspots] archives updated for {hs_written} fires")
 
         log("[catalogs] discovering NOAA HRRR cycles (AWS S3 listing) ...")
         hrrr_runs = hrrr.discover_runs(client)
@@ -199,10 +233,15 @@ def cmd_sync_catalogs(args) -> int:
         log(f"[catalogs] backfilled incident counts for {healed} fires from manifests")
 
     version = int(state.get("catalog_version", 0)) + 1
+    hotspot_archives = {
+        slug: True for slug, rec in state.get("hotspot_archive", {}).items()
+        if rec.get("days")
+    }
     catalog = cat.build_catalog(
         fires, version=version,
         incident_matches=incident_matches, spread_index=spread_index,
         perimeter_counts=perimeter_counts,
+        hotspot_archives=hotspot_archives,
         national_layers=national_layers,
     )
 
@@ -1133,11 +1172,16 @@ def cmd_sync_incidents(args) -> int:
             for slug, rec in (state.get("perim_counts") or {}).items()
             if rec.get("count") is not None
         }
+        hotspot_archives = {
+            slug: True for slug, rec in state.get("hotspot_archive", {}).items()
+            if rec.get("days")
+        }
         version = int(state.get("catalog_version", 0)) + 1
         catalog = cat.build_catalog(fires, version=version,
                                     incident_matches=incident_matches,
                                     spread_index=spread_index,
                                     perimeter_counts=perimeter_counts,
+                                    hotspot_archives=hotspot_archives,
                                     national_layers=prev_catalog.get("national_layers"))
         storage.put_json(f"catalogs/versions/catalog.{version}.json", catalog)
         storage.put_json("catalogs/catalog.json", catalog)

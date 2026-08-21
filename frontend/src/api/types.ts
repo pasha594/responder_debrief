@@ -124,6 +124,8 @@ export interface CatalogFire {
   incident_latest_upload_ts?: string | null;
   perimeter_count?: number | null;
   spread_run_count?: number | null;
+  /** Root-relative path of the worker's per-fire hotspot archive index. */
+  hotspot_archive?: string | null;
   /** IR flight packages mirrored for this fire. */
   incident_ir_count?: number | null;
   /** YYYY-MM-DD of the newest FTP upload. */
@@ -464,4 +466,15 @@ export interface HealthDoc {
   catalogs?: HealthCatalogsEntry;
   mirror?: HealthMirrorEntry;
   history?: { job: string; at: string; ok: boolean; note: string | null }[];
+}
+
+/** hotspots/{slug}/index.json — worker-archived daily hotspot chunks. */
+export interface HotspotArchiveIndex {
+  schema: number;
+  /** Chunk-path generation: bumps when the query box grows (fresh backfill
+   * under new URLs so immutable caches are never rewritten). */
+  gen?: number;
+  bbox: [number, number, number, number];
+  days: string[];
+  updated_at: string;
 }

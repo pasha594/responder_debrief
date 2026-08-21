@@ -4,12 +4,14 @@ import {
   fetchFire,
   fetchFires,
   fetchHotspots,
+  normalizeHotspots,
   fetchPerimeterByPath,
   fetchPerimeterIndex,
   type HotspotQuery,
 } from './fireApi';
 import {
   fetchHealth,
+  fetchHotspotArchive,
   fetchImsr,
   fetchIncidentManifest,
   fetchMasterCatalog,
@@ -58,6 +60,20 @@ export const useHotspots = (q: HotspotQuery | null) =>
     queryKey: ['hotspots', q?.bbox, q?.since, q?.limit],
     queryFn: () => fetchHotspots(q!),
     enabled: !!q,
+    staleTime: 300_000,
+    placeholderData: (prev) => prev,
+  });
+
+/** Worker-archived hotspot history (daily chunks; index revalidates). */
+export const useHotspotArchive = (indexPath: string | null) =>
+  useQuery({
+    queryKey: ['hotspot-archive', indexPath],
+    queryFn: async () => {
+      const fc = await fetchHotspotArchive(indexPath!);
+      normalizeHotspots(fc.features);
+      return fc;
+    },
+    enabled: !!indexPath,
     staleTime: 300_000,
     placeholderData: (prev) => prev,
   });

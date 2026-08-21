@@ -1,14 +1,20 @@
 /**
  * Satellite hotspot detections as tinted circles. (Circle layer, not symbol:
  * MapLibre symbol buckets crash past 8192 icons per bucket — historic fire
- * queries return 30k+ points.) Scrubbing is a setFilter + circle-color repaint
- * (cheap per tick); setData happens only when the FeatureCollection identity
- * changes. Age color ramp: fresh #FF7518 → 1 day #FF6467 → 7 days #C05DE1.
+ * queries return 30k+ points.) Scrubbing must stay cheap at 100k+ features:
+ *  - the time window is enforced in PAINT (radius/stroke collapse to 0),
+ *    never via setFilter — filter changes force MapLibre to regenerate
+ *    feature buckets for every tile and the queued work keeps "catching up"
+ *    after the scrub stops;
+ *  - paint transitions are zeroed (the default 300 ms tween on circle-color
+ *    was animating every scrub tick);
+ *  - time applies are throttled with a trailing update, and quantized to the
+ *    minute so identical ticks dedupe.
+ * setData happens only when the FeatureCollection identity changes.
  */
 import {
   Popup,
   type ExpressionSpecification,
-  type FilterSpecification,
   type GeoJSONSource,
   type Map as MlMap,
   type MapLayerMouseEvent,
@@ -60,25 +66,37 @@ const CIRCLE_OPACITY: ExpressionSpecification = [
   0.8,
 ];
 
-const CIRCLE_RADIUS: ExpressionSpecification = [
-  'interpolate',
-  ['linear'],
-  ['zoom'],
-  5,
-  1,
-  9,
-  2.25,
-  13,
-  4,
-];
-
-/** Detections already acquired at tEff, and no older than the age cutoff. */
-export function timeFilter(tEff: number): FilterSpecification {
+/** Acquired at or before tEff, and no older than the age cutoff. */
+function inTimeWindow(tEff: number): ExpressionSpecification {
   return [
     'all',
     ['<=', ['coalesce', ['get', 'acq_ts'], 0], tEff],
     ['>=', ['coalesce', ['get', 'acq_ts'], 0], tEff - HOTSPOT_MAX_AGE_MS],
   ];
+}
+
+/** Radius gated by the time window: out-of-window points collapse to r=0,
+ * which also removes them from hit-testing (unlike opacity 0). MapLibre
+ * only allows ["zoom"] at the top level, so the interpolate wraps the case
+ * (one gated output per zoom stop), not the other way around. */
+export function timeRadiusExpr(tEff: number): ExpressionSpecification {
+  const gate = (r: number): ExpressionSpecification =>
+    ['case', inTimeWindow(tEff), r, 0];
+  return [
+    'interpolate',
+    ['linear'],
+    ['zoom'],
+    5,
+    gate(1),
+    9,
+    gate(2.25),
+    13,
+    gate(4),
+  ];
+}
+
+export function timeStrokeExpr(tEff: number): ExpressionSpecification {
+  return ['case', inTimeWindow(tEff), 0.5, 0];
 }
 
 function escapeHtml(s: string): string {
@@ -120,6 +138,43 @@ function popupHtml(props: Record<string, unknown>): string {
 let lastData: HotspotFeatureCollection | undefined;
 let lastTEff: number | null = null;
 let lastVisible: boolean | null = null;
+
+// ---- throttled time application (one map at a time, like the peers) ----
+const THROTTLE_MS = 100;
+let pendingT: number | null = null;
+let throttleTimer: ReturnType<typeof setTimeout> | null = null;
+let lastApplyAt = 0;
+
+function quantize(t: number): number {
+  return Math.round(t / 60_000) * 60_000;
+}
+
+function applyTime(map: MlMap, t: number): void {
+  lastTEff = t;
+  lastApplyAt = performance.now();
+  map.setPaintProperty(LYR, 'circle-color', ageColorExpr(t));
+  map.setPaintProperty(LYR, 'circle-radius', timeRadiusExpr(t));
+  map.setPaintProperty(LYR, 'circle-stroke-width', timeStrokeExpr(t));
+}
+
+function queueTime(map: MlMap, t: number): void {
+  pendingT = t;
+  const since = performance.now() - lastApplyAt;
+  if (since >= THROTTLE_MS) {
+    pendingT = null;
+    applyTime(map, t);
+    return;
+  }
+  if (throttleTimer) return; // trailing apply already scheduled
+  throttleTimer = setTimeout(() => {
+    throttleTimer = null;
+    const dead = (map as unknown as { _removed?: boolean })._removed || !map.getLayer(LYR);
+    if (dead || pendingT == null) return;
+    const t2 = pendingT;
+    pendingT = null;
+    applyTime(map, t2);
+  }, THROTTLE_MS - since);
+}
 let popup: Popup | null = null;
 const handlersInstalled = new WeakSet<MlMap>();
 
@@ -147,22 +202,25 @@ export const hotspotLayer: LayerManager = {
       map.addSource(SRC, { type: 'geojson', data: EMPTY_FC });
     }
     if (!map.getLayer(LYR)) {
+      const t0 = quantize(Date.now());
       map.addLayer(
         {
           id: LYR,
           type: 'circle',
           source: SRC,
-          filter: timeFilter(Date.now()),
           paint: {
-            'circle-color': ageColorExpr(Date.now()),
+            'circle-color': ageColorExpr(t0),
             'circle-opacity': CIRCLE_OPACITY,
-            'circle-radius': CIRCLE_RADIUS,
-            'circle-stroke-width': 0.5,
+            'circle-radius': timeRadiusExpr(t0),
+            'circle-stroke-width': timeStrokeExpr(t0),
             'circle-stroke-color': 'rgba(0,0,0,0.35)',
           },
         },
         beforeIdFor(map, 'rd-hotspots'),
       );
+      for (const prop of ['circle-color', 'circle-radius', 'circle-stroke-width', 'circle-opacity']) {
+        map.setPaintProperty(LYR, `${prop}-transition`, { duration: 0, delay: 0 });
+      }
     }
     if (!handlersInstalled.has(map)) {
       handlersInstalled.add(map);
@@ -188,16 +246,18 @@ export const hotspotLayer: LayerManager = {
       src?.setData(data);
     }
 
-    // Freeze at present when scrubbing into the future.
-    const tEff = Math.min(ctx.currentTime, ctx.now);
-    if (tEff !== lastTEff) {
-      lastTEff = tEff;
-      map.setFilter(LYR, timeFilter(tEff));
-      map.setPaintProperty(LYR, 'circle-color', ageColorExpr(tEff));
+    // Freeze at present when scrubbing into the future. Minute quantization
+    // makes repeat ticks free; the throttle absorbs scrub streams.
+    const tEff = quantize(Math.min(ctx.currentTime, ctx.now));
+    if (tEff !== lastTEff && tEff !== pendingT) {
+      queueTime(map, tEff);
     }
   },
 
   unmount(map) {
+    if (throttleTimer) clearTimeout(throttleTimer);
+    throttleTimer = null;
+    pendingT = null;
     map.off('click', LYR, onClick);
     map.off('mouseenter', LYR, onEnter);
     map.off('mouseleave', LYR, onLeave);

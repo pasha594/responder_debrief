@@ -372,3 +372,12 @@ describe('matchesQuery state names', () => {
     expect(matchesQuery(wa, 'or')).toBe(false);
   });
 });
+
+describe('matchesQuery two-letter queries', () => {
+  it('never substring-matches other state names', () => {
+    expect(matchesQuery(row({ name: 'X', state: 'CO' }), 'or')).toBe(false); // colORado
+    expect(matchesQuery(row({ name: 'X', state: 'CA' }), 'or')).toBe(false); // califORnia
+    expect(matchesQuery(row({ name: 'X', state: 'OR' }), 'or')).toBe(true);
+    expect(matchesQuery(row({ name: 'X', state: 'IN' }), 'in')).toBe(true);
+  });
+});

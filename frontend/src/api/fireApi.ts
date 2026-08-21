@@ -113,9 +113,16 @@ export async function fetchHotspots(q: HotspotQuery): Promise<HotspotFeatureColl
     if (!newest || newest === since) break; // cannot advance (degenerate)
     since = newest;
   }
+  normalizeHotspots(features);
+  return { type: 'FeatureCollection', features };
+}
+
+/** Derived fields every hotspot consumer relies on (in-place). */
+export function normalizeHotspots(
+  features: HotspotFeatureCollection['features'],
+): void {
   for (const f of features) {
     f.properties.acq_ts = hotspotAcqTs(f.properties.acq_date, f.properties.acq_time);
     f.properties.conf_norm = normalizeConfidence(f.properties.confidence);
   }
-  return { type: 'FeatureCollection', features };
 }

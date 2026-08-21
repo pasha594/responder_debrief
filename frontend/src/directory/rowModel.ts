@@ -229,7 +229,10 @@ export function matchesQuery(row: DirectoryRow, query: string): boolean {
   if (!q) return true;
   if (row.name.toLowerCase().includes(q)) return true;
   const abbr = row.state.toLowerCase();
-  if (abbr === q) return true; // exact abbr ("or" must not substring-match names it isn't in
+  if (abbr === q) return true;
+  // Full-name substring only for 3+ chars: "or" must match OR fires alone,
+  // not colORado/califORnia.
+  if (q.length < 3) return false;
   const full = STATE_NAMES[row.state.toUpperCase()];
   return full ? full.includes(q) : abbr.includes(q);
 }

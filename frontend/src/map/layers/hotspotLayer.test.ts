@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ageColorExpr, timeFilter, HOTSPOT_MAX_AGE_MS } from './hotspotLayer';
+import { ageColorExpr, timeRadiusExpr, timeStrokeExpr, HOTSPOT_MAX_AGE_MS } from './hotspotLayer';
 
 const T = Date.parse('2026-08-18T00:00:00Z');
 const DAY = 86_400_000;
@@ -38,17 +38,34 @@ describe('hotspot age ramp', () => {
   });
 });
 
-describe('hotspot time window', () => {
+describe('hotspot time window (paint-gated)', () => {
+  const radius = timeRadiusExpr(T) as unknown[];
+  // ["interpolate", ["linear"], ["zoom"], 5, gate, 9, gate, 13, gate]
+  const gate = radius[4] as unknown[];
+  const cond = gate[1] as unknown[];
+
+  it('keeps ["zoom"] at the top level (MapLibre requirement) and collapses radius to 0 outside the window', () => {
+    expect(radius[0]).toBe('interpolate');
+    expect((radius[2] as unknown[])[0]).toBe('zoom');
+    expect(gate[0]).toBe('case');
+    expect(gate[3]).toBe(0);
+  });
+
   it('shows only detections acquired at or before the scrub time', () => {
-    const f = timeFilter(T) as unknown[];
-    expect(f[0]).toBe('all');
-    expect((f[1] as unknown[])[0]).toBe('<=');
+    const upper = cond[1] as unknown[];
+    expect(upper[0]).toBe('<=');
+    expect(upper[2]).toBe(T);
   });
 
   it('hides detections older than 3 days', () => {
-    expect(HOTSPOT_MAX_AGE_MS).toBe(3 * DAY);
-    const lower = (timeFilter(T) as unknown[])[2] as unknown[];
+    const lower = cond[2] as unknown[];
     expect(lower[0]).toBe('>=');
-    expect(lower[2]).toBe(T - 3 * DAY);
+    expect(lower[2]).toBe(T - HOTSPOT_MAX_AGE_MS);
+  });
+
+  it('gates the stroke the same way (no phantom rings)', () => {
+    const stroke = timeStrokeExpr(T) as unknown[];
+    expect(stroke[0]).toBe('case');
+    expect(stroke[3]).toBe(0);
   });
 });

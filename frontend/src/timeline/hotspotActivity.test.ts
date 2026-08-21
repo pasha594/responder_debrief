@@ -6,6 +6,7 @@ import {
   fireLocalDayKey,
   fireLocalDayStart,
   hotspotActivity,
+  ACTIVE_FLOOR,
   normalizeCounts,
   sparklinePath,
 } from './hotspotActivity';
@@ -149,6 +150,15 @@ describe('bucketHotspotsByDay', () => {
 describe('normalizeCounts', () => {
   it('scales against the busiest day', () => {
     expect(normalizeCounts([0, 5, 10, 2])).toEqual([0, 0.5, 1, 0.2]);
+  });
+
+  it('floors any active day above the baseline — only true zeros touch it', () => {
+    const out = normalizeCounts([0, 1, 1000]);
+    expect(out[0]).toBe(0);
+    expect(out[1]).toBe(ACTIVE_FLOOR);
+    expect(out[2]).toBe(1);
+    // days already above the floor are untouched (still relative)
+    expect(normalizeCounts([0, 500, 1000])[1]).toBe(0.5);
   });
 
   it('returns nothing when there is no activity at all', () => {

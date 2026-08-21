@@ -10,6 +10,7 @@ import { useMemo } from 'react';
 import {
   latestRun,
   useFire,
+  useHotspotArchive,
   useHotspots,
   useMasterCatalog,
   usePyrecastRuns,
@@ -71,7 +72,24 @@ export function useFireHotspotQuery(corneaId: string | null): HotspotQuery | nul
   }, [corneaId, spreadRun, catalogFire, fire]);
 }
 
-/** The fire's hotspot FeatureCollection (shared cache entry). */
+/**
+ * The fire's hotspot FeatureCollection (shared cache entry). Prefers the
+ * worker's per-fire archive on B2 — increments only, closed-day chunks
+ * cached immutably — and falls back to paging the fire API directly for
+ * fires the worker hasn't archived yet.
+ */
 export function useFireHotspots(corneaId: string | null) {
-  return useHotspots(useFireHotspotQuery(corneaId));
+  const { data: catalog, isError: catalogFailed } = useMasterCatalog();
+  const archivePath =
+    catalog?.fires.find((f) => f.cornea_id === corneaId)?.hotspot_archive ?? null;
+  const q = useFireHotspotQuery(corneaId);
+  const archived = useHotspotArchive(archivePath);
+  // Direct API path only when the archive can't serve: no archive advertised
+  // (wait for the catalog to settle first — the direct pull is tens of MB,
+  // don't fire it just because the catalog is still loading), or the archive
+  // fetch itself failed.
+  const catalogSettled = !!catalog || catalogFailed;
+  const useDirect = catalogSettled && (!archivePath || archived.isError);
+  const direct = useHotspots(useDirect ? q : null);
+  return archivePath && !archived.isError ? archived : direct;
 }
