@@ -21,7 +21,7 @@ import {
   usePyrecastRuns,
   useWeatherRuns,
 } from '../api/queries';
-import { useFireHotspotQuery } from '../api/useFireHotspots';
+import { useFireHotspots } from '../api/useFireHotspots';
 import { HOTSPOT_BBOX_SNAP_DEG, HOTSPOT_NATIONAL_MIN_ZOOM } from '../app/config';
 import {
   boundsToLatFirst,
@@ -144,19 +144,21 @@ export function useMapLayerSync(): void {
   // Scrubbing crosses version boundaries constantly — keep the neighbors warm.
   usePrefetchPerimeterNeighbors(perimeterIndex, versionItem?.path ?? null);
 
-  // Hotspot query: fire mode = fixed bbox since discovery (capped), built by
-  // the shared hook so the timeline's throughline reuses the SAME cache entry.
-  // The map only mounts in fire mode now; the viewport fallback stays a guard.
+  // Hotspots: fire mode goes through the archive-aware hook — the SAME
+  // cache entry the timeline throughline reads, so the map and the sparkline
+  // share one download (archive chunks when advertised, paged API when not).
+  // The timeline needs the data even when the layer is hidden, so there is
+  // nothing to save by gating the fetch on visibility. The viewport query
+  // stays as a guard for the retired national mode.
   const vp = useViewportBounds(map);
-  const fireHotspotQuery = useFireHotspotQuery(corneaId);
-  const hotspotQuery = useMemo(() => {
-    if (!layers.hotspots.visible) return null;
-    if (view.mode === 'fire') return fireHotspotQuery;
+  const { data: fireHotspots } = useFireHotspots(view.mode === 'fire' ? corneaId : null);
+  const viewportQuery = useMemo(() => {
+    if (view.mode === 'fire' || !layers.hotspots.visible) return null;
     if (!vp || vp.zoom < HOTSPOT_NATIONAL_MIN_ZOOM) return null;
     return { bbox: boundsToLatFirst(vp.bounds) };
-  }, [layers.hotspots.visible, view.mode, fireHotspotQuery, vp]);
-
-  const { data: hotspots } = useHotspots(hotspotQuery);
+  }, [layers.hotspots.visible, view.mode, vp]);
+  const { data: viewportHotspots } = useHotspots(viewportQuery);
+  const hotspots = view.mode === 'fire' ? fireHotspots : viewportHotspots;
 
   const ctx: LayerContext = useMemo(
     () => ({
