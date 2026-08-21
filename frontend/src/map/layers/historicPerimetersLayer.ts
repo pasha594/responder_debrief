@@ -45,6 +45,14 @@ function esc(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
+/** DATE_CUR arrives as a "YYYYMMDDHHMMSS" string → "MM/YY". */
+export function fmtWhen(p: Record<string, unknown>): string {
+  const raw = String(p.DATE_CUR ?? '');
+  const m = /^(19|20)(\d{2})(\d{2})/.exec(raw);
+  if (m) return `${m[3]}/${m[2]}`;
+  return String(p.FIRE_YEAR_INT ?? '—');
+}
+
 function onClick(this: MlMap, e: MapLayerMouseEvent): void {
   const f = e.features?.[0];
   if (!f) return;
@@ -54,15 +62,11 @@ function onClick(this: MlMap, e: MapLayerMouseEvent): void {
   popup
     .setLngLat(e.lngLat)
     .setHTML(
-      `<div style="font-family:var(--font-sans,sans-serif);font-size:12px;line-height:1.4;` +
-        `background:var(--color-surface,#241c21);color:var(--color-text,#e8e2e5);` +
-        `border-radius:var(--radius,4px);margin:-10px -10px -15px;padding:8px 10px;">` +
-        `<strong>${esc(String(p.INCIDENT ?? 'Unnamed fire'))}</strong>` +
-        ` <span style="opacity:.55">•</span> ${esc(String(p.FIRE_YEAR_INT ?? '—'))}` +
+      `<strong>${esc(String(p.INCIDENT ?? 'Unnamed fire'))}</strong>` +
+        ` <span style="opacity:.55">•</span> ${esc(fmtWhen(p))}` +
         (Number.isFinite(acres)
           ? ` <span style="opacity:.55">•</span> ${Math.round(acres).toLocaleString('en-US')} ac`
-          : '') +
-        `</div>`,
+          : ''),
     )
     .addTo(this);
 }

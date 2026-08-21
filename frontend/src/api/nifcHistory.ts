@@ -26,6 +26,7 @@ export interface HistoricPerimeterFC {
     properties: {
       INCIDENT: string | null;
       FIRE_YEAR_INT: number | null;
+      DATE_CUR: number | null;
       GIS_ACRES: number | null;
       IRWINID: string | null;
     };
@@ -44,7 +45,7 @@ export function historyQueryUrl(
     geometryType: 'esriGeometryEnvelope',
     inSR: '4326',
     spatialRel: 'esriSpatialRelIntersects',
-    outFields: 'INCIDENT,FIRE_YEAR_INT,GIS_ACRES,IRWINID',
+    outFields: 'INCIDENT,FIRE_YEAR_INT,DATE_CUR,GIS_ACRES,IRWINID',
     outSR: '4326',
     maxAllowableOffset: String(SIMPLIFY_DEG),
     resultOffset: String(offset),

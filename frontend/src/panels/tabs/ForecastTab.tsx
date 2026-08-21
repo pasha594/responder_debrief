@@ -343,7 +343,6 @@ function MapLayerToggles() {
           onChange={() => actions.toggleHistoricPerimeters()}
         />
         <span>Historic perimeters</span>
-        <span className="rd-title-meta">NIFC, last 10 yr</span>
       </label>
       {historic && (
         <div className="rd-hist-legend" aria-hidden="true">

@@ -145,13 +145,7 @@ function popupHtml(props: Record<string, unknown>): string {
   if (props.confidence != null && props.confidence !== '') {
     parts.push(`confidence ${escapeHtml(String(props.confidence))}`);
   }
-  return (
-    `<div style="font-family:var(--font-sans,sans-serif);font-size:12px;line-height:1.4;` +
-    `background:var(--color-surface,#241c21);color:var(--color-text,#e8e2e5);` +
-    `border-radius:var(--radius,4px);margin:-10px -10px -15px;padding:8px 10px;">` +
-    parts.join(' <span style="opacity:.55">•</span> ') +
-    `</div>`
-  );
+  return parts.join(' <span style="opacity:.55">•</span> ');
 }
 
 // ---------- module state ----------

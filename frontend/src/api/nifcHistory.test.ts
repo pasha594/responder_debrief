@@ -9,6 +9,6 @@ describe('historyQueryUrl', () => {
     expect(url).toContain('resultOffset=1000');
     expect(url).toContain('maxAllowableOffset=0.0003');
     expect(url).toContain('f=geojson');
-    expect(url).toContain('outFields=INCIDENT%2CFIRE_YEAR_INT%2CGIS_ACRES%2CIRWINID');
+    expect(url).toContain('outFields=INCIDENT%2CFIRE_YEAR_INT%2CDATE_CUR%2CGIS_ACRES%2CIRWINID');
   });
 });
