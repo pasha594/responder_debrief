@@ -250,6 +250,12 @@ export function App() {
       <NowSampler />
       {mode === 'fire' ? (
         <FireMapView />
+      ) : route.name === 'fire' ? (
+        // Deep link still resolving (slug → fire needs the fires index):
+        // a quiet shell, never a flash of the directory.
+        <div className="rd-route-resolving">
+          <span className="rd-route-resolving-word">Responder Brief</span>
+        </div>
       ) : (
         <ErrorBoundary label="Fire directory">
           <DirectoryView />
