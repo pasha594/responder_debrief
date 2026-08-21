@@ -17,6 +17,7 @@ import {
   useMasterCatalog,
   usePerimeterIndex,
   usePerimeterVersion,
+  usePrefetchPerimeterNeighbors,
   usePyrecastRuns,
   useWeatherRuns,
 } from '../api/queries';
@@ -140,6 +141,8 @@ export function useMapLayerSync(): void {
     [perimeterIndex, currentTime],
   );
   const { data: perimeterFeature } = usePerimeterVersion(versionItem?.path ?? null);
+  // Scrubbing crosses version boundaries constantly — keep the neighbors warm.
+  usePrefetchPerimeterNeighbors(perimeterIndex, versionItem?.path ?? null);
 
   // Hotspot query: fire mode = fixed bbox since discovery (capped), built by
   // the shared hook so the timeline's throughline reuses the SAME cache entry.

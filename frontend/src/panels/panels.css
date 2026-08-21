@@ -1431,11 +1431,13 @@
 /* ---------- /health ---------- */
 
 .rd-health {
+  height: 100%;
+  overflow-y: auto;
+}
+.rd-health-inner {
   max-width: 720px;
   margin: 0 auto;
   padding: 20px 16px 48px;
-  height: 100%;
-  overflow-y: auto;
 }
 
 .rd-health-head {
@@ -1561,12 +1563,17 @@
 }
 
 /* ---------- /sources ---------- */
+/* Full-width scroll surface; the column centers INSIDE it — otherwise wheel
+   events in the side gutters hit the app shell (overflow hidden) and the
+   page "refuses" to scroll depending on where the cursor sits. */
 .rd-sources {
+  overflow-y: auto;
+  height: 100%;
+}
+.rd-sources-inner {
   max-width: 640px;
   margin: 0 auto;
   padding: 28px 20px 12px;
-  overflow-y: auto;
-  height: 100%;
 }
 .rd-sources-header h1 {
   font-family: var(--font-serif);

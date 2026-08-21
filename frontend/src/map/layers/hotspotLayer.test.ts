@@ -69,3 +69,19 @@ describe('hotspot time window (paint-gated)', () => {
     expect(stroke[3]).toBe(0);
   });
 });
+
+describe('coarse prefilter', () => {
+  it('covers the paint-gated window with slack on both sides', async () => {
+    const { coarseFilter, COARSE_BACK_MS, COARSE_FWD_MS, COARSE_RECENTER_MS } =
+      await import('./hotspotLayer');
+    const f = coarseFilter(T) as unknown[];
+    const lower = f[1] as unknown[];
+    const upper = f[2] as unknown[];
+    expect(lower[2]).toBe(T - COARSE_BACK_MS);
+    expect(upper[2]).toBe(T + COARSE_FWD_MS);
+    // slack invariant: after drifting the full recenter distance either way,
+    // the coarse window must still contain the visible [t-3d, t] window
+    expect(COARSE_BACK_MS - COARSE_RECENTER_MS).toBeGreaterThanOrEqual(HOTSPOT_MAX_AGE_MS);
+    expect(COARSE_FWD_MS - COARSE_RECENTER_MS).toBeGreaterThanOrEqual(0);
+  });
+});

@@ -138,6 +138,7 @@ export function HealthView() {
 
   return (
     <div className="rd-health">
+      <div className="rd-health-inner">
       <header className="rd-health-head">
         <a href={HREF_DIRECTORY} className="rd-back">
           ← All fires
@@ -276,6 +277,7 @@ export function HealthView() {
         )}
       </section>
       <DisclaimerFooter />
+      </div>
     </div>
   );
 }

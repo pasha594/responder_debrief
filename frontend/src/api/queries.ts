@@ -1,4 +1,5 @@
 /** TanStack Query hooks — the only gateway to server data. */
+import { useEffect } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   fetchFire,
@@ -18,7 +19,7 @@ import {
   fetchPyrecastRuns,
   fetchWeatherRuns,
 } from './catalogs';
-import type { PyrecastRun, WeatherRun } from './types';
+import type { PerimeterIndexItem, PyrecastRun, WeatherRun } from './types';
 
 export const useFires = () =>
   useQuery({
@@ -53,6 +54,36 @@ export const usePerimeterVersion = (path: string | null) =>
     staleTime: Infinity,
     gcTime: 30 * 60_000,
   });
+
+/**
+ * Warm the cache for the perimeter versions NEIGHBORING the one on screen,
+ * so scrubbing across a version boundary swaps instantly instead of
+ * stalling on a 1-2 MB fetch. Versions are server-marked immutable
+ * (staleTime Infinity), so prefetching is free after the first pass.
+ */
+export function usePrefetchPerimeterNeighbors(
+  index: PerimeterIndexItem[] | undefined,
+  currentPath: string | null,
+  reach = 2,
+) {
+  const qc = useQueryClient();
+  useEffect(() => {
+    if (!index || !currentPath) return;
+    const i = index.findIndex((v) => v.path === currentPath);
+    if (i < 0) return;
+    for (let d = 1; d <= reach; d++) {
+      for (const j of [i - d, i + d]) {
+        const item = index[j];
+        if (!item) continue;
+        void qc.prefetchQuery({
+          queryKey: ['perimeter-version', item.path],
+          queryFn: () => fetchPerimeterByPath(item.path),
+          staleTime: Infinity,
+        });
+      }
+    }
+  }, [qc, index, currentPath, reach]);
+}
 
 /** Callers must pass a grid-snapped bbox (see snapBoundsOut) for cache reuse. */
 export const useHotspots = (q: HotspotQuery | null) =>

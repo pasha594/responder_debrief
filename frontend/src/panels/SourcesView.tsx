@@ -87,6 +87,7 @@ const SOURCES: Source[] = [
 export function SourcesView() {
   return (
     <div className="rd-sources">
+      <div className="rd-sources-inner">
       <header className="rd-sources-header">
         <a href={HREF_DIRECTORY} className="rd-back">
           ← All fires
@@ -109,6 +110,7 @@ export function SourcesView() {
         ))}
       </ul>
       <DisclaimerFooter />
+      </div>
     </div>
   );
 }

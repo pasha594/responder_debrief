@@ -15,6 +15,7 @@
 import {
   Popup,
   type ExpressionSpecification,
+  type FilterSpecification,
   type GeoJSONSource,
   type Map as MlMap,
   type MapLayerMouseEvent,
@@ -65,6 +66,26 @@ const CIRCLE_OPACITY: ExpressionSpecification = [
   0.45,
   0.8,
 ];
+
+/**
+ * Coarse prefilter around the playhead: paint applies re-evaluate every
+ * feature the FILTER lets through, so keeping a generous window in the
+ * filter (recentered only when the playhead drifts COARSE_RECENTER_MS)
+ * cuts per-tick work from the fire's whole history to ~a week of points,
+ * while filter changes — the expensive bucket-regenerating operation —
+ * happen a handful of times per full scrub instead of every tick.
+ */
+export const COARSE_BACK_MS = 6 * DAY_MS;
+export const COARSE_FWD_MS = 3 * DAY_MS;
+export const COARSE_RECENTER_MS = 3 * DAY_MS;
+
+export function coarseFilter(center: number) {
+  return [
+    'all',
+    ['>=', ['coalesce', ['get', 'acq_ts'], 0], center - COARSE_BACK_MS],
+    ['<=', ['coalesce', ['get', 'acq_ts'], 0], center + COARSE_FWD_MS],
+  ] as FilterSpecification;
+}
 
 /** Acquired at or before tEff, and no older than the age cutoff. */
 function inTimeWindow(tEff: number): ExpressionSpecification {
@@ -144,6 +165,7 @@ const THROTTLE_MS = 100;
 let pendingT: number | null = null;
 let throttleTimer: ReturnType<typeof setTimeout> | null = null;
 let lastApplyAt = 0;
+let coarseCenter: number | null = null;
 
 function quantize(t: number): number {
   return Math.round(t / 60_000) * 60_000;
@@ -152,6 +174,10 @@ function quantize(t: number): number {
 function applyTime(map: MlMap, t: number): void {
   lastTEff = t;
   lastApplyAt = performance.now();
+  if (coarseCenter == null || Math.abs(t - coarseCenter) > COARSE_RECENTER_MS) {
+    coarseCenter = t;
+    map.setFilter(LYR, coarseFilter(t));
+  }
   map.setPaintProperty(LYR, 'circle-color', ageColorExpr(t));
   map.setPaintProperty(LYR, 'circle-radius', timeRadiusExpr(t));
   map.setPaintProperty(LYR, 'circle-stroke-width', timeStrokeExpr(t));
@@ -203,11 +229,13 @@ export const hotspotLayer: LayerManager = {
     }
     if (!map.getLayer(LYR)) {
       const t0 = quantize(Date.now());
+      coarseCenter = t0;
       map.addLayer(
         {
           id: LYR,
           type: 'circle',
           source: SRC,
+          filter: coarseFilter(t0),
           paint: {
             'circle-color': ageColorExpr(t0),
             'circle-opacity': CIRCLE_OPACITY,
@@ -258,6 +286,7 @@ export const hotspotLayer: LayerManager = {
     if (throttleTimer) clearTimeout(throttleTimer);
     throttleTimer = null;
     pendingT = null;
+    coarseCenter = null;
     map.off('click', LYR, onClick);
     map.off('mouseenter', LYR, onEnter);
     map.off('mouseleave', LYR, onLeave);
