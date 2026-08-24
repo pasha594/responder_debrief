@@ -2,6 +2,11 @@
 <html lang="en" data-theme="dark">
   <head>
     <meta charset="UTF-8" />
+    <!-- Any http:// subresource request (including ones injected by browser
+         extensions) is upgraded to https, so the page can never be flagged
+         for mixed content. GitHub Pages can't set response headers; a meta
+         CSP is the supported alternative for this directive. -->
+    <meta http-equiv="Content-Security-Policy" content="upgrade-insecure-requests" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <link rel="icon" type="image/svg+xml" href="favicon.svg" />
     <meta name="theme-color" content="#1a1218" />
