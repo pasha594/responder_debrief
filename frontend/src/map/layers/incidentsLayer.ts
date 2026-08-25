@@ -3,7 +3,7 @@
 import type { GeoJSONSource, Map as MlMap, MapLayerMouseEvent } from 'maplibre-gl';
 import { Popup } from 'maplibre-gl';
 import type { IncidentFC } from '../../api/tomtomTraffic';
-import { useStore } from '../../state/store';
+import { routeClickClaims, useStore } from '../../state/store';
 import { beforeIdFor } from '../zOrder';
 import type { LayerManager } from '../layerTypes';
 
@@ -23,7 +23,7 @@ function esc(x: string): string {
 }
 
 function onClick(this: MlMap, e: MapLayerMouseEvent): void {
-  if (useStore.getState().directions.picking) return; // range pick claims the click
+  if (routeClickClaims(useStore.getState().directions)) return; // fill click claims
   const f = e.features?.[0];
   if (!f) return;
   const p = f.properties ?? {};

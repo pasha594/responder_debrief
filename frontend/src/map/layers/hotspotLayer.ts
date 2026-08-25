@@ -21,7 +21,7 @@ import {
   type MapLayerMouseEvent,
 } from 'maplibre-gl';
 import type { HotspotFeatureCollection } from '../../api/types';
-import { useStore } from '../../state/store';
+import { routeClickClaims, useStore } from '../../state/store';
 import { beforeIdFor } from '../zOrder';
 import type { LayerManager } from '../layerTypes';
 
@@ -200,7 +200,7 @@ let popup: Popup | null = null;
 const handlersInstalled = new WeakSet<MlMap>();
 
 function onClick(this: MlMap, e: MapLayerMouseEvent): void {
-  if (useStore.getState().directions.picking) return; // range pick claims the click
+  if (routeClickClaims(useStore.getState().directions)) return; // fill click claims
   const f = e.features?.[0];
   if (!f) return;
   popup ??= new Popup({ closeButton: false, offset: 10 });

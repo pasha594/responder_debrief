@@ -12,7 +12,7 @@ import {
 } from 'maplibre-gl';
 import type { HistoricPerimeterFC } from '../../api/nifcHistory';
 import { HISTORY_YEARS } from '../../api/nifcHistory';
-import { useStore } from '../../state/store';
+import { routeClickClaims, useStore } from '../../state/store';
 import { beforeIdFor } from '../zOrder';
 import type { LayerManager } from '../layerTypes';
 
@@ -55,7 +55,7 @@ export function fmtWhen(p: Record<string, unknown>): string {
 }
 
 function onClick(this: MlMap, e: MapLayerMouseEvent): void {
-  if (useStore.getState().directions.picking) return; // range pick claims the click
+  if (routeClickClaims(useStore.getState().directions)) return; // fill click claims
   const f = e.features?.[0];
   if (!f) return;
   const p = f.properties ?? {};

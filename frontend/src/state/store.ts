@@ -114,7 +114,6 @@ export interface AppState {
   };
 
   range: {
-    origin: { coords: [number, number]; label: string } | null;
     rings: import('../api/routing').RangeRing[];
   };
 
@@ -125,8 +124,6 @@ export interface AppState {
     route: import('../api/routing').RouteResult | null;
     /** Map clicks fill route slots only while the search UI is engaged. */
     armed: boolean;
-    /** 'range' while the range card is open (its clicks set the origin). */
-    picking: 'range' | null;
   };
 
   draw: {
@@ -186,13 +183,11 @@ export interface AppState {
     setIrFlight(flightId: string | null): void;
     toggleTraffic(): void;
     toggleIncidents(): void;
-    setRangeOrigin(p: { coords: [number, number]; label: string } | null): void;
     setRangeRings(rings: import('../api/routing').RangeRing[]): void;
     setDirectionsPoint(which: 'a' | 'b', p: { coords: [number, number]; label: string } | null): void;
     setDirectionsProfile(profile: import('../api/routing').RouteProfile): void;
     setDirectionsRoute(route: import('../api/routing').RouteResult | null): void;
     setDirectionsArmed(armed: boolean): void;
-    setDirectionsPicking(which: 'range' | null): void;
     clearDirections(): void;
     setTheme(theme: 'dark' | 'light'): void;
     setSidebarTab(tab: AppState['ui']['sidebarTab']): void;
@@ -218,6 +213,12 @@ export interface AppState {
 }
 
 const now = Date.now();
+
+/** True while the next map click will claim a route endpoint (exactly one
+ * slot missing, or the bar focused with none set) — feature popups yield. */
+export function routeClickClaims(d: AppState['directions']): boolean {
+  return (!!d.a !== !!d.b) || (d.armed && !d.a && !d.b);
+}
 
 export const useStore = create<AppState>((set, get) => ({
   view: { mode: 'directory' },
@@ -252,9 +253,9 @@ export const useStore = create<AppState>((set, get) => ({
     incidents: { visible: false },
   },
 
-  range: { origin: null, rings: [] },
+  range: { rings: [] },
 
-  directions: { a: null, b: null, profile: 'drive', route: null, armed: false, picking: null },
+  directions: { a: null, b: null, profile: 'drive', route: null, armed: false },
 
   draw: { tool: 'none', features: [], past: [], future: [] },
 
@@ -298,7 +299,7 @@ export const useStore = create<AppState>((set, get) => ({
           a: null, b: null, profile: s.directions.profile,
           route: null, armed: false, picking: null,
         },
-        range: { origin: null, rings: [] },
+        range: { rings: [] },
       }));
     },
 
@@ -460,24 +461,18 @@ export const useStore = create<AppState>((set, get) => ({
         layers: { ...s.layers, incidents: { visible: !s.layers.incidents.visible } },
       }));
     },
-    setRangeOrigin: (p) =>
-      set((s) => ({
-        range: { origin: p, rings: p ? s.range.rings : [] },
-        directions: { ...s.directions, picking: null },
-      })),
-    setRangeRings: (rings) => set((s) => ({ range: { ...s.range, rings } })),
+    setRangeRings: (rings) => set(() => ({ range: { rings } })),
     setDirectionsProfile: (profile) =>
       set((s) => ({ directions: { ...s.directions, profile, route: null } })),
     setDirectionsRoute: (route) =>
       set((s) => ({ directions: { ...s.directions, route } })),
-    setDirectionsPicking: (which) =>
-      set((s) => ({ directions: { ...s.directions, picking: which } })),
     clearDirections: () =>
       set((s) => ({
         directions: {
           a: null, b: null, profile: s.directions.profile,
-          route: null, armed: false, picking: s.directions.picking,
+          route: null, armed: false,
         },
+        range: { rings: [] },
       })),
 
     setTheme: (theme) => {

@@ -5,7 +5,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Map as MlMap } from 'maplibre-gl';
 import { useMap } from './MapRoot';
-import { useStore } from '../state/store';
+import { routeClickClaims, useStore } from '../state/store';
 import {
   latestRun,
   latestWeatherRun,
@@ -278,11 +278,12 @@ export function useMapLayerSync(): void {
     for (const m of MANAGERS) m.update(map, ctx);
   }, [map, ctx]);
 
-  // Map clicks drop route/range pins. MapLibre only fires 'click' on
-  // non-drag clicks, so panning never drops. Arbitration order: an active
-  // draw tool always wins; the open range card claims clicks; clicks on
-  // interactive features (popups) pass through; otherwise, while the search
-  // UI is engaged, fill start → destination → move destination.
+  // Map clicks drop route pins. MapLibre only fires 'click' on non-drag
+  // clicks, so panning never drops. Arbitration: an active draw tool always
+  // wins; while exactly one endpoint is missing the fill CLAIMS the click
+  // (even over hotspots — the burn area is carpeted with them and popups
+  // would otherwise swallow every destination click); with both ends set,
+  // feature clicks open popups and empty-map clicks move the destination.
   useEffect(() => {
     if (!map) return;
     const INTERACTIVE = [
@@ -295,24 +296,24 @@ export function useMapLayerSync(): void {
     }) => {
       const st = useStore.getState();
       if (st.draw.tool !== 'none') return;
+      const d = st.directions;
+      if (!d.armed && !d.a && !d.b) return; // idle browsing — clicks are clicks
       const p = {
         coords: [e.lngLat.lng, e.lngLat.lat] as [number, number],
         label: `${e.lngLat.lat.toFixed(5)}, ${e.lngLat.lng.toFixed(5)}`,
       };
-      if (st.directions.picking === 'range') {
-        st.actions.setRangeOrigin(p);
+      if (routeClickClaims(d)) {
+        st.actions.setDirectionsPoint(d.a ? 'b' : 'a', p);
         return;
       }
-      const d = st.directions;
-      if (!d.armed && !d.a && !d.b) return; // idle browsing — clicks are clicks
+      // both set: features keep their popups; empty map moves the destination
       const present = INTERACTIVE.filter((l) => map.getLayer(l));
       if (present.length && map.queryRenderedFeatures(
             [e.point.x, e.point.y] as unknown as [number, number], { layers: present },
           ).length) {
-        return; // the feature's own popup handles this click
+        return;
       }
-      if (!d.a) st.actions.setDirectionsPoint('a', p);
-      else st.actions.setDirectionsPoint('b', p);
+      st.actions.setDirectionsPoint('b', p);
     };
     map.on('click', onClick);
     return () => {

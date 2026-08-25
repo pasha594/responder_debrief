@@ -1,9 +1,10 @@
 /**
  * Always-visible search bar under the basemap switcher. Searching (or a
  * plain click on the map — pans never count, MapLibre only emits 'click'
- * on non-drags) drops the start pin; a destination field then opens below
- * and the route computes automatically whenever both ends exist, the
- * profile changes, or a pin is dragged. Endpoints are draggable Markers.
+ * on non-drags) drops point A; the B field then opens below and the route
+ * computes automatically whenever both ends exist, the profile changes, or
+ * a pin is dragged. Drive-time rings (15/30/60 min) draw automatically
+ * around A. Endpoints are draggable Markers.
  */
 import { useEffect, useRef, useState } from 'react';
 import { Marker } from 'maplibre-gl';
@@ -165,9 +166,7 @@ export function SearchDirectionsControl() {
   const actions = useStore((s) => s.actions);
   const [routing, setRouting] = useState(false);
   const [routeError, setRouteError] = useState<string | null>(null);
-  const [rangeOpen, setRangeOpen] = useState(false);
-  const [ranging, setRanging] = useState(false);
-  const [rangeError, setRangeError] = useState<string | null>(null);
+  const rangeSeq = useRef(0);
   const markers = useRef<{ a: Marker | null; b: Marker | null }>({ a: null, b: null });
   const routeSeq = useRef(0);
 
@@ -250,27 +249,25 @@ export function SearchDirectionsControl() {
     })();
   }, [directions, actions, map]);
 
-  // ---- range card owns map clicks while open ----
+  // ---- drive-time rings follow point A automatically ----
   useEffect(() => {
-    actions.setDirectionsPicking(rangeOpen ? 'range' : null);
-    return () => actions.setDirectionsPicking(null);
-  }, [rangeOpen, actions]);
-
-  const goRange = async () => {
-    const origin = useStore.getState().range.origin;
-    if (!origin) return;
-    setRanging(true);
-    setRangeError(null);
-    try {
-      const { rings, engine } = await fetchReachableRange(origin.coords);
-      actions.setRangeRings(rings);
-      track('range_requested', { engine });
-    } catch {
-      setRangeError('Could not compute the range for this point.');
-    } finally {
-      setRanging(false);
+    const a = directions.a;
+    const mySeq = ++rangeSeq.current;
+    if (!a) {
+      actions.setRangeRings([]);
+      return;
     }
-  };
+    void (async () => {
+      try {
+        const { rings, engine } = await fetchReachableRange(a.coords);
+        if (mySeq !== rangeSeq.current) return;
+        actions.setRangeRings(rings);
+        track('range_requested', { engine });
+      } catch {
+        if (mySeq === rangeSeq.current) actions.setRangeRings([]);
+      }
+    })();
+  }, [directions.a, actions]);
 
   const setPoint = (which: 'a' | 'b') => (hit: PlaceHit) => {
     if (which === 'a') track('place_searched', { kind: hit.kind });
@@ -281,14 +278,15 @@ export function SearchDirectionsControl() {
   };
 
   const route = directions.route;
-  const showDestination = (!!directions.a || !!directions.b) && !rangeOpen;
+  const showDestination = !!directions.a || !!directions.b;
 
   return (
     <div className="rd-sd-control">
       <div className="rd-sd-card rd-sd-bar">
         <div className="rd-sd-row">
+          <span className="rd-route-pin rd-route-pin--a rd-sd-badge">A</span>
           <PlaceInput
-            placeholder="Search place, coordinates — or click the map"
+            placeholder="Search place or coordinates"
             value={directions.a?.label ?? ''}
             onPick={setPoint('a')}
             onClear={() => actions.setDirectionsPoint('a', null)}
@@ -307,21 +305,14 @@ export function SearchDirectionsControl() {
               ✕
             </button>
           )}
-          <button
-            type="button"
-            className={`rd-mini-btn${rangeOpen ? ' rd-mini-btn--on' : ''}`}
-            title="Drive-time range from a point"
-            onClick={() => setRangeOpen(!rangeOpen)}
-          >
-            ◔
-          </button>
         </div>
 
         {showDestination && (
           <>
             <div className="rd-sd-row">
+              <span className="rd-route-pin rd-route-pin--b rd-sd-badge">B</span>
               <PlaceInput
-                placeholder="Destination — search or click the map"
+                placeholder="Search place or coordinates"
                 value={directions.b?.label ?? ''}
                 onPick={setPoint('b')}
                 onClear={() => actions.setDirectionsPoint('b', null)}
@@ -330,7 +321,7 @@ export function SearchDirectionsControl() {
             </div>
             <div className="rd-sd-row rd-sd-actions">
               <div className="rd-sd-profiles">
-                {(['drive', 'apparatus', 'hike'] as RouteProfile[]).map((p) => {
+                {(['drive', 'apparatus'] as RouteProfile[]).map((p) => {
                   const gated = p === 'apparatus' && !apparatusAvailable;
                   return (
                     <button
@@ -347,7 +338,7 @@ export function SearchDirectionsControl() {
                       }
                       onClick={() => actions.setDirectionsProfile(p)}
                     >
-                      {p === 'drive' ? 'Drive' : p === 'apparatus' ? 'Apparatus' : 'Hike'}
+                      {p === 'drive' ? 'Drive' : 'Apparatus'}
                     </button>
                   );
                 })}
@@ -388,48 +379,18 @@ export function SearchDirectionsControl() {
           </>
         )}
 
-        {rangeOpen && (
-          <>
-            <div className="rd-sd-row">
-              <PlaceInput
-                placeholder="Origin — search or click the map"
-                value={range.origin?.label ?? ''}
-                onPick={(h) => actions.setRangeOrigin({ coords: h.coords, label: h.label })}
-              />
-              <button
-                type="button"
-                className="rd-mini-btn"
-                title="Clear rings"
-                onClick={() => actions.setRangeOrigin(null)}
-              >
-                ✕
-              </button>
-              <button
-                type="button"
-                className="rd-go-btn"
-                disabled={!range.origin || ranging}
-                onClick={() => void goRange()}
-              >
-                {ranging ? '…' : 'Go'}
-              </button>
+        {range.rings.length > 0 && (
+          <div className="rd-sd-row rd-sd-rangelegend">
+            <span className="rd-sd-note">Drive time from A:</span>
+            <div className="rd-sd-profiles rd-range-legend">
+              {[15, 30, 60].map((m) => (
+                <span key={m} className="rd-range-key">
+                  <span className="rd-hist-chip" style={{ background: RANGE_COLORS[m] }} />
+                  {m}m
+                </span>
+              ))}
             </div>
-            <div className="rd-sd-row">
-              <div className="rd-sd-profiles rd-range-legend">
-                {[15, 30, 60].map((m) => (
-                  <span key={m} className="rd-range-key">
-                    <span className="rd-hist-chip" style={{ background: RANGE_COLORS[m] }} />
-                    {m}m
-                  </span>
-                ))}
-              </div>
-            </div>
-            {rangeError && <div className="rd-sd-note rd-sd-error">{rangeError}</div>}
-            {range.rings.length > 0 && (
-              <div className="rd-sd-note">
-                Drive-time reach at current conditions — not a fire-closure map.
-              </div>
-            )}
-          </>
+          </div>
         )}
       </div>
     </div>
