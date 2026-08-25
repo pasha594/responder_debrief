@@ -20,6 +20,7 @@ export const RD_LAYER_ORDER = [
   'rd-weather-meq-a', 'rd-weather-meq-b',
   'rd-weather-apcp01-a', 'rd-weather-apcp01-b',
   'rd-weather-apcptot-a', 'rd-weather-apcptot-b',
+  'rd-traffic',
   'rd-incident-map',
   'rd-spread-forecast',
   'rd-national-perimeters',
@@ -43,6 +44,10 @@ export const RD_LAYER_ORDER = [
   'rd-draw-line-letter',
   'rd-draw-pt',
   'rd-draw-label',
+  // directions ride on the very top
+  'rd-route-casing',
+  'rd-route-line',
+  'rd-route-ends',
 ] as const;
 
 export type RdLayerId = (typeof RD_LAYER_ORDER)[number];

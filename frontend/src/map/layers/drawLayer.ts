@@ -261,6 +261,7 @@ function setCursor(map: MlMap): void {
 // ---------- interactions ----------
 
 function onClick(map: MlMap, e: MapMouseEvent): void {
+  if (useStore.getState().directions.picking) return; // click claims a route endpoint
   const { draw, actions } = useStore.getState();
   const tool = draw.tool;
   if (tool.startsWith('marker:')) {

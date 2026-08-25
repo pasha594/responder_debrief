@@ -107,6 +107,17 @@ export interface AppState {
       opacity: number;
     };
     irFlight: { flightId: string | null };
+    /** TomTom live traffic flow tiles (needs VITE_TOMTOM_KEY). */
+    traffic: { visible: boolean };
+  };
+
+  directions: {
+    a: { coords: [number, number]; label: string } | null;
+    b: { coords: [number, number]; label: string } | null;
+    profile: import('../api/routing').RouteProfile;
+    route: import('../api/routing').RouteResult | null;
+    /** Which endpoint the next map click fills, or null. */
+    picking: 'a' | 'b' | null;
   };
 
   draw: {
@@ -164,6 +175,12 @@ export interface AppState {
     setIncidentMapSeries(series: string | null): void;
     setIncidentMapOpacity(opacity: number): void;
     setIrFlight(flightId: string | null): void;
+    toggleTraffic(): void;
+    setDirectionsPoint(which: 'a' | 'b', p: { coords: [number, number]; label: string } | null): void;
+    setDirectionsProfile(profile: import('../api/routing').RouteProfile): void;
+    setDirectionsRoute(route: import('../api/routing').RouteResult | null): void;
+    setDirectionsPicking(which: 'a' | 'b' | null): void;
+    clearDirections(): void;
     setTheme(theme: 'dark' | 'light'): void;
     setSidebarTab(tab: AppState['ui']['sidebarTab']): void;
     setSidebarCollapsed(collapsed: boolean): void;
@@ -218,12 +235,18 @@ export const useStore = create<AppState>((set, get) => ({
     nationalPerimeters: { visible: true },
     incidentMap: { mapId: null, series: null, opacity: 0.75 },
     irFlight: { flightId: null },
+    traffic: { visible: false },
   },
+
+  directions: { a: null, b: null, profile: 'drive', route: null, picking: null },
 
   draw: { tool: 'none', features: [], past: [], future: [] },
 
   ui: {
-    theme: (document.documentElement.dataset.theme as 'dark' | 'light') ?? 'dark',
+    theme:
+      typeof document !== 'undefined'
+        ? ((document.documentElement.dataset.theme as 'dark' | 'light') ?? 'dark')
+        : 'dark',
     sidebarTab: 'overview',
     basemap: 'map',
     sidebarCollapsed: false,
@@ -253,7 +276,9 @@ export const useStore = create<AppState>((set, get) => ({
           historicPerimeters: { visible: false },
           incidentMap: { mapId: null, series: null, opacity: s.layers.incidentMap.opacity },
           irFlight: { flightId: null },
+          // traffic (like the basemap) is a viewing preference — persists
         },
+        directions: { a: null, b: null, profile: s.directions.profile, route: null, picking: null },
       }));
     },
 
@@ -396,6 +421,28 @@ export const useStore = create<AppState>((set, get) => ({
       set((s) => ({ layers: { ...s.layers, irFlight: { flightId } } }));
     },
 
+    toggleTraffic: () => {
+      track('layer_toggled', { layer: 'traffic', on: !get().layers.traffic.visible });
+      set((s) => ({
+        layers: { ...s.layers, traffic: { visible: !s.layers.traffic.visible } },
+      }));
+    },
+
+    setDirectionsPoint: (which, p) =>
+      set((s) => ({
+        directions: { ...s.directions, [which]: p, route: null, picking: null },
+      })),
+    setDirectionsProfile: (profile) =>
+      set((s) => ({ directions: { ...s.directions, profile, route: null } })),
+    setDirectionsRoute: (route) =>
+      set((s) => ({ directions: { ...s.directions, route } })),
+    setDirectionsPicking: (which) =>
+      set((s) => ({ directions: { ...s.directions, picking: which } })),
+    clearDirections: () =>
+      set((s) => ({
+        directions: { a: null, b: null, profile: s.directions.profile, route: null, picking: null },
+      })),
+
     setTheme: (theme) => {
       document.documentElement.dataset.theme = theme;
       try {
@@ -499,6 +546,6 @@ export const useView = () => useStore((s) => s.view);
 export const useCurrentTime = () => useStore((s) => s.time.currentTime);
 
 // DEV diagnostics: expose the store for browser-automation testing.
-if (import.meta.env.DEV) {
+if (import.meta.env.DEV && typeof window !== 'undefined') {
   (window as unknown as { __rdStore: typeof useStore }).__rdStore = useStore;
 }

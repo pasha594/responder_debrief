@@ -9,7 +9,7 @@
  *   t   playhead, compact UTC minutes: 20260820T1930Z (only when scrubbed
  *       off "now")
  *   hs  0 → hotspots hidden          pm  0 → perimeters hidden
- *   hist 1 → historic perimeters shown
+ *   hist 1 → historic perimeters shown   tr 1 → live traffic shown
  *   wx  visible weather products, dot-separated: tmpf.rh
  *   ff  fire forecast: {product}.{percentile}, e.g. time-of-arrival.50
  *   bm  basemap: satellite | topo
@@ -35,6 +35,7 @@ export interface UrlViewState {
   hotspots?: false;
   perimeters?: false;
   historic?: true;
+  traffic?: true;
   weather?: WeatherProduct[];
   spread?: { product: SpreadProduct; percentile: Percentile };
   basemap?: 'satellite' | 'topo';
@@ -68,6 +69,7 @@ export function buildSearch(s: AppState): string {
   if (!s.layers.hotspots.visible) q.set('hs', '0');
   if (!s.layers.perimeters.visible) q.set('pm', '0');
   if (s.layers.historicPerimeters.visible) q.set('hist', '1');
+  if (s.layers.traffic.visible) q.set('tr', '1');
   const wx = (Object.keys(s.layers.weather) as WeatherProduct[])
     .filter((p) => s.layers.weather[p]?.visible)
     .sort();
@@ -96,6 +98,7 @@ export function decodeSearch(search: string): UrlViewState {
   if (q.get('hs') === '0') out.hotspots = false;
   if (q.get('pm') === '0') out.perimeters = false;
   if (q.get('hist') === '1') out.historic = true;
+  if (q.get('tr') === '1') out.traffic = true;
 
   const wx = q.get('wx');
   if (wx) {
@@ -142,6 +145,7 @@ export function applyViewState(
   if (v.hotspots === false && s.layers.hotspots.visible) actions.toggleHotspots();
   if (v.perimeters === false && s.layers.perimeters.visible) actions.togglePerimeters();
   if (v.historic && !s.layers.historicPerimeters.visible) actions.toggleHistoricPerimeters();
+  if (v.traffic && !s.layers.traffic.visible) actions.toggleTraffic();
   for (const p of v.weather ?? []) actions.setWeatherLayer(p, { visible: true });
   if (v.spread) {
     actions.setSpreadProduct(v.spread.product); // also sets visible: true

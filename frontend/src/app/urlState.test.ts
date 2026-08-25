@@ -16,6 +16,7 @@ function mkState(): AppState {
       hotspots: { visible: true },
       perimeters: { visible: true },
       historicPerimeters: { visible: false },
+      traffic: { visible: false },
       incidentMap: { mapId: null, series: null, opacity: 0.75 },
       irFlight: { flightId: null },
     },

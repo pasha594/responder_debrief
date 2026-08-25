@@ -30,6 +30,7 @@ import {
   toaWithinStops,
 } from '../../spread/toaBands';
 import { staleBadgeLabel } from '../../spread/runMeta';
+import { trafficAvailable } from '../../map/layers/trafficLayer';
 import { useStore, type ToaMode } from '../../state/store';
 import { formatDateTime, formatRelative } from '../../utils/format';
 import { GradientLegend } from '../../utils/GradientLegend';
@@ -325,6 +326,7 @@ function MapLayerToggles() {
   const hotspots = useStore((s) => s.layers.hotspots.visible);
   const perimeters = useStore((s) => s.layers.perimeters.visible);
   const historic = useStore((s) => s.layers.historicPerimeters.visible);
+  const traffic = useStore((s) => s.layers.traffic.visible);
   const actions = useStore((s) => s.actions);
   return (
     <section className="rd-section">
@@ -344,6 +346,12 @@ function MapLayerToggles() {
         />
         <span>Historic perimeters</span>
       </label>
+      {trafficAvailable && (
+        <label className="rd-field--row">
+          <input type="checkbox" checked={traffic} onChange={() => actions.toggleTraffic()} />
+          <span>Live traffic</span>
+        </label>
+      )}
       {historic && (
         <div className="rd-hist-legend" aria-hidden="true">
           <span className="rd-hist-chip" style={{ background: '#e0a24a' }} /> recent

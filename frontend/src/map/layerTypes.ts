@@ -32,6 +32,7 @@ export interface LayerContext {
   perimeterFeature: PerimeterFeature | undefined;
   hotspots: HotspotFeatureCollection | undefined;
   historicPerimeters: import('../api/nifcHistory').HistoricPerimeterFC | undefined;
+  directions: import('../state/store').AppState['directions'];
   catalog: MasterCatalog | undefined;
   spreadRun: PyrecastRun | null;
   weatherRun: WeatherRun | null;

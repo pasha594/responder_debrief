@@ -47,6 +47,8 @@ import { drawLayer } from './layers/drawLayer';
 import { terrainControl } from './layers/terrainControl';
 import { irHeatLayer } from './layers/irHeatLayer';
 import { historicPerimetersLayer } from './layers/historicPerimetersLayer';
+import { routeLayer } from './layers/routeLayer';
+import { trafficLayer } from './layers/trafficLayer';
 
 // The directory pivot retired nationalPerimetersLayer: the map now only ever
 // shows one incident, so the CONUS perimeter raster has nowhere to render.
@@ -57,6 +59,7 @@ const MANAGERS: LayerManager[] = [
   spreadForecastLayer,
   windArrowsLayer,
   irHeatLayer,
+  trafficLayer,
   historicPerimetersLayer,
   perimeterLayer,
   hotspotLayer,
@@ -64,6 +67,7 @@ const MANAGERS: LayerManager[] = [
   drawLayer,
   terrainControl,
   labelContrastLayer, // paints no layers of its own — tunes basemap halos
+  routeLayer,
 ];
 
 /** Track the viewport as a grid-snapped Bounds4326 (fallback hotspot query). */
@@ -109,6 +113,7 @@ export function useMapLayerSync(): void {
   const map = useMap();
   const view = useStore((s) => s.view);
   const layers = useStore((s) => s.layers);
+  const directions = useStore((s) => s.directions);
   const currentTime = useStore((s) => s.time.currentTime);
   const now = useStore((s) => s.time.now);
   const actions = useStore((s) => s.actions);
@@ -186,6 +191,7 @@ export function useMapLayerSync(): void {
       perimeterFeature,
       hotspots,
       historicPerimeters,
+      directions,
       catalog,
       spreadRun,
       weatherRun,
@@ -209,6 +215,7 @@ export function useMapLayerSync(): void {
       perimeterFeature,
       hotspots,
       historicPerimeters,
+      directions,
       catalog,
       spreadRun,
       weatherRun,
@@ -248,6 +255,24 @@ export function useMapLayerSync(): void {
     if (!map || mountedOn.current !== map || !isMapUsable(map)) return;
     for (const m of MANAGERS) m.update(map, ctx);
   }, [map, ctx]);
+
+  // Directions: a map click fills whichever endpoint is in picking mode.
+  useEffect(() => {
+    if (!map) return;
+    const onClick = (e: { lngLat: { lng: number; lat: number } }) => {
+      const st = useStore.getState();
+      const which = st.directions.picking;
+      if (!which) return;
+      st.actions.setDirectionsPoint(which, {
+        coords: [e.lngLat.lng, e.lngLat.lat],
+        label: `${e.lngLat.lat.toFixed(5)}, ${e.lngLat.lng.toFixed(5)}`,
+      });
+    };
+    map.on('click', onClick);
+    return () => {
+      map.off('click', onClick);
+    };
+  }, [map]);
 
   // Initial camera. Best framing is the NEWEST PERIMETER with padding — the
   // forecast-domain bbox or a fixed zoom is often far too wide. The
