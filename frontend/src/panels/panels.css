@@ -1849,6 +1849,19 @@
   border-radius: 999px;
   font-size: 13px;
 }
+/* the input row must fill the pill — otherwise the input collapses to its
+   ~170px intrinsic width, clipping the placeholder off-center */
+.rd-sd-bar > .rd-sd-row {
+  flex: 1;
+  width: 100%;
+}
+/* focus ring on the pill, not the borderless inner input */
+.rd-sd-bar .rd-place-input input:focus {
+  outline: none;
+}
+.rd-sd-bar:focus-within {
+  border-color: var(--color-accent);
+}
 /* expanded states square the card back off */
 .rd-sd-bar:has(.rd-sd-row + .rd-sd-row),
 .rd-sd-bar:has(.rd-sd-result) {
