@@ -359,30 +359,21 @@ export function SearchDirectionsControl() {
                   {route.trafficDelayS != null && route.trafficDelayS > 60 && (
                     <span className="rd-sd-traffic"> · +{fmtDuration(route.trafficDelayS)} traffic</span>
                   )}
-                </div>
-                <details className="rd-sd-steps">
-                  <summary>{route.steps.length} steps</summary>
-                  <ol>
-                    {route.steps.map((s, i) => (
-                      <li key={i}>
-                        {s.text}
-                        {s.distanceM > 0 && (
-                          <span className="rd-sd-stepdist"> — {fmtDistance(s.distanceM)}</span>
-                        )}
-                      </li>
-                    ))}
-                  </ol>
-                </details>
-                <div className="rd-sd-note">
-                  Drag A/B to adjust. Routes reflect map data, not fire closures — verify with
-                  incident traffic control.
+                  <label className="rd-rings-toggle rd-rings-inline">
+                    <input
+                      type="checkbox"
+                      checked={ringsOn}
+                      onChange={() => setRingsOn(!ringsOn)}
+                    />
+                    <span>Show isochrones</span>
+                  </label>
                 </div>
               </div>
             )}
           </>
         )}
 
-        {showDestination && (
+        {showDestination && !route && (
           <div className="rd-sd-row rd-sd-rangelegend">
             <label className="rd-rings-toggle">
               <input
@@ -390,18 +381,20 @@ export function SearchDirectionsControl() {
                 checked={ringsOn}
                 onChange={() => setRingsOn(!ringsOn)}
               />
-              <span>Drive-time rings from A</span>
+              <span>Show isochrones</span>
             </label>
-            {range.rings.length > 0 && (
-              <div className="rd-sd-profiles rd-range-legend">
-                {[15, 30, 60].map((m) => (
-                  <span key={m} className="rd-range-key">
-                    <span className="rd-hist-chip" style={{ background: RANGE_COLORS[m] }} />
-                    {m}m
-                  </span>
-                ))}
-              </div>
-            )}
+          </div>
+        )}
+        {ringsOn && range.rings.length > 0 && (
+          <div className="rd-sd-row rd-sd-rangelegend">
+            <div className="rd-sd-profiles rd-range-legend">
+              {[15, 30, 60].map((m) => (
+                <span key={m} className="rd-range-key">
+                  <span className="rd-hist-chip" style={{ background: RANGE_COLORS[m] }} />
+                  {m}m
+                </span>
+              ))}
+            </div>
           </div>
         )}
       </div>

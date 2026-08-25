@@ -1892,3 +1892,5 @@
 .rd-sd-rangelegend { justify-content: flex-start; gap: 8px; }
 
 .rd-rings-toggle { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--color-text); cursor: pointer; }
+
+.rd-rings-inline { display: inline-flex; margin-left: 10px; vertical-align: 1px; }
