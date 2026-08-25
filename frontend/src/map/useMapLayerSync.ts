@@ -35,7 +35,14 @@ import type { LayerContext, LayerManager } from './layerTypes';
 
 import { firePinsLayer } from './layers/firePinsLayer';
 import { perimeterLayer } from './layers/perimeterLayer';
-import { useHistoricPerimeters } from '../api/queries';
+import { useHistoricPerimeters, useIncidents } from '../api/queries';
+
+function histBoxForIncidents(
+  catalogFire: { coordinates?: [number, number] | null } | null,
+): [number, number, number, number] | null {
+  const c = catalogFire?.coordinates;
+  return c ? [c[0] - 0.6, c[1] - 0.5, c[0] + 0.6, c[1] + 0.5] : null;
+}
 import { hotspotLayer } from './layers/hotspotLayer';
 import { spreadForecastLayer } from './layers/spreadForecastLayer';
 import { weatherLayers } from './layers/weatherLayers';
@@ -49,6 +56,8 @@ import { irHeatLayer } from './layers/irHeatLayer';
 import { historicPerimetersLayer } from './layers/historicPerimetersLayer';
 import { routeLayer } from './layers/routeLayer';
 import { trafficLayer } from './layers/trafficLayer';
+import { incidentsLayer } from './layers/incidentsLayer';
+import { rangeLayer } from './layers/rangeLayer';
 
 // The directory pivot retired nationalPerimetersLayer: the map now only ever
 // shows one incident, so the CONUS perimeter raster has nowhere to render.
@@ -67,6 +76,8 @@ const MANAGERS: LayerManager[] = [
   drawLayer,
   terrainControl,
   labelContrastLayer, // paints no layers of its own — tunes basemap halos
+  incidentsLayer,
+  rangeLayer,
   routeLayer,
 ];
 
@@ -114,6 +125,7 @@ export function useMapLayerSync(): void {
   const view = useStore((s) => s.view);
   const layers = useStore((s) => s.layers);
   const directions = useStore((s) => s.directions);
+  const range = useStore((s) => s.range);
   const currentTime = useStore((s) => s.time.currentTime);
   const now = useStore((s) => s.time.now);
   const actions = useStore((s) => s.actions);
@@ -142,6 +154,12 @@ export function useMapLayerSync(): void {
 
   const { data: incidentManifest } = useIncidentManifest(
     catalogFire?.incident_manifest ?? null,
+  );
+
+  // Road incidents: lazy, short-lived (closures change), same box family.
+  const { data: incidents } = useIncidents(
+    histBoxForIncidents(catalogFire),
+    view.mode === 'fire' && layers.incidents.visible,
   );
 
   // Historic burn scars: lazy — the query runs only once the layer is on.
@@ -192,6 +210,8 @@ export function useMapLayerSync(): void {
       hotspots,
       historicPerimeters,
       directions,
+      range,
+      incidents,
       catalog,
       spreadRun,
       weatherRun,
@@ -216,6 +236,8 @@ export function useMapLayerSync(): void {
       hotspots,
       historicPerimeters,
       directions,
+      range,
+      incidents,
       catalog,
       spreadRun,
       weatherRun,
@@ -263,10 +285,12 @@ export function useMapLayerSync(): void {
       const st = useStore.getState();
       const which = st.directions.picking;
       if (!which) return;
-      st.actions.setDirectionsPoint(which, {
-        coords: [e.lngLat.lng, e.lngLat.lat],
+      const p = {
+        coords: [e.lngLat.lng, e.lngLat.lat] as [number, number],
         label: `${e.lngLat.lat.toFixed(5)}, ${e.lngLat.lng.toFixed(5)}`,
-      });
+      };
+      if (which === 'range') st.actions.setRangeOrigin(p);
+      else st.actions.setDirectionsPoint(which, p);
     };
     map.on('click', onClick);
     return () => {

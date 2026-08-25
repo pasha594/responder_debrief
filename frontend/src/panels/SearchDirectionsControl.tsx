@@ -6,7 +6,13 @@
 import { useEffect, useRef, useState } from 'react';
 import { Marker } from 'maplibre-gl';
 import { searchPlaces, type PlaceHit } from '../api/geocode';
-import { fetchRoute, type RouteProfile } from '../api/routing';
+import {
+  apparatusAvailable,
+  fetchReachableRange,
+  fetchRoute,
+  type RouteProfile,
+} from '../api/routing';
+import { RANGE_COLORS } from '../map/layers/rangeLayer';
 import { track } from '../app/analytics';
 import { useStore } from '../state/store';
 import { useMap } from '../map/MapRoot';
@@ -133,7 +139,10 @@ function PlaceInput({
 
 export function SearchDirectionsControl() {
   const map = useMap();
-  const [mode, setMode] = useState<'closed' | 'search' | 'directions'>('closed');
+  const [mode, setMode] = useState<'closed' | 'search' | 'directions' | 'range'>('closed');
+  const range = useStore((s) => s.range);
+  const [ranging, setRanging] = useState(false);
+  const [rangeError, setRangeError] = useState<string | null>(null);
   const directions = useStore((s) => s.directions);
   const actions = useStore((s) => s.actions);
   const [routing, setRouting] = useState(false);
@@ -187,9 +196,45 @@ export function SearchDirectionsControl() {
         map.fitBounds([[w, sMin], [e, n]], { padding: pad, duration: 800 });
       }
     } catch {
-      setRouteError('No route found — try different points.');
+      setRouteError(
+        useStore.getState().directions.profile === 'apparatus'
+          ? 'No apparatus-legal route found for these points.'
+          : 'No route found — try different points.',
+      );
     } finally {
       setRouting(false);
+    }
+  };
+
+  const goRange = async () => {
+    const origin = useStore.getState().range.origin;
+    if (!origin) return;
+    setRanging(true);
+    setRangeError(null);
+    try {
+      const { rings, engine } = await fetchReachableRange(origin.coords);
+      actions.setRangeRings(rings);
+      track('range_requested', { engine });
+      if (map && rings.length) {
+        let w = Infinity, sMin = Infinity, e = -Infinity, n = -Infinity;
+        for (const ring of rings) {
+          for (const [x, y] of ring.polygon.coordinates[0] ?? []) {
+            if (x < w) w = x;
+            if (x > e) e = x;
+            if (y < sMin) sMin = y;
+            if (y > n) n = y;
+          }
+        }
+        const cw = map.getContainer().clientWidth;
+        const pad = cw > 800
+          ? { top: 80, bottom: 140, left: 80, right: 440 }
+          : { top: 60, bottom: 120, left: 24, right: 24 };
+        map.fitBounds([[w, sMin], [e, n]], { padding: pad, duration: 800 });
+      }
+    } catch {
+      setRangeError('Could not compute the range for this point.');
+    } finally {
+      setRanging(false);
     }
   };
 
@@ -199,7 +244,11 @@ export function SearchDirectionsControl() {
   // Armed pick mode must not outlive the card — a later map click would
   // silently overwrite an endpoint and wipe the rendered route.
   useEffect(() => {
-    if (mode !== 'directions' && useStore.getState().directions.picking) {
+    const picking = useStore.getState().directions.picking;
+    const belongs =
+      (picking === 'range' && mode === 'range') ||
+      ((picking === 'a' || picking === 'b') && mode === 'directions');
+    if (picking && !belongs) {
       actions.setDirectionsPicking(null);
     }
     return () => {
@@ -227,6 +276,14 @@ export function SearchDirectionsControl() {
           onClick={() => setMode(mode === 'directions' ? 'closed' : 'directions')}
         >
           ⇄
+        </button>
+        <button
+          type="button"
+          className={`rd-mini-btn${mode === 'range' ? ' rd-mini-btn--on' : ''}`}
+          title="Drive-time range from a point"
+          onClick={() => setMode(mode === 'range' ? 'closed' : 'range')}
+        >
+          ◔
         </button>
       </div>
 
@@ -262,16 +319,27 @@ export function SearchDirectionsControl() {
           </div>
           <div className="rd-sd-row rd-sd-actions">
             <div className="rd-sd-profiles">
-              {(['drive', 'hike'] as RouteProfile[]).map((p) => (
-                <button
-                  key={p}
-                  type="button"
-                  className={`rd-chip${directions.profile === p ? ' rd-chip--on' : ''}`}
-                  onClick={() => actions.setDirectionsProfile(p)}
-                >
-                  {p === 'drive' ? 'Drive' : 'Hike'}
-                </button>
-              ))}
+              {(['drive', 'apparatus', 'hike'] as RouteProfile[]).map((p) => {
+                const gated = p === 'apparatus' && !apparatusAvailable;
+                return (
+                  <button
+                    key={p}
+                    type="button"
+                    disabled={gated}
+                    className={`rd-chip${directions.profile === p ? ' rd-chip--on' : ''}`}
+                    title={
+                      p === 'apparatus'
+                        ? gated
+                          ? 'Needs the TomTom key'
+                          : 'Truck routing with typical engine/tender dimensions'
+                        : undefined
+                    }
+                    onClick={() => actions.setDirectionsProfile(p)}
+                  >
+                    {p === 'drive' ? 'Drive' : p === 'apparatus' ? 'Apparatus' : 'Hike'}
+                  </button>
+                );
+              })}
             </div>
             <button
               type="button"
@@ -316,6 +384,63 @@ export function SearchDirectionsControl() {
               <div className="rd-sd-note">
                 Routes reflect map data, not fire closures — verify with incident traffic control.
               </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {mode === 'range' && (
+        <div className="rd-sd-card">
+          <div className="rd-sd-row">
+            <PlaceInput
+              placeholder="From — search or pick on map"
+              value={range.origin?.label ?? ''}
+              onPick={(h) => actions.setRangeOrigin({ coords: h.coords, label: h.label })}
+            />
+            <button
+              type="button"
+              className={`rd-mini-btn${directions.picking === 'range' ? ' rd-mini-btn--on' : ''}`}
+              title="Pick the origin on the map"
+              onClick={() =>
+                actions.setDirectionsPicking(directions.picking === 'range' ? null : 'range')
+              }
+            >
+              ⌖
+            </button>
+          </div>
+          <div className="rd-sd-row rd-sd-actions">
+            <div className="rd-sd-profiles rd-range-legend">
+              {[15, 30, 60].map((m) => (
+                <span key={m} className="rd-range-key">
+                  <span className="rd-hist-chip" style={{ background: RANGE_COLORS[m] }} />
+                  {m}m
+                </span>
+              ))}
+            </div>
+            <button
+              type="button"
+              className="rd-mini-btn"
+              title="Clear rings"
+              onClick={() => actions.setRangeOrigin(null)}
+            >
+              ✕
+            </button>
+            <button
+              type="button"
+              className="rd-go-btn"
+              disabled={!range.origin || ranging}
+              onClick={() => void goRange()}
+            >
+              {ranging ? '…' : 'Go'}
+            </button>
+          </div>
+          {directions.picking === 'range' && (
+            <div className="rd-sd-note">Click the map to set the origin.</div>
+          )}
+          {rangeError && <div className="rd-sd-note rd-sd-error">{rangeError}</div>}
+          {range.rings.length > 0 && (
+            <div className="rd-sd-note">
+              Drive-time reach at current conditions — not a fire-closure map.
             </div>
           )}
         </div>

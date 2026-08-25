@@ -109,6 +109,13 @@ export interface AppState {
     irFlight: { flightId: string | null };
     /** TomTom live traffic flow tiles (needs VITE_TOMTOM_KEY). */
     traffic: { visible: boolean };
+    /** TomTom road incidents/closures (needs VITE_TOMTOM_KEY). */
+    incidents: { visible: boolean };
+  };
+
+  range: {
+    origin: { coords: [number, number]; label: string } | null;
+    rings: import('../api/routing').RangeRing[];
   };
 
   directions: {
@@ -117,7 +124,7 @@ export interface AppState {
     profile: import('../api/routing').RouteProfile;
     route: import('../api/routing').RouteResult | null;
     /** Which endpoint the next map click fills, or null. */
-    picking: 'a' | 'b' | null;
+    picking: 'a' | 'b' | 'range' | null;
   };
 
   draw: {
@@ -176,10 +183,13 @@ export interface AppState {
     setIncidentMapOpacity(opacity: number): void;
     setIrFlight(flightId: string | null): void;
     toggleTraffic(): void;
+    toggleIncidents(): void;
+    setRangeOrigin(p: { coords: [number, number]; label: string } | null): void;
+    setRangeRings(rings: import('../api/routing').RangeRing[]): void;
     setDirectionsPoint(which: 'a' | 'b', p: { coords: [number, number]; label: string } | null): void;
     setDirectionsProfile(profile: import('../api/routing').RouteProfile): void;
     setDirectionsRoute(route: import('../api/routing').RouteResult | null): void;
-    setDirectionsPicking(which: 'a' | 'b' | null): void;
+    setDirectionsPicking(which: 'a' | 'b' | 'range' | null): void;
     clearDirections(): void;
     setTheme(theme: 'dark' | 'light'): void;
     setSidebarTab(tab: AppState['ui']['sidebarTab']): void;
@@ -236,7 +246,10 @@ export const useStore = create<AppState>((set, get) => ({
     incidentMap: { mapId: null, series: null, opacity: 0.75 },
     irFlight: { flightId: null },
     traffic: { visible: false },
+    incidents: { visible: false },
   },
+
+  range: { origin: null, rings: [] },
 
   directions: { a: null, b: null, profile: 'drive', route: null, picking: null },
 
@@ -279,6 +292,7 @@ export const useStore = create<AppState>((set, get) => ({
           // traffic (like the basemap) is a viewing preference — persists
         },
         directions: { a: null, b: null, profile: s.directions.profile, route: null, picking: null },
+        range: { origin: null, rings: [] },
       }));
     },
 
@@ -432,6 +446,18 @@ export const useStore = create<AppState>((set, get) => ({
       set((s) => ({
         directions: { ...s.directions, [which]: p, route: null, picking: null },
       })),
+    toggleIncidents: () => {
+      track('layer_toggled', { layer: 'incidents', on: !get().layers.incidents.visible });
+      set((s) => ({
+        layers: { ...s.layers, incidents: { visible: !s.layers.incidents.visible } },
+      }));
+    },
+    setRangeOrigin: (p) =>
+      set((s) => ({
+        range: { origin: p, rings: p ? s.range.rings : [] },
+        directions: { ...s.directions, picking: null },
+      })),
+    setRangeRings: (rings) => set((s) => ({ range: { ...s.range, rings } })),
     setDirectionsProfile: (profile) =>
       set((s) => ({ directions: { ...s.directions, profile, route: null } })),
     setDirectionsRoute: (route) =>

@@ -15,3 +15,11 @@ describe('decodePolyline6', () => {
     expect(pts[1][0]).toBeCloseTo(-120.95, 5);
   });
 });
+
+describe('apparatus + range', () => {
+  it('exposes conservative apparatus dimensions', async () => {
+    const { APPARATUS_DIMS } = await import('./routing');
+    expect(APPARATUS_DIMS.vehicleWeight).toBeGreaterThanOrEqual(12000);
+    expect(APPARATUS_DIMS.vehicleHeight).toBeGreaterThan(3);
+  });
+});

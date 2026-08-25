@@ -33,6 +33,8 @@ export interface LayerContext {
   hotspots: HotspotFeatureCollection | undefined;
   historicPerimeters: import('../api/nifcHistory').HistoricPerimeterFC | undefined;
   directions: import('../state/store').AppState['directions'];
+  range: import('../state/store').AppState['range'];
+  incidents: import('../api/tomtomTraffic').IncidentFC | undefined;
   catalog: MasterCatalog | undefined;
   spreadRun: PyrecastRun | null;
   weatherRun: WeatherRun | null;

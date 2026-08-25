@@ -21,6 +21,7 @@ import {
 } from './catalogs';
 import type { PerimeterIndexItem, PyrecastRun, WeatherRun } from './types';
 import { fetchHistoricPerimeters } from './nifcHistory';
+import { fetchIncidents } from './tomtomTraffic';
 
 export const useFires = () =>
   useQuery({
@@ -94,6 +95,20 @@ export const useHotspots = (q: HotspotQuery | null) =>
     enabled: !!q,
     staleTime: 300_000,
     placeholderData: (prev) => prev,
+  });
+
+/** TomTom road incidents near a fire — lazy, refreshed every 2 min while
+ * visible (closures move fast during an incident). */
+export const useIncidents = (
+  bbox: [number, number, number, number] | null,
+  enabled: boolean,
+) =>
+  useQuery({
+    queryKey: ['road-incidents', bbox],
+    queryFn: () => fetchIncidents(bbox!),
+    enabled: enabled && !!bbox,
+    staleTime: 120_000,
+    refetchInterval: enabled ? 120_000 : false,
   });
 
 /** NIFC historic perimeters near a fire — lazy (enabled only when the

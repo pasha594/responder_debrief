@@ -1795,3 +1795,7 @@
 .rd-sd-steps summary { cursor: pointer; font-size: 12px; color: var(--color-muted); }
 .rd-sd-steps ol { margin: 6px 0 0; padding-left: 18px; font-size: 12px; line-height: 1.5; }
 .rd-sd-stepdist { color: var(--color-muted); }
+
+.rd-range-legend { align-items: center; font-size: 11px; color: var(--color-muted); gap: 8px; }
+.rd-range-key { display: inline-flex; align-items: center; gap: 4px; }
+.rd-chip:disabled { opacity: 0.45; cursor: default; }

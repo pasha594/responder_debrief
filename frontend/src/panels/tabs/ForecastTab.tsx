@@ -31,6 +31,7 @@ import {
 } from '../../spread/toaBands';
 import { staleBadgeLabel } from '../../spread/runMeta';
 import { trafficAvailable } from '../../map/layers/trafficLayer';
+import { incidentsAvailable } from '../../api/tomtomTraffic';
 import { useStore, type ToaMode } from '../../state/store';
 import { formatDateTime, formatRelative } from '../../utils/format';
 import { GradientLegend } from '../../utils/GradientLegend';
@@ -327,6 +328,7 @@ function MapLayerToggles() {
   const perimeters = useStore((s) => s.layers.perimeters.visible);
   const historic = useStore((s) => s.layers.historicPerimeters.visible);
   const traffic = useStore((s) => s.layers.traffic.visible);
+  const incidents = useStore((s) => s.layers.incidents.visible);
   const actions = useStore((s) => s.actions);
   return (
     <section className="rd-section">
@@ -350,6 +352,13 @@ function MapLayerToggles() {
         <label className="rd-field--row">
           <input type="checkbox" checked={traffic} onChange={() => actions.toggleTraffic()} />
           <span>Live traffic</span>
+        </label>
+      )}
+      {incidentsAvailable && (
+        <label className="rd-field--row">
+          <input type="checkbox" checked={incidents} onChange={() => actions.toggleIncidents()} />
+          <span>Road incidents</span>
+          <span className="rd-title-meta">closures, delays</span>
         </label>
       )}
       {historic && (

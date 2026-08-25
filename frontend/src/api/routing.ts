@@ -11,7 +11,21 @@
  * about fire closures; the UI says so.
  */
 
-export type RouteProfile = 'drive' | 'hike';
+export type RouteProfile = 'drive' | 'hike' | 'apparatus';
+
+/**
+ * Typical wildland engine / water tender envelope for truck routing —
+ * deliberately on the heavy/tall side so a "legal" route is legal for the
+ * whole column. (Type 3 engine ≈ 12 t / 3.2 m; tenders run larger.)
+ */
+export const APPARATUS_DIMS = {
+  vehicleWeight: 18000, // kg
+  vehicleHeight: 3.7, // m
+  vehicleWidth: 2.6, // m
+  vehicleLength: 10, // m
+} as const;
+
+export const apparatusAvailable = !!(import.meta.env.VITE_TOMTOM_KEY as string | undefined);
 
 export interface RouteStep {
   text: string;
@@ -41,15 +55,18 @@ async function getJson<T>(url: string, init?: RequestInit): Promise<T> {
 
 // ---------- TomTom (drive, traffic-aware) ----------
 
-async function routeTomTom(a: LonLat, b: LonLat): Promise<RouteResult> {
+async function routeTomTom(a: LonLat, b: LonLat, apparatus = false): Promise<RouteResult> {
   const locs = `${a[1]},${a[0]}:${b[1]},${b[0]}`;
   const params = new URLSearchParams({
     key: TOMTOM_KEY!,
     traffic: 'true',
-    travelMode: 'car',
+    travelMode: apparatus ? 'truck' : 'car',
     instructionsType: 'text',
     language: 'en-US',
   });
+  if (apparatus) {
+    for (const [k, v] of Object.entries(APPARATUS_DIMS)) params.set(k, String(v));
+  }
   const d = await getJson<{
     routes: {
       summary: { lengthInMeters: number; travelTimeInSeconds: number; trafficDelayInSeconds: number };
@@ -229,6 +246,11 @@ export async function fetchRoute(
   b: LonLat,
   profile: RouteProfile,
 ): Promise<RouteResult> {
+  if (profile === 'apparatus') {
+    // No silent car fallback here: a failure must read as "no apparatus-
+    // legal route", not quietly hand back a route a tender can't take.
+    return routeTomTom(a, b, true);
+  }
   if (profile === 'drive') {
     if (TOMTOM_KEY) {
       try {
@@ -247,4 +269,68 @@ export async function fetchRoute(
     }
   }
   return routeValhalla(a, b);
+}
+
+
+// ---------- reachable range (drive-time isochrones) ----------
+
+export interface RangeRing {
+  minutes: number;
+  polygon: { type: 'Polygon'; coordinates: [number, number][][] };
+}
+
+async function rangeTomTom(origin: LonLat, minutes: number): Promise<RangeRing> {
+  const params = new URLSearchParams({
+    key: TOMTOM_KEY!,
+    timeBudgetInSec: String(minutes * 60),
+    traffic: 'true',
+    travelMode: 'car',
+  });
+  const d = await getJson<{
+    reachableRange: { boundary: { latitude: number; longitude: number }[] };
+  }>(
+    `https://api.tomtom.com/routing/1/calculateReachableRange/${origin[1]},${origin[0]}/json?${params}`,
+  );
+  const ring = d.reachableRange.boundary.map(
+    (p) => [p.longitude, p.latitude] as [number, number],
+  );
+  if (ring.length) ring.push(ring[0]);
+  return { minutes, polygon: { type: 'Polygon', coordinates: [ring] } };
+}
+
+async function rangeValhalla(origin: LonLat, budgets: number[]): Promise<RangeRing[]> {
+  const req = {
+    locations: [{ lat: origin[1], lon: origin[0] }],
+    costing: 'auto',
+    contours: budgets.map((m) => ({ time: m })),
+    polygons: true,
+  };
+  const d = await getJson<{
+    features: {
+      geometry: { type: string; coordinates: [number, number][][] };
+      properties: { contour: number };
+    }[];
+  }>(`https://valhalla1.openstreetmap.de/isochrone?json=${encodeURIComponent(JSON.stringify(req))}`);
+  return d.features.map((f) => ({
+    minutes: f.properties.contour,
+    polygon: { type: 'Polygon' as const, coordinates: f.geometry.coordinates },
+  }));
+}
+
+/** Drive-time rings around a point (traffic-aware with the TomTom key,
+ * community Valhalla otherwise). Sorted small→large. */
+export async function fetchReachableRange(
+  origin: LonLat,
+  budgets: number[] = [15, 30, 60],
+): Promise<{ rings: RangeRing[]; engine: 'tomtom' | 'valhalla' }> {
+  if (TOMTOM_KEY) {
+    try {
+      const rings = await Promise.all(budgets.map((m) => rangeTomTom(origin, m)));
+      return { rings: rings.sort((x, y) => x.minutes - y.minutes), engine: 'tomtom' };
+    } catch {
+      /* fall through */
+    }
+  }
+  const rings = await rangeValhalla(origin, budgets);
+  return { rings: rings.sort((x, y) => x.minutes - y.minutes), engine: 'valhalla' };
 }
