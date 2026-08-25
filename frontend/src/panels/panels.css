@@ -962,7 +962,11 @@
 .rd-back-control {
   position: static;
   flex: 0 0 auto;
-  padding: 7px 14px;
+  height: 32px;
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 14px;
   font-size: 13px;
   font-weight: 500;
   color: var(--color-text);
@@ -1399,7 +1403,10 @@
 .rd-basemap-control {
   position: static;
   flex: 0 0 auto;
+  height: 32px;
+  box-sizing: border-box;
   display: flex;
+  align-items: center;
   padding: 3px;
   gap: 2px;
   background: var(--color-surface);
@@ -1409,8 +1416,11 @@
 }
 
 .rd-basemap-btn {
-  padding: 4px 10px;
-  font-size: 11.5px;
+  height: 26px;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 10px;
+  font-size: 13px;
   border-radius: 999px;
   color: var(--color-text-muted);
 }
@@ -1831,17 +1841,29 @@
 .rd-route-pin--b { background: #4aa3ff; }
 .rd-sd-bar {
   width: 280px;
-  padding: 3px;
+  height: 32px;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  padding: 0 2px;
   border-radius: 999px;
+  font-size: 13px;
 }
 /* expanded states square the card back off */
 .rd-sd-bar:has(.rd-sd-row + .rd-sd-row),
 .rd-sd-bar:has(.rd-sd-result) {
   border-radius: var(--radius);
   padding: 8px;
+  height: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
 }
 .rd-sd-bar .rd-place-input input {
-  padding: 5px 12px;
+  height: 28px;
+  box-sizing: border-box;
+  padding: 0 12px;
+  font-size: 13px;
   border-radius: 999px;
   border-color: transparent;
   background: transparent;
