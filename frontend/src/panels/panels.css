@@ -1799,3 +1799,21 @@
 .rd-range-legend { align-items: center; font-size: 11px; color: var(--color-muted); gap: 8px; }
 .rd-range-key { display: inline-flex; align-items: center; gap: 4px; }
 .rd-chip:disabled { opacity: 0.45; cursor: default; }
+
+/* Route endpoint pins (draggable) */
+.rd-route-pin {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font: 700 11px var(--font-sans);
+  color: #0d0a0c;
+  border: 2px solid #0d0a0c;
+  box-shadow: 0 1px 5px rgba(0, 0, 0, 0.6);
+  cursor: grab;
+}
+.rd-route-pin--a { background: #ffffff; }
+.rd-route-pin--b { background: #4aa3ff; }
+.rd-sd-bar { width: 320px; }

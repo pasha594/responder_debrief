@@ -51,7 +51,6 @@ export const RD_LAYER_ORDER = [
   // directions ride on the very top
   'rd-route-casing',
   'rd-route-line',
-  'rd-route-ends',
 ] as const;
 
 export type RdLayerId = (typeof RD_LAYER_ORDER)[number];

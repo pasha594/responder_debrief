@@ -278,19 +278,41 @@ export function useMapLayerSync(): void {
     for (const m of MANAGERS) m.update(map, ctx);
   }, [map, ctx]);
 
-  // Directions: a map click fills whichever endpoint is in picking mode.
+  // Map clicks drop route/range pins. MapLibre only fires 'click' on
+  // non-drag clicks, so panning never drops. Arbitration order: an active
+  // draw tool always wins; the open range card claims clicks; clicks on
+  // interactive features (popups) pass through; otherwise, while the search
+  // UI is engaged, fill start → destination → move destination.
   useEffect(() => {
     if (!map) return;
-    const onClick = (e: { lngLat: { lng: number; lat: number } }) => {
+    const INTERACTIVE = [
+      'rd-hotspots', 'rd-hist-perims-fill', 'rd-incidents-line',
+      'rd-incidents-pt', 'rd-ir-heat-fill', 'rd-fire-pins',
+    ];
+    const onClick = (e: {
+      lngLat: { lng: number; lat: number };
+      point: { x: number; y: number };
+    }) => {
       const st = useStore.getState();
-      const which = st.directions.picking;
-      if (!which) return;
+      if (st.draw.tool !== 'none') return;
       const p = {
         coords: [e.lngLat.lng, e.lngLat.lat] as [number, number],
         label: `${e.lngLat.lat.toFixed(5)}, ${e.lngLat.lng.toFixed(5)}`,
       };
-      if (which === 'range') st.actions.setRangeOrigin(p);
-      else st.actions.setDirectionsPoint(which, p);
+      if (st.directions.picking === 'range') {
+        st.actions.setRangeOrigin(p);
+        return;
+      }
+      const d = st.directions;
+      if (!d.armed && !d.a && !d.b) return; // idle browsing — clicks are clicks
+      const present = INTERACTIVE.filter((l) => map.getLayer(l));
+      if (present.length && map.queryRenderedFeatures(
+            [e.point.x, e.point.y] as unknown as [number, number], { layers: present },
+          ).length) {
+        return; // the feature's own popup handles this click
+      }
+      if (!d.a) st.actions.setDirectionsPoint('a', p);
+      else st.actions.setDirectionsPoint('b', p);
     };
     map.on('click', onClick);
     return () => {

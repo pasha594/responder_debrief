@@ -55,7 +55,7 @@ export function fmtWhen(p: Record<string, unknown>): string {
 }
 
 function onClick(this: MlMap, e: MapLayerMouseEvent): void {
-  if (useStore.getState().directions.picking) return; // map click is claiming a route endpoint
+  if (useStore.getState().directions.picking) return; // range pick claims the click
   const f = e.features?.[0];
   if (!f) return;
   const p = f.properties ?? {};

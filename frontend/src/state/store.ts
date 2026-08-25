@@ -123,8 +123,10 @@ export interface AppState {
     b: { coords: [number, number]; label: string } | null;
     profile: import('../api/routing').RouteProfile;
     route: import('../api/routing').RouteResult | null;
-    /** Which endpoint the next map click fills, or null. */
-    picking: 'a' | 'b' | 'range' | null;
+    /** Map clicks fill route slots only while the search UI is engaged. */
+    armed: boolean;
+    /** 'range' while the range card is open (its clicks set the origin). */
+    picking: 'range' | null;
   };
 
   draw: {
@@ -189,7 +191,8 @@ export interface AppState {
     setDirectionsPoint(which: 'a' | 'b', p: { coords: [number, number]; label: string } | null): void;
     setDirectionsProfile(profile: import('../api/routing').RouteProfile): void;
     setDirectionsRoute(route: import('../api/routing').RouteResult | null): void;
-    setDirectionsPicking(which: 'a' | 'b' | 'range' | null): void;
+    setDirectionsArmed(armed: boolean): void;
+    setDirectionsPicking(which: 'range' | null): void;
     clearDirections(): void;
     setTheme(theme: 'dark' | 'light'): void;
     setSidebarTab(tab: AppState['ui']['sidebarTab']): void;
@@ -251,7 +254,7 @@ export const useStore = create<AppState>((set, get) => ({
 
   range: { origin: null, rings: [] },
 
-  directions: { a: null, b: null, profile: 'drive', route: null, picking: null },
+  directions: { a: null, b: null, profile: 'drive', route: null, armed: false, picking: null },
 
   draw: { tool: 'none', features: [], past: [], future: [] },
 
@@ -291,7 +294,10 @@ export const useStore = create<AppState>((set, get) => ({
           irFlight: { flightId: null },
           // traffic (like the basemap) is a viewing preference — persists
         },
-        directions: { a: null, b: null, profile: s.directions.profile, route: null, picking: null },
+        directions: {
+          a: null, b: null, profile: s.directions.profile,
+          route: null, armed: false, picking: null,
+        },
         range: { origin: null, rings: [] },
       }));
     },
@@ -444,8 +450,10 @@ export const useStore = create<AppState>((set, get) => ({
 
     setDirectionsPoint: (which, p) =>
       set((s) => ({
-        directions: { ...s.directions, [which]: p, route: null, picking: null },
+        directions: { ...s.directions, [which]: p, route: null },
       })),
+    setDirectionsArmed: (armed) =>
+      set((s) => ({ directions: { ...s.directions, armed } })),
     toggleIncidents: () => {
       track('layer_toggled', { layer: 'incidents', on: !get().layers.incidents.visible });
       set((s) => ({
@@ -466,7 +474,10 @@ export const useStore = create<AppState>((set, get) => ({
       set((s) => ({ directions: { ...s.directions, picking: which } })),
     clearDirections: () =>
       set((s) => ({
-        directions: { a: null, b: null, profile: s.directions.profile, route: null, picking: null },
+        directions: {
+          a: null, b: null, profile: s.directions.profile,
+          route: null, armed: false, picking: s.directions.picking,
+        },
       })),
 
     setTheme: (theme) => {
