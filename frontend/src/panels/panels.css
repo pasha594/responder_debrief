@@ -1820,3 +1820,5 @@
 
 .rd-sd-badge { flex: 0 0 auto; width: 18px; height: 18px; font-size: 10px; cursor: default; }
 .rd-sd-rangelegend { justify-content: flex-start; gap: 8px; }
+
+.rd-rings-toggle { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--color-text); cursor: pointer; }

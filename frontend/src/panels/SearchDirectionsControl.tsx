@@ -167,6 +167,7 @@ export function SearchDirectionsControl() {
   const [routing, setRouting] = useState(false);
   const [routeError, setRouteError] = useState<string | null>(null);
   const rangeSeq = useRef(0);
+  const [ringsOn, setRingsOn] = useState(false);
   const markers = useRef<{ a: Marker | null; b: Marker | null }>({ a: null, b: null });
   const routeSeq = useRef(0);
 
@@ -249,11 +250,11 @@ export function SearchDirectionsControl() {
     })();
   }, [directions, actions, map]);
 
-  // ---- drive-time rings follow point A automatically ----
+  // ---- drive-time rings: opt-in toggle, following A while enabled ----
   useEffect(() => {
     const a = directions.a;
     const mySeq = ++rangeSeq.current;
-    if (!a) {
+    if (!a || !ringsOn) {
       actions.setRangeRings([]);
       return;
     }
@@ -267,7 +268,10 @@ export function SearchDirectionsControl() {
         if (mySeq === rangeSeq.current) actions.setRangeRings([]);
       }
     })();
-  }, [directions.a, actions]);
+  }, [directions.a, ringsOn, actions]);
+
+  const route = directions.route;
+  const showDestination = !!directions.a || !!directions.b;
 
   const setPoint = (which: 'a' | 'b') => (hit: PlaceHit) => {
     if (which === 'a') track('place_searched', { kind: hit.kind });
@@ -277,14 +281,13 @@ export function SearchDirectionsControl() {
     }
   };
 
-  const route = directions.route;
-  const showDestination = !!directions.a || !!directions.b;
-
   return (
     <div className="rd-sd-control">
       <div className="rd-sd-card rd-sd-bar">
         <div className="rd-sd-row">
-          <span className="rd-route-pin rd-route-pin--a rd-sd-badge">A</span>
+          {showDestination && (
+            <span className="rd-route-pin rd-route-pin--a rd-sd-badge">A</span>
+          )}
           <PlaceInput
             placeholder="Search place or coordinates"
             value={directions.a?.label ?? ''}
@@ -379,17 +382,26 @@ export function SearchDirectionsControl() {
           </>
         )}
 
-        {range.rings.length > 0 && (
+        {showDestination && (
           <div className="rd-sd-row rd-sd-rangelegend">
-            <span className="rd-sd-note">Drive time from A:</span>
-            <div className="rd-sd-profiles rd-range-legend">
-              {[15, 30, 60].map((m) => (
-                <span key={m} className="rd-range-key">
-                  <span className="rd-hist-chip" style={{ background: RANGE_COLORS[m] }} />
-                  {m}m
-                </span>
-              ))}
-            </div>
+            <label className="rd-rings-toggle">
+              <input
+                type="checkbox"
+                checked={ringsOn}
+                onChange={() => setRingsOn(!ringsOn)}
+              />
+              <span>Drive-time rings from A</span>
+            </label>
+            {range.rings.length > 0 && (
+              <div className="rd-sd-profiles rd-range-legend">
+                {[15, 30, 60].map((m) => (
+                  <span key={m} className="rd-range-key">
+                    <span className="rd-hist-chip" style={{ background: RANGE_COLORS[m] }} />
+                    {m}m
+                  </span>
+                ))}
+              </div>
+            )}
           </div>
         )}
       </div>
