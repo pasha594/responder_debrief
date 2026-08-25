@@ -203,11 +203,13 @@ function FireMapView() {
     <MapRoot>
       <MapLayerBridge />
       <UrlStateSync />
-      <BackControl />
-      <BasemapControl />
-      <ErrorBoundary label="Search">
-        <SearchDirectionsControl />
-      </ErrorBoundary>
+      <div className="rd-map-toolbar">
+        <BackControl />
+        <BasemapControl />
+        <ErrorBoundary label="Search">
+          <SearchDirectionsControl />
+        </ErrorBoundary>
+      </div>
       <ErrorBoundary label="Fire panel">
         <Sidebar />
       </ErrorBoundary>
