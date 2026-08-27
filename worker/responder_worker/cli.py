@@ -1103,7 +1103,10 @@ def cmd_sync_incidents(args) -> int:
                 continue
             # deterministic evidence (skip listing work when unchanged & known)
             prev = state["incidents"].get(cand.key)
-            if (prev and not args.force and prev.get("dir_mtime") == cand.dir_mtime
+            # --since widens the mirror window, so an unchanged dir still
+            # needs re-listing on a backfill run.
+            if (prev and not args.force and not args.since
+                    and prev.get("dir_mtime") == cand.dir_mtime
                     and prev.get("match")):
                 log(f"[incidents] {cand.key}: unchanged since last sync — skipping")
                 unchanged_skips += 1
