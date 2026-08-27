@@ -102,6 +102,26 @@ GACC_STATES: dict[str, set[str]] = {
 }
 
 # pacific_nw splits into per-state year roots and uses GIS/ instead of Products/.
+# GACCs that nest per-STATE subdirectories, both as {gacc}/{State}/{year}/
+# (southern/Texas/2026/Ross_2026) and {gacc}/{year}/{State}/
+# (southern/2026/Florida/...). Their dirs also use looser naming.
+STATE_SUBDIR_REGIONS = {"southern", "eastern"}
+
+STATE_NAME_ABBR = {
+    "alabama": "AL", "arkansas": "AR", "florida": "FL", "georgia": "GA",
+    "kentucky": "KY", "louisiana": "LA", "mississippi": "MS",
+    "north carolina": "NC", "oklahoma": "OK", "puerto rico": "PR",
+    "south carolina": "SC", "tennessee": "TN", "texas": "TX",
+    "virginia": "VA", "west virginia": "WV", "minnesota": "MN",
+    "wisconsin": "WI", "michigan": "MI", "missouri": "MO", "new york": "NY",
+    "new jersey": "NJ", "pennsylvania": "PA", "maryland": "MD",
+    "maine": "ME", "new hampshire": "NH", "vermont": "VT",
+    "massachusetts": "MA", "connecticut": "CT", "ohio": "OH",
+    "indiana": "IN", "illinois": "IL", "iowa": "IA", "delaware": "DE",
+    "rhode island": "RI",
+}
+
+
 def region_year_roots(year: int) -> list[tuple[str, str]]:
     """(region_key, url) pairs to crawl for candidate incident dirs."""
     roots: list[tuple[str, str]] = []

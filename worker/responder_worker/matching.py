@@ -45,15 +45,28 @@ def is_placeholder_dir(name: str) -> bool:
     return False
 
 
-def candidate_dir_name(name: str, year: int = 2026) -> str | None:
-    """'2026_HayCreekComplex/' -> 'HayCreekComplex' or None if not a candidate."""
+# "TX_TXTX_123456" / "FL_FNF_000833" style tokens embedded in a dir name —
+# the Southern GACC's state subdirs name dirs this way with no year at all.
+_UNIT_IN_NAME_RE = re.compile(r"[A-Z]{2}[_-][A-Z0-9]{2,4}[_-]\d{4,6}")
+
+
+def candidate_dir_name(name: str, year: int = 2026, *, lenient: bool = False) -> str | None:
+    """'2026_HayCreekComplex/' -> 'HayCreekComplex' or None if not a candidate.
+    Also accepts the reversed 'Ross_2026' form. With lenient=True (state
+    subdirectory roots), a dir whose name embeds a unit id ('MailBox_FL_FNF_
+    002135') qualifies too — the unit-token matcher resolves it."""
     name = urllib.parse.unquote(name.rstrip("/"))
-    m = re.fullmatch(r"(?P<yr>\d{4})_(?P<rest>.+)", name)
-    if not m or int(m.group("yr")) != year:
-        return None
     if is_placeholder_dir(name):
         return None
-    return m.group("rest")
+    m = re.fullmatch(r"(?P<yr>\d{4})_(?P<rest>.+)", name)
+    if m and int(m.group("yr")) == year:
+        return m.group("rest")
+    m = re.fullmatch(r"(?P<rest>.+)_(?P<yr>\d{4})", name)
+    if m and int(m.group("yr")) == year:
+        return m.group("rest")
+    if lenient and _UNIT_IN_NAME_RE.search(name):
+        return name
+    return None
 
 
 def normalize_name(raw: str) -> str:
@@ -64,6 +77,7 @@ def normalize_name(raw: str) -> str:
     """
     s = urllib.parse.unquote(raw)
     s = re.sub(r"^\d{4}_", "", s)
+    s = re.sub(r"_\d{4}$", "", s)  # year-suffixed dirs: Ross_2026
     s = _CAMEL_1.sub(" ", s)
     s = _CAMEL_2.sub(" ", s)
     s = re.sub(r"[_\-]+", " ", s)
@@ -92,7 +106,8 @@ class IncidentCandidate:
 
     @property
     def key(self) -> str:
-        region_dir = self.region.replace("pacific_nw_oregon", "pacific_nw").replace(
+        region_dir = re.sub(r"^(southern|eastern)_[a-z_]+$", r"\1", self.region)
+        region_dir = region_dir.replace("pacific_nw_oregon", "pacific_nw").replace(
             "pacific_nw_washington", "pacific_nw"
         )
         return f"{region_dir}/{self.year}/{self.dir_name}"
@@ -107,7 +122,18 @@ class Match:
 
 
 def _allowed_states(region: str) -> set[str] | None:
-    return config.GACC_STATES.get(region)
+    direct = config.GACC_STATES.get(region)
+    if direct is not None:
+        return direct
+    # state-subdir keys like "southern_texas" narrow to that one state
+    for gacc in config.STATE_SUBDIR_REGIONS:
+        prefix = f"{gacc}_"
+        if region.startswith(prefix):
+            abbr = config.STATE_NAME_ABBR.get(region[len(prefix):].replace("_", " "))
+            if abbr:
+                return {abbr}
+            return config.GACC_STATES.get(gacc)
+    return None
 
 
 def match_candidate(

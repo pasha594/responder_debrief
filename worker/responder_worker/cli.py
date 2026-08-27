@@ -311,16 +311,45 @@ def _collect_candidates(client, args, fires) -> list[IncidentCandidate]:
     if args.region:
         roots = [(r, u) for r, u in roots if r.startswith(args.region)]
 
+    from .ftp_index import parse_autoindex
+
+    def state_of(dir_name: str) -> str | None:
+        name = dir_name.rstrip("/").replace("%20", " ").replace("_", " ").lower()
+        return name if name in config.STATE_NAME_ABBR else None
+
     cands: list[IncidentCandidate] = []
+    extra_roots: list[tuple[str, str, bool]] = []  # (region_key, url, lenient)
+
+    # The Southern/Eastern GACCs hide incidents in per-STATE subdirs at BOTH
+    # placements: {gacc}/{State}/{year}/ (southern/Texas/2026/Ross_2026) and
+    # {gacc}/{year}/{State}/ (southern/2026/Florida/...).
+    for region in sorted(config.STATE_SUBDIR_REGIONS):
+        if args.region and not region.startswith(args.region):
+            continue
+        gacc_root = f"{config.FTP_BASE}/{region}/"
+        resp = get_optional(client, gacc_root)
+        if resp is None:
+            continue
+        for e in parse_autoindex(resp.text, gacc_root):
+            st_name = state_of(e.name) if e.is_dir else None
+            if st_name:
+                key = f"{region}_{st_name.replace(' ', '_')}"
+                extra_roots.append((key, f"{e.url.rstrip('/')}/{year}/", True))
+
     for region, root_url in roots:
         resp = get_optional(client, root_url)
         if resp is None:
             continue
-        from .ftp_index import parse_autoindex
 
         for e in parse_autoindex(resp.text, root_url):
             if not e.is_dir:
                 continue
+            if region in config.STATE_SUBDIR_REGIONS:
+                st_name = state_of(e.name)
+                if st_name:
+                    key = f"{region}_{st_name.replace(' ', '_')}"
+                    extra_roots.append((key, e.url.rstrip('/') + '/', True))
+                    continue
             rest = candidate_dir_name(e.name + "/", year)
             if rest is None:
                 continue
@@ -332,6 +361,30 @@ def _collect_candidates(client, args, fires) -> list[IncidentCandidate]:
                 region=region, year=year, dir_name=e.name,
                 dir_url=e.url, dir_mtime=e.mtime,
             ))
+
+    # Crawl the collected state subdirectory roots with lenient naming.
+    seen_urls = {c.dir_url for c in cands}
+    for region, root_url, lenient in extra_roots:
+        resp = get_optional(client, root_url)
+        if resp is None:
+            continue
+        for e in parse_autoindex(resp.text, root_url):
+            if not e.is_dir:
+                continue
+            rest = candidate_dir_name(e.name + "/", year, lenient=lenient)
+            if rest is None:
+                continue
+            if e.url in seen_urls:
+                continue
+            if fire_filter:
+                dir_norm = normalize_name(e.name)
+                if fire_filter not in dir_norm and dir_norm not in fire_filter:
+                    continue
+            cands.append(IncidentCandidate(
+                region=region, year=year, dir_name=e.name,
+                dir_url=e.url, dir_mtime=e.mtime,
+            ))
+            seen_urls.add(e.url)
     return cands
 
 

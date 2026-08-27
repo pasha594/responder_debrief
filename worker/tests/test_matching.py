@@ -259,3 +259,32 @@ def test_rank_tolerates_unmatched_dirs():
     cands = [_cand("2026_NotAFireWeKnow"), _cand("2026_BigGrass")]
     got = [c.dir_name for c in _rank_candidates(cands, FIRES, [])]
     assert got[0] == "2026_BigGrass"  # unknown dirs sink to the end (0 acres)
+
+
+def test_candidate_dir_name_reversed_and_lenient():
+    from responder_worker.matching import candidate_dir_name
+
+    assert candidate_dir_name("2026_HayCreekComplex/") == "HayCreekComplex"
+    assert candidate_dir_name("Ross_2026/") == "Ross"
+    assert candidate_dir_name("Ross_2025/") is None
+    assert candidate_dir_name("Fuels/") is None
+    # lenient roots accept unit-id-embedded names with no year
+    assert candidate_dir_name("MailBox_FL_FNF_002135/", lenient=True) == "MailBox_FL_FNF_002135"
+    assert candidate_dir_name("FL_FNF_001638_Shell/", lenient=True) == "FL_FNF_001638_Shell"
+    assert candidate_dir_name("SomeRandomDir/", lenient=True) is None
+
+
+def test_allowed_states_for_state_subdir_regions():
+    from responder_worker.matching import _allowed_states
+
+    assert _allowed_states("southern_texas") == {"TX"}
+    assert _allowed_states("southern_north_carolina") == {"NC"}
+    assert _allowed_states("eastern_minnesota") == {"MN"}
+    assert "TX" in _allowed_states("southern")
+
+
+def test_normalize_name_year_suffix():
+    from responder_worker.matching import normalize_name
+
+    assert normalize_name("Ross_2026") == "ross"
+    assert normalize_name("2026_HayCreekComplex") == "hay creek complex"
