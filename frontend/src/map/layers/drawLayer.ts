@@ -7,6 +7,7 @@
  * persists per-fire to localStorage.
  */
 import type { GeoJSONSource, Map as MlMap, MapMouseEvent, MapTouchEvent } from 'maplibre-gl';
+import { rdLabelFont } from '../glyphFonts';
 import { useStore, type DrawFeature } from '../../state/store';
 import { beforeIdFor } from '../zOrder';
 import type { LayerManager } from '../layerTypes';
@@ -144,7 +145,7 @@ function ensureLayers(map: MlMap): void {
           'symbol-spacing': 90,
           'text-field': ['get', 'letter'],
           'text-size': 11,
-          'text-font': ['Noto Sans Bold'],
+          'text-font': rdLabelFont(map),
           'text-allow-overlap': true,
         },
         paint: {
@@ -199,7 +200,7 @@ function ensureLayers(map: MlMap): void {
         layout: {
           'text-field': ['get', 'glyph'],
           'text-size': ['coalesce', ['get', 'tsize'], 11],
-          'text-font': ['Noto Sans Bold'],
+          'text-font': rdLabelFont(map),
           'text-allow-overlap': true,
         },
         paint: {

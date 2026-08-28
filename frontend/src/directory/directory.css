@@ -361,3 +361,24 @@
 .rd-dir-health-link:hover {
   color: var(--color-accent);
 }
+
+
+/* ---------- place search (fires near a city) ---------- */
+.rd-dir-searchwrap { position: relative; }
+.rd-dir-placehits {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  min-width: 100%;
+  width: max-content;
+  max-width: 340px;
+  z-index: 30;
+}
+.rd-dir-placehead {
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--color-text-muted);
+  padding: 5px 8px 3px;
+}
+.rd-near-chip { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }

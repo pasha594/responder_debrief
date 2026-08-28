@@ -1,9 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
+  NEAR_RADIUS_MI,
   buildDirectoryRows,
   compareRows,
+  distanceMiles,
   matchesFilter,
   matchesQuery,
+  nearRows,
   perimeterFreshness,
   selectDirectoryRows,
   summarizeRows,
@@ -93,6 +96,7 @@ function row(over: Partial<DirectoryRow> = {}): DirectoryRow {
     containment: 10,
     prescribed: false,
     active: true,
+    coords: [-120, 39],
     createdOn: '2026-08-01T00:00:00Z',
     polyLastUpdated: null,
     hasForecast: false,
@@ -391,5 +395,108 @@ describe('files column sorts by upload time', () => {
     const sort = { key: 'files' as const, dir: 'desc' as const };
     const out = [d, c, b, a].sort((x, y) => compareRows(x, y, sort)).map((r) => r.name);
     expect(out).toEqual(['A', 'B', 'C', 'D']);
+  });
+});
+
+describe('distanceMiles', () => {
+  it('zero for identical points', () => {
+    expect(distanceMiles([-120, 39], [-120, 39])).toBe(0);
+  });
+
+  it('Reno to Truckee is roughly 26 miles', () => {
+    const reno: [number, number] = [-119.8138, 39.5296];
+    const truckee: [number, number] = [-120.1833, 39.328];
+    const d = distanceMiles(reno, truckee);
+    expect(d).toBeGreaterThan(20);
+    expect(d).toBeLessThan(32);
+  });
+
+  it('one degree of latitude is about 69 miles', () => {
+    expect(distanceMiles([-100, 40], [-100, 41])).toBeCloseTo(69.09, 0);
+  });
+});
+
+describe('coords on rows', () => {
+  it('catalog coordinates flow through', () => {
+    const rows = buildDirectoryRows(catalog([catalogFire({ coordinates: [-114, 45] })]), undefined);
+    expect(rows[0].coords).toEqual([-114, 45]);
+  });
+
+  it('live-index "lat, lon" strings are parsed', () => {
+    const rows = buildDirectoryRows(undefined, firesList([summary({ fire_coordinates: '39.5, -119.8' })]));
+    expect(rows[0].coords).toEqual([-119.8, 39.5]);
+  });
+
+  it('merge keeps the catalog position, falls back to the live one', () => {
+    const rows = buildDirectoryRows(
+      catalog([catalogFire({ cornea_id: 'c-1', coordinates: [-114, 45] })]),
+      firesList([summary({ cornea_id: 'c-1', fire_coordinates: '40, -110' })]),
+    );
+    expect(rows[0].coords).toEqual([-114, 45]);
+  });
+
+  it('garbage coordinates become null, never NaN', () => {
+    const rows = buildDirectoryRows(
+      catalog([catalogFire({ coordinates: [NaN, 45] as [number, number] })]),
+      undefined,
+    );
+    expect(rows[0].coords).toBeNull();
+  });
+});
+
+describe('near mode', () => {
+  const reno: [number, number] = [-119.8138, 39.5296];
+  const sort = { key: 'distance', dir: 'asc' } as const;
+
+  it('keeps only fires within the radius, closest first, with distances', () => {
+    const rows = [
+      row({ corneaId: 'far', name: 'Far', coords: [-105, 40] }), // ~790 mi
+      row({ corneaId: 'near2', name: 'Tahoe', coords: [-120.03, 39.09] }), // ~33 mi
+      row({ corneaId: 'near1', name: 'Truckee', coords: [-120.1833, 39.328] }), // ~26 mi
+      row({ corneaId: 'nocoords', name: 'Unknown', coords: null }),
+    ];
+    const shown = selectDirectoryRows(
+      nearRows(rows, { label: 'Reno', coords: reno }),
+      { query: '', filter: 'all', sort },
+    );
+    expect(shown.map((r) => r.corneaId)).toEqual(['near1', 'near2']);
+    expect(shown[0].distanceMi).toBeGreaterThan(20);
+    expect(shown[0].distanceMi).toBeLessThan(32);
+  });
+
+  it('radius boundary: just inside stays, just outside goes', () => {
+    // ~1 degree lon at lat 39.5 is ~53.5 mi; place two fires straddling 200 mi
+    const inside = row({ corneaId: 'in', coords: [-119.8138, 39.5296 + 199 / 69.09] });
+    const outside = row({ corneaId: 'out', coords: [-119.8138, 39.5296 + 201 / 69.09] });
+    const shown = selectDirectoryRows(
+      nearRows([inside, outside], { label: 'Reno', coords: reno }),
+      { query: '', filter: 'all', sort },
+    );
+    expect(shown.map((r) => r.corneaId)).toEqual(['in']);
+    expect(NEAR_RADIUS_MI).toBe(200);
+  });
+
+  it('query and filter still apply within the near set', () => {
+    const rows = [
+      row({ corneaId: 'a', name: 'Alpha', acres: 5000, coords: [-120.1, 39.4] }),
+      row({ corneaId: 'b', name: 'Beta', acres: 10, coords: [-120.2, 39.3] }),
+    ];
+    const shown = selectDirectoryRows(
+      nearRows(rows, { label: 'Reno', coords: reno }),
+      { query: 'alpha', filter: 'large', sort },
+    );
+    expect(shown.map((r) => r.corneaId)).toEqual(['a']);
+  });
+
+  it('without near, rows carry no distance and column sort is untouched', () => {
+    const pool = nearRows([row({ corneaId: 'a' })], null);
+    const shown = selectDirectoryRows(pool, {
+      query: '',
+      filter: 'all',
+      sort: { key: 'acres', dir: 'desc' },
+    });
+    expect(shown[0].distanceMi).toBeUndefined();
+    // no near: identity passes straight through (DirectoryRow memo depends on it)
+    expect(pool[0]).toBe(shown[0]);
   });
 });

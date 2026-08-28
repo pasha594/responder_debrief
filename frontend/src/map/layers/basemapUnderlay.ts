@@ -90,6 +90,30 @@ function apply(map: MlMap): void {
   appliedFor = want;
 }
 
+/**
+ * After a setStyle swap the old style's layers are gone but our module state
+ * still thinks satellite/topo is applied (and the carried-over imagery layer
+ * sits above the NEW basemap's roads/labels, breaking the hybrid). Reset and
+ * re-apply against the fresh style.
+ */
+export function resyncBasemapUnderlay(map: MlMap): void {
+  // Restore (not wipe) first: if the resync runs while the CURRENT style's
+  // layers are hidden, dropping hidden[] would orphan them as invisible
+  // forever (hideBasemap skips already-'none' layers). Stale ids from a
+  // replaced style are skipped by restoreBasemap's getLayer guard.
+  try {
+    restoreBasemap(map);
+  } catch {
+    hidden = [];
+  }
+  appliedFor = null;
+  try {
+    apply(map);
+  } catch {
+    /* style mid-swap — the next update retries */
+  }
+}
+
 export const basemapUnderlay: LayerManager = {
   mount(map) {
     appliedFor = null;

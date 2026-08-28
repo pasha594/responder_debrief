@@ -7,9 +7,36 @@ export const FIRE_API = 'https://fire-api-prod.web.app';
 export const DATA_BASE_URL: string =
   import.meta.env.VITE_DATA_BASE_URL || `${import.meta.env.BASE_URL}data`;
 
-/** Free, keyless dark basemap (OpenMapTiles schema). */
-export const BASEMAP_STYLE_DARK = 'https://tiles.openfreemap.org/styles/dark';
-export const BASEMAP_STYLE_LIGHT = 'https://tiles.openfreemap.org/styles/positron';
+/**
+ * Basemap style catalog — all free and keyless, straight from the provider
+ * (OpenFreeMap serves the OpenMapTiles styles; CARTO's GL styles are public).
+ * Three variants per theme; the first entry is each theme's default.
+ * `swatch` is just the picker chip color, roughly the style's ground tone.
+ */
+export interface MapStyleDef {
+  id: string;
+  label: string;
+  url: string;
+  swatch: string;
+}
+
+export const MAP_STYLES: Record<'dark' | 'light', MapStyleDef[]> = {
+  dark: [
+    { id: 'dark', label: 'Classic dark', url: 'https://tiles.openfreemap.org/styles/dark', swatch: '#161313' },
+    { id: 'fiord', label: 'Fiord', url: 'https://tiles.openfreemap.org/styles/fiord', swatch: '#232f41' },
+    { id: 'dark-matter', label: 'Dark Matter', url: 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json', swatch: '#0e0e0e' },
+  ],
+  light: [
+    { id: 'positron', label: 'Positron', url: 'https://tiles.openfreemap.org/styles/positron', swatch: '#f4f4f2' },
+    { id: 'liberty', label: 'Liberty', url: 'https://tiles.openfreemap.org/styles/liberty', swatch: '#efe9e1' },
+    { id: 'voyager', label: 'Voyager', url: 'https://basemaps.cartocdn.com/gl/voyager-gl-style/style.json', swatch: '#fbf6ef' },
+  ],
+};
+
+export function mapStyleDef(theme: 'dark' | 'light', id: string): MapStyleDef {
+  const list = MAP_STYLES[theme];
+  return list.find((s) => s.id === id) ?? list[0];
+}
 
 /** Playback speed default: model-hours advanced per wall-clock second. */
 export const DEFAULT_PLAYBACK_SPEED = 10;

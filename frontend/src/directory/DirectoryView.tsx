@@ -3,15 +3,20 @@
  * mounted here — clicking a row routes to '#/fire/{corneaId}', which swaps in
  * the single-fire map shell.
  */
-import { useEffect, useLayoutEffect, useMemo, useRef } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { DisclaimerFooter } from '../panels/DisclaimerFooter';
+import { SettingsControl } from '../panels/SettingsControl';
+import { searchPlaces, type PlaceHit } from '../api/geocode';
+import { track } from '../app/analytics';
 import { useFires, useMasterCatalog } from '../api/queries';
 import { useStore } from '../state/store';
 import { useIsDesktop } from '../utils/useMediaQuery';
 import { DirectoryRow } from './DirectoryRow';
 import {
   DIRECTORY_FILTERS,
+  NEAR_RADIUS_MI,
   buildDirectoryRows,
+  nearRows,
   selectDirectoryRows,
   summarizeRows,
   type DirectorySortKey,
@@ -65,7 +70,7 @@ export function DirectoryView() {
   const fires = useFires();
   const catalog = useMasterCatalog();
   const nowMs = useStore((s) => s.time.now);
-  const { query, filter, sort } = useStore((s) => s.ui.directory);
+  const { query, filter, sort, near } = useStore((s) => s.ui.directory);
   const actions = useStore((s) => s.actions);
   const isDesktop = useIsDesktop();
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -75,10 +80,52 @@ export function DirectoryView() {
     [catalog.data, fires.data],
   );
   const summary = useMemo(() => summarizeRows(rows), [rows]);
+  // The near pool clones rows (distance attached), so memoize it on
+  // [rows, near] alone — recomputing per keystroke would mint new object
+  // identities and defeat DirectoryRow's memo.
+  const pool = useMemo(() => nearRows(rows, near), [rows, near]);
   const shown = useMemo(
-    () => selectDirectoryRows(rows, { query, filter, sort }),
-    [rows, query, filter, sort],
+    () => selectDirectoryRows(pool, { query, filter, sort }),
+    [pool, query, filter, sort],
   );
+
+  // ---- place autocomplete on the same search box ("Reno" → fires near Reno).
+  // Debounced Photon lookup; fire/state filtering stays instant beneath it.
+  const [placeHits, setPlaceHits] = useState<PlaceHit[]>([]);
+  const [placesOpen, setPlacesOpen] = useState(false);
+  const placeSeq = useRef(0);
+  // Only geocode once the user actually edits the box in THIS mount — the
+  // query survives fire round-trips in the store, and remounting must not
+  // re-fire Photon for a search the user already finished.
+  const queryTouched = useRef(false);
+  useEffect(() => {
+    const q = query.trim();
+    const mySeq = ++placeSeq.current;
+    if (!queryTouched.current || q.length < 3) {
+      setPlaceHits([]);
+      return;
+    }
+    const t = setTimeout(() => {
+      // biased to the CONUS centroid so "Moscow" means Idaho before Russia
+      searchPlaces(q, [-98.6, 39.8])
+        .then((hits) => {
+          if (mySeq !== placeSeq.current) return;
+          setPlaceHits(hits);
+        })
+        .catch(() => {
+          if (mySeq === placeSeq.current) setPlaceHits([]);
+        });
+    }, 350);
+    return () => clearTimeout(t);
+  }, [query]);
+
+  const pickPlace = (hit: PlaceHit) => {
+    track('place_searched', { kind: hit.kind, context: 'directory' });
+    actions.setDirectoryNear({ label: hit.label, coords: hit.coords });
+    actions.setDirectoryQuery('');
+    setPlaceHits([]);
+    setPlacesOpen(false);
+  };
 
   // Restore the roster scroll position when coming back from a fire.
   useLayoutEffect(() => {
@@ -108,6 +155,16 @@ export function DirectoryView() {
 
   const open = actions.selectFire;
 
+  // In near mode the Location column carries the distances, so its header
+  // sorts by distance (how the roster is ordered on entry) instead of state.
+  const columns = useMemo(
+    () =>
+      near
+        ? COLUMNS.map((c) => (c.key === 'state' ? { ...c, key: 'distance' as DirectorySortKey } : c))
+        : COLUMNS,
+    [near],
+  );
+
   return (
     <div className="rd-directory">
       <header className="rd-dir-header">
@@ -115,17 +172,91 @@ export function DirectoryView() {
           <h1 className="rd-dir-wordmark">Responder Brief</h1>
           <div className="rd-dir-subtitle">{subtitle}</div>
         </div>
+        <SettingsControl />
       </header>
 
       <div className="rd-dir-toolbar">
-        <input
-          type="search"
-          className="rd-search rd-dir-search"
-          placeholder="Search fire or state"
-          value={query}
-          onChange={(e) => actions.setDirectoryQuery(e.target.value)}
-          aria-label="Search fires by name or state"
-        />
+        <div
+          className="rd-dir-searchwrap"
+          onBlur={(e) => {
+            // close only when focus truly left the wrap (input ↔ hit buttons)
+            if (!e.currentTarget.contains(e.relatedTarget as Node)) setPlacesOpen(false);
+          }}
+        >
+          <input
+            type="search"
+            className="rd-search rd-dir-search"
+            placeholder="Search fire, state, or city"
+            value={query}
+            onChange={(e) => {
+              queryTouched.current = true;
+              actions.setDirectoryQuery(e.target.value);
+            }}
+            onFocus={() => setPlacesOpen(true)}
+            onKeyDown={(e) => {
+              if (e.key === 'Escape') setPlacesOpen(false);
+              if (e.key === 'ArrowDown') {
+                const first = e.currentTarget
+                  .closest('.rd-dir-searchwrap')
+                  ?.querySelector<HTMLButtonElement>('.rd-dir-placehits button');
+                if (first) {
+                  e.preventDefault();
+                  first.focus();
+                }
+              }
+            }}
+            aria-label="Search fires by name, state, or city"
+          />
+          {placesOpen && placeHits.length > 0 && query.trim().length >= 3 && (
+            <ul
+              className="rd-place-hits rd-dir-placehits"
+              // keep the input focused through hit clicks AND scrollbar drags
+              onMouseDown={(e) => {
+                if (e.target instanceof HTMLElement && e.target.tagName !== 'BUTTON') {
+                  e.preventDefault();
+                }
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Escape') {
+                  setPlacesOpen(false);
+                  document.querySelector<HTMLInputElement>('.rd-dir-search')?.focus();
+                }
+                if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+                  e.preventDefault();
+                  const btns = [...e.currentTarget.querySelectorAll<HTMLButtonElement>('button')];
+                  const i = btns.indexOf(document.activeElement as HTMLButtonElement);
+                  const next = btns[i + (e.key === 'ArrowDown' ? 1 : -1)];
+                  if (next) next.focus();
+                  else if (e.key === 'ArrowUp') {
+                    document.querySelector<HTMLInputElement>('.rd-dir-search')?.focus();
+                  }
+                }
+              }}
+            >
+              <li className="rd-dir-placehead" aria-hidden="true">
+                Places — show fires nearby
+              </li>
+              {placeHits.map((h, i) => (
+                <li key={`${h.label}-${i}`}>
+                  <button type="button" onClick={() => pickPlace(h)}>
+                    {h.label}
+                    {h.detail && <span className="rd-place-detail">{h.detail}</span>}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+        {near && (
+          <button
+            type="button"
+            className="rd-chip rd-chip--active rd-near-chip"
+            title={`Fires within ${NEAR_RADIUS_MI} miles, closest first — click to clear`}
+            onClick={() => actions.setDirectoryNear(null)}
+          >
+            Near {near.label} <span aria-hidden="true">✕</span>
+          </button>
+        )}
         <div className="rd-chips" role="group" aria-label="Filter fires">
           {DIRECTORY_FILTERS.map((f) => (
             <button
@@ -158,7 +289,7 @@ export function DirectoryView() {
           <table className="rd-dir-table">
             <thead>
               <tr>
-                {COLUMNS.map((c) => {
+                {columns.map((c) => {
                   const active = sort.key === c.key;
                   return (
                     <th
@@ -219,7 +350,13 @@ export function DirectoryView() {
         )}
 
         {!failed && !loading && hasRows && shown.length === 0 && (
-          <div className="rd-empty">No fires match this search.</div>
+          <div className="rd-empty">
+            {near && pool.length === 0
+              ? `No fires within ${NEAR_RADIUS_MI} miles of ${near.label}.`
+              : near
+                ? `No fires near ${near.label} match this search.`
+                : 'No fires match this search.'}
+          </div>
         )}
         {!failed && !loading && !hasRows && (
           <div className="rd-empty">No active fires are listed right now.</div>

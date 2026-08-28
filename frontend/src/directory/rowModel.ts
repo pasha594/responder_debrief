@@ -11,6 +11,7 @@
  * would cost one detail request per fire.
  */
 import { isPrescribed } from '../api/fireFields';
+import { parseFireCoordinates } from '../api/geo';
 import type { CatalogFire, FireSummary, FiresListResponse, MasterCatalog } from '../api/types';
 
 export interface DirectoryRow {
@@ -39,6 +40,19 @@ export interface DirectoryRow {
   latestUploadTs: string | null;
   perimeterCount: number | null;
   spreadRunCount: number | null;
+  /** [lon, lat] when either source carries a usable position. */
+  coords: [number, number] | null;
+  /** Miles from the active "near" place; attached only in near mode. */
+  distanceMi?: number;
+}
+
+function lonLat(v: unknown): [number, number] | null {
+  if (!Array.isArray(v) || v.length !== 2) return null;
+  const [lon, lat] = v as [unknown, unknown];
+  if (typeof lon !== 'number' || typeof lat !== 'number') return null;
+  if (!Number.isFinite(lon) || !Number.isFinite(lat)) return null;
+  if (Math.abs(lon) > 180 || Math.abs(lat) > 90) return null;
+  return [lon, lat];
 }
 
 function num(v: unknown): number | null {
@@ -78,6 +92,7 @@ function fromCatalog(f: CatalogFire): DirectoryRow {
     latestUploadTs: str(f.incident_latest_upload_ts),
     perimeterCount: num(f.perimeter_count),
     spreadRunCount: num(f.spread_run_count),
+    coords: lonLat(f.coordinates),
   };
 }
 
@@ -103,6 +118,7 @@ function fromSummary(f: FireSummary): DirectoryRow {
     latestUploadTs: null,
     perimeterCount: null,
     spreadRunCount: null,
+    coords: parseFireCoordinates(f.fire_coordinates),
   };
 }
 
@@ -150,6 +166,7 @@ export function buildDirectoryRows(
       createdOn: base.createdOn ?? live.createdOn,
       polyLastUpdated: newerIso(base.polyLastUpdated, live.polyLastUpdated),
       fireSlug: base.fireSlug ?? live.fireSlug,
+      coords: base.coords ?? live.coords,
     });
   }
 
@@ -237,6 +254,29 @@ export function matchesQuery(row: DirectoryRow, query: string): boolean {
   return full ? full.includes(q) : abbr.includes(q);
 }
 
+// ---------- proximity ("fires near Reno") ----------
+
+export interface DirectoryNear {
+  label: string;
+  coords: [number, number];
+}
+
+/** Radius for the "near <place>" directory mode. */
+export const NEAR_RADIUS_MI = 200;
+
+const EARTH_RADIUS_MI = 3958.8;
+
+/** Great-circle distance in miles between two [lon, lat] points. */
+export function distanceMiles(a: [number, number], b: [number, number]): number {
+  const toRad = Math.PI / 180;
+  const dLat = (b[1] - a[1]) * toRad;
+  const dLon = (b[0] - a[0]) * toRad;
+  const h =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(a[1] * toRad) * Math.cos(b[1] * toRad) * Math.sin(dLon / 2) ** 2;
+  return 2 * EARTH_RADIUS_MI * Math.asin(Math.min(1, Math.sqrt(h)));
+}
+
 // ---------- sorting ----------
 
 export type DirectorySortKey =
@@ -246,7 +286,9 @@ export type DirectorySortKey =
   | 'started'
   | 'perimeter'
   | 'forecast'
-  | 'files';
+  | 'files'
+  /** Only meaningful in near mode; applied automatically when a place is picked. */
+  | 'distance';
 
 export interface DirectorySort {
   key: DirectorySortKey;
@@ -269,6 +311,8 @@ function sortValue(row: DirectoryRow, key: DirectorySortKey): string | number | 
     case 'forecast':
       if (!row.hasForecast) return null;
       return row.spreadLatestRun ? (orNull(Date.parse(row.spreadLatestRun)) ?? 0) : 0;
+    case 'distance':
+      return row.distanceMi ?? null;
     case 'files': {
       // Sort by freshness like the other data columns. A fire with files
       // but an unknown upload time still ranks above one with none at all.
@@ -303,7 +347,26 @@ export function compareRows(a: DirectoryRow, b: DirectoryRow, sort: DirectorySor
   return sort.dir === 'asc' ? cmp : -cmp;
 }
 
-/** Filter + search + sort in one pass (new array; input untouched). */
+/**
+ * Near-mode pool: fires within NEAR_RADIUS_MI of the place, each cloned once
+ * with its distance attached. Memoize the result on [rows, near] — the clones
+ * mint new object identities, and DirectoryRow's memo lives on row identity,
+ * so this must NOT re-run per keystroke. With no place, rows pass through
+ * untouched (same objects).
+ */
+export function nearRows(rows: DirectoryRow[], near: DirectoryNear | null | undefined): DirectoryRow[] {
+  if (!near) return rows;
+  const pool: DirectoryRow[] = [];
+  for (const r of rows) {
+    if (!r.coords) continue;
+    const d = distanceMiles(near.coords, r.coords);
+    if (d <= NEAR_RADIUS_MI) pool.push({ ...r, distanceMi: d });
+  }
+  return pool;
+}
+
+/** Filter + search + sort in one pass (new array; input untouched). Near
+ * mode: pass the rows through nearRows() first. */
 export function selectDirectoryRows(
   rows: DirectoryRow[],
   opts: { query: string; filter: DirectoryFilter; sort: DirectorySort },

@@ -164,7 +164,10 @@ function DirectoryRowImpl({ row, nowMs, variant, onOpen }: DirectoryRowProps) {
           <span className="rd-dir-card-size">{formatAcres(row.acres)}</span>
         </div>
         <div className="rd-dir-card-meta">
-          <span>{row.state || DASH}</span>
+          <span>
+            {row.state || DASH}
+            {row.distanceMi != null ? ` · ${Math.round(row.distanceMi)} mi` : ''}
+          </span>
           <span className="rd-dot-sep">•</span>
           <span>
             {c.started}
@@ -204,7 +207,12 @@ function DirectoryRowImpl({ row, nowMs, variant, onOpen }: DirectoryRowProps) {
         </div>
         <Containment row={row} />
       </td>
-      <td className="rd-dir-c-loc">{row.state || DASH}</td>
+      <td className="rd-dir-c-loc">
+        {row.state || DASH}
+        {row.distanceMi != null && (
+          <div className="rd-dir-sub">{Math.round(row.distanceMi)} mi away</div>
+        )}
+      </td>
       <td className="rd-dir-c-num">{formatAcres(row.acres)}</td>
       <td className="rd-dir-c-started">
         {c.started}

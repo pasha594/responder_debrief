@@ -8,7 +8,8 @@ import { resetScope, track, trackOncePer } from '../app/analytics';
 import { DEFAULT_PLAYBACK_SPEED } from '../app/config';
 import type { Percentile, SpreadProduct, WeatherProduct } from '../api/types';
 import { TOA_DEFAULT_WITHIN_HOURS } from '../spread/toaBands';
-import type { DirectoryFilter, DirectorySort, DirectorySortKey } from '../directory/rowModel';
+import type { DirectoryFilter, DirectoryNear, DirectorySort, DirectorySortKey } from '../directory/rowModel';
+import { MAP_STYLES } from '../app/config';
 
 /**
  * 'directory' is the app's default: a full-screen roster with no map. 'fire'
@@ -159,7 +160,11 @@ export interface AppState {
       query: string;
       filter: DirectoryFilter;
       sort: DirectorySort;
+      /** Proximity mode: only fires near this place, closest first. */
+      near: DirectoryNear | null;
     };
+    /** Chosen basemap style id per theme (see MAP_STYLES). */
+    mapStyle: { dark: string; light: string };
   };
 
   actions: {
@@ -218,6 +223,9 @@ export interface AppState {
     setDirectoryFilter(filter: DirectoryFilter): void;
     /** Click a column header: same key flips direction, new key starts descending. */
     toggleDirectorySort(key: DirectorySortKey): void;
+    /** Enter/leave "near <place>" mode; entering sorts by distance. */
+    setDirectoryNear(near: DirectoryNear | null): void;
+    setMapStyle(theme: 'dark' | 'light', id: string): void;
   };
 }
 
@@ -227,6 +235,26 @@ const now = Date.now();
  * slot missing, or the bar focused with none set) — feature popups yield. */
 export function routeClickClaims(d: AppState['directions']): boolean {
   return (!!d.a !== !!d.b) || (d.armed && !d.a && !d.b);
+}
+
+/**
+ * Per-theme basemap style, persisted like the theme itself. Unknown or
+ * removed ids fall back to each theme's default (the first catalog entry).
+ */
+function initMapStyle(): { dark: string; light: string } {
+  const pick = (theme: 'dark' | 'light'): string => {
+    const fallback = MAP_STYLES[theme][0].id;
+    // Everything inside the try: even `typeof localStorage` can throw when
+    // the browser blocks storage access (sandboxed frames, cookie blocking).
+    try {
+      if (typeof localStorage === 'undefined') return fallback;
+      const saved = localStorage.getItem(`rd-map-style-${theme}`);
+      return saved && MAP_STYLES[theme].some((st) => st.id === saved) ? saved : fallback;
+    } catch {
+      return fallback;
+    }
+  };
+  return { dark: pick('dark'), light: pick('light') };
 }
 
 export const useStore = create<AppState>((set, get) => ({
@@ -281,7 +309,8 @@ export const useStore = create<AppState>((set, get) => ({
     sheetSnap: 'peek',
     legendKey: null,
     toast: null,
-    directory: { query: '', filter: 'all', sort: { key: 'acres', dir: 'desc' } },
+    directory: { query: '', filter: 'all', sort: { key: 'acres', dir: 'desc' }, near: null },
+    mapStyle: initMapStyle(),
   },
 
   actions: {
@@ -499,6 +528,7 @@ export const useStore = create<AppState>((set, get) => ({
       })),
 
     setTheme: (theme) => {
+      track('theme_changed', { theme });
       document.documentElement.dataset.theme = theme;
       try {
         localStorage.setItem('rd-theme', theme);
@@ -592,6 +622,27 @@ export const useStore = create<AppState>((set, get) => ({
             : { key, dir: 'desc' };
         return { ui: { ...s.ui, directory: { ...s.ui.directory, sort } } };
       }),
+    setDirectoryNear: (near) =>
+      set((s) => {
+        const cur = s.ui.directory.sort;
+        // Entering near mode leads with the closest fires; leaving it drops
+        // the (now meaningless) distance sort back to the default.
+        const sort: DirectorySort = near
+          ? { key: 'distance', dir: 'asc' }
+          : cur.key === 'distance'
+            ? { key: 'acres', dir: 'desc' }
+            : cur;
+        return { ui: { ...s.ui, directory: { ...s.ui.directory, near, sort } } };
+      }),
+    setMapStyle: (theme, id) => {
+      track('map_style_changed', { theme, style: id });
+      try {
+        localStorage.setItem(`rd-map-style-${theme}`, id);
+      } catch {
+        /* private mode */
+      }
+      set((s) => ({ ui: { ...s.ui, mapStyle: { ...s.ui.mapStyle, [theme]: id } } }));
+    },
   },
 }));
 

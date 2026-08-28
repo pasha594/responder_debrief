@@ -1979,3 +1979,127 @@
   70% { transform: scale(3.2); opacity: 0; }
   100% { transform: scale(3.2); opacity: 0; }
 }
+
+
+/* ---------- Settings (gear + popover) ---------- */
+.rd-settings { position: relative; }
+.rd-settings-gear {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border-radius: 999px;
+  background: var(--color-surface);
+  color: var(--color-text);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+}
+.rd-settings-panel {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 40;
+  width: 200px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  padding: 10px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.45);
+}
+.rd-settings-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--color-text-muted);
+  margin: 2px 0 6px;
+}
+.rd-settings-label + .rd-settings-label,
+.rd-settings-segment + .rd-settings-label { margin-top: 12px; }
+.rd-settings-segment {
+  display: flex;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  overflow: hidden;
+}
+.rd-settings-seg {
+  flex: 1;
+  background: none;
+  border: 0;
+  color: var(--color-text-muted);
+  font: inherit;
+  font-size: 12.5px;
+  padding: 5px 0;
+  cursor: pointer;
+}
+.rd-settings-seg:hover { background: var(--color-hover-bg); color: var(--color-text); }
+.rd-settings-seg--on,
+.rd-settings-seg--on:hover { background: var(--color-accent); color: #1a1218; }
+.rd-settings-style {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  color: var(--color-text);
+  font: inherit;
+  font-size: 13px;
+  padding: 6px 8px;
+  cursor: pointer;
+  text-align: left;
+}
+.rd-settings-style:hover { background: var(--color-hover-bg); }
+.rd-settings-style--on,
+.rd-settings-style--on:hover {
+  border-color: var(--color-accent);
+  background: rgba(255, 189, 90, 0.1);
+}
+.rd-settings-swatch {
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+  border: 1px solid var(--color-border);
+  flex: 0 0 auto;
+}
+
+/* On the fire map the gear floats at the visible map area's top right
+   (clear of the sidebar, tracking its collapsed/tablet widths); on the
+   directory it sits inline in the header. z 31 keeps the popover above the
+   mobile bottom sheet (z 30). */
+.rd-app > .rd-settings,
+.rd-app .rd-map-toolbar ~ .rd-settings {
+  position: absolute;
+  top: 12px;
+  right: calc(var(--sidebar-w) + 12px);
+  z-index: 31;
+}
+.rd-app:has(.rd-sidebar--collapsed) > .rd-settings {
+  right: 60px;
+}
+@media (min-width: 768px) and (max-width: 1023px) {
+  .rd-app > .rd-settings {
+    right: 332px;
+  }
+  .rd-app:has(.rd-sidebar--collapsed) > .rd-settings {
+    right: 60px;
+  }
+}
+@media (max-width: 767px) {
+  /* below the maplibre zoom control, which owns the top-right corner here */
+  .rd-app > .rd-settings,
+  .rd-app .rd-map-toolbar ~ .rd-settings {
+    top: 80px;
+    right: 10px;
+  }
+}
+.rd-directory .rd-settings { position: relative; top: auto; right: auto; }
+
+/* the amber wash is invisible on the light surface — mark the selection
+   with real contrast there */
+[data-theme='light'] .rd-settings-style--on,
+[data-theme='light'] .rd-settings-style--on:hover {
+  border-color: #a86c00;
+  background: rgba(255, 189, 90, 0.3);
+}

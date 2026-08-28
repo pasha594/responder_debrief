@@ -1,10 +1,12 @@
 /**
- * Google-style basemap labels: dark ink with a white outline, applied to
- * every basemap symbol layer. That single treatment reads on ANY ground —
- * the dark basemap, bright weather rasters, incident-map sheets, satellite —
- * so no per-layer or per-overlay switching is needed.
+ * Google-style basemap labels: dark ink with a white outline so labels read
+ * over weather rasters, incident-map sheets, and satellite. Part of the
+ * curated "Classic dark" look only — the alternate style variants keep their
+ * out-of-the-box labels (that's the point of offering them).
  */
 import type { Map as MlMap } from 'maplibre-gl';
+import { mapStyleDef } from '../../app/config';
+import { useStore } from '../../state/store';
 import type { LayerManager } from '../layerTypes';
 
 const TEXT_COLOR = '#1f1b1e';
@@ -15,6 +17,8 @@ const HALO_WIDTH = 1.8;
 let styled: Set<string> = new Set();
 
 function apply(map: MlMap): void {
+  const ui = useStore.getState().ui;
+  if (ui.theme !== 'dark' || mapStyleDef(ui.theme, ui.mapStyle[ui.theme]).id !== 'dark') return;
   const layers = map.getStyle()?.layers ?? [];
   for (const l of layers) {
     if (l.type !== 'symbol' || l.id.startsWith('rd-') || styled.has(l.id)) continue;
@@ -22,6 +26,17 @@ function apply(map: MlMap): void {
     map.setPaintProperty(l.id, 'text-halo-color', HALO_COLOR);
     map.setPaintProperty(l.id, 'text-halo-width', HALO_WIDTH);
     styled.add(l.id);
+  }
+}
+
+/** After a style swap: forget the old style's layer ids and re-treat (no-op
+ * unless the classic dark style is active). */
+export function resyncLabelContrast(map: MlMap): void {
+  styled = new Set();
+  try {
+    apply(map);
+  } catch {
+    /* style mid-swap */
   }
 }
 
