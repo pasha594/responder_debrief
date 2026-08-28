@@ -117,6 +117,13 @@ export interface AppState {
     rings: import('../api/routing').RangeRing[];
   };
 
+  /** Browser geolocation: latest fix + whether live tracking is on. */
+  location: {
+    coords: [number, number] | null;
+    accuracy: number | null;
+    tracking: boolean;
+  };
+
   directions: {
     a: { coords: [number, number]; label: string } | null;
     b: { coords: [number, number]; label: string } | null;
@@ -184,6 +191,8 @@ export interface AppState {
     toggleTraffic(): void;
     toggleIncidents(): void;
     setRangeRings(rings: import('../api/routing').RangeRing[]): void;
+    setLocationFix(coords: [number, number] | null, accuracy: number | null): void;
+    setLocationTracking(tracking: boolean): void;
     setDirectionsPoint(which: 'a' | 'b', p: { coords: [number, number]; label: string } | null): void;
     setDirectionsProfile(profile: import('../api/routing').RouteProfile): void;
     setDirectionsRoute(route: import('../api/routing').RouteResult | null): void;
@@ -255,6 +264,8 @@ export const useStore = create<AppState>((set, get) => ({
 
   range: { rings: [] },
 
+  location: { coords: null, accuracy: null, tracking: false },
+
   directions: { a: null, b: null, profile: 'drive', route: null, armed: false },
 
   draw: { tool: 'none', features: [], past: [], future: [] },
@@ -300,6 +311,8 @@ export const useStore = create<AppState>((set, get) => ({
           route: null, armed: false, picking: null,
         },
         range: { rings: [] },
+
+  location: { coords: null, accuracy: null, tracking: false },
       }));
     },
 
@@ -462,6 +475,14 @@ export const useStore = create<AppState>((set, get) => ({
       }));
     },
     setRangeRings: (rings) => set(() => ({ range: { rings } })),
+    setLocationFix: (coords, accuracy) =>
+      set((s) => ({ location: { ...s.location, coords, accuracy } })),
+    setLocationTracking: (tracking) =>
+      set((s) => ({
+        location: tracking
+          ? { ...s.location, tracking }
+          : { coords: null, accuracy: null, tracking: false },
+      })),
     setDirectionsProfile: (profile) =>
       set((s) => ({ directions: { ...s.directions, profile, route: null } })),
     setDirectionsRoute: (route) =>
@@ -473,6 +494,8 @@ export const useStore = create<AppState>((set, get) => ({
           route: null, armed: false,
         },
         range: { rings: [] },
+
+  location: { coords: null, accuracy: null, tracking: false },
       })),
 
     setTheme: (theme) => {

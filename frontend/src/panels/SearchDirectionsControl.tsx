@@ -16,6 +16,7 @@ import {
   type RouteProfile,
 } from '../api/routing';
 import { RANGE_COLORS } from '../map/layers/rangeLayer';
+import { geolocationAvailable, locateOnce, watchLocation } from '../app/geolocation';
 import { track } from '../app/analytics';
 import { useStore } from '../state/store';
 import { useMap } from '../map/MapRoot';
@@ -168,8 +169,74 @@ export function SearchDirectionsControl() {
   const [routeError, setRouteError] = useState<string | null>(null);
   const rangeSeq = useRef(0);
   const [ringsOn, setRingsOn] = useState(false);
+  const tracking = useStore((st) => st.location.tracking);
+  const locationFix = useStore((st) => st.location.coords);
+  const [locating, setLocating] = useState(false);
+  const locMarker = useRef<Marker | null>(null);
+  const stopWatch = useRef<(() => void) | null>(null);
   const markers = useRef<{ a: Marker | null; b: Marker | null }>({ a: null, b: null });
   const routeSeq = useRef(0);
+
+  // ---- live location: watch while tracking; pulsing dot follows fixes ----
+  useEffect(() => {
+    if (!tracking) {
+      stopWatch.current?.();
+      stopWatch.current = null;
+      return;
+    }
+    setLocating(true);
+    stopWatch.current = watchLocation(
+      (fix) => {
+        setLocating(false);
+        useStore.getState().actions.setLocationFix(fix.coords, fix.accuracy);
+      },
+      () => {
+        setLocating(false);
+        useStore.getState().actions.showToast(
+          'Location unavailable — check browser permissions',
+        );
+        useStore.getState().actions.setLocationTracking(false);
+      },
+    );
+    return () => {
+      stopWatch.current?.();
+      stopWatch.current = null;
+    };
+  }, [tracking]);
+
+  const centeredOnce = useRef(false);
+  useEffect(() => {
+    if (!map) return;
+    if (!locationFix) {
+      locMarker.current?.remove();
+      locMarker.current = null;
+      centeredOnce.current = false;
+      return;
+    }
+    if (!locMarker.current) {
+      const el = document.createElement('div');
+      const dot = document.createElement('div');
+      dot.className = 'rd-loc-dot';
+      el.appendChild(dot);
+      locMarker.current = new Marker({ element: el }).setLngLat(locationFix).addTo(map);
+    } else {
+      locMarker.current.setLngLat(locationFix);
+    }
+    if (!centeredOnce.current) {
+      centeredOnce.current = true;
+      map.flyTo({ center: locationFix, zoom: Math.max(map.getZoom(), 12), duration: 800 });
+    }
+  }, [map, locationFix]);
+
+  const useMyLocation = (which: 'a' | 'b') => async () => {
+    try {
+      const fix = await locateOnce();
+      actions.setDirectionsPoint(which, { coords: fix.coords, label: 'My location' });
+      track('location_used', { context: which });
+    } catch {
+      actions.showToast('Location unavailable — check browser permissions');
+    }
+  };
 
   // ---- draggable endpoint markers follow the store; dragend re-routes ----
   useEffect(() => {
@@ -283,6 +350,7 @@ export function SearchDirectionsControl() {
 
   return (
     <div className="rd-sd-control">
+      <div className="rd-sd-toprow">
       <div className="rd-sd-card rd-sd-bar">
         <div className="rd-sd-row">
           {showDestination && (
@@ -295,6 +363,16 @@ export function SearchDirectionsControl() {
             onClear={() => actions.setDirectionsPoint('a', null)}
             onFocusChange={(f) => actions.setDirectionsArmed(f)}
           />
+          {geolocationAvailable() && (
+            <button
+              type="button"
+              className="rd-mini-btn rd-loc-mini"
+              title="Use my current location as the start"
+              onClick={() => void useMyLocation('a')()}
+            >
+              ◎
+            </button>
+          )}
           {(directions.a || directions.b) && (
             <button
               type="button"
@@ -321,6 +399,16 @@ export function SearchDirectionsControl() {
                 onClear={() => actions.setDirectionsPoint('b', null)}
                 onFocusChange={(f) => actions.setDirectionsArmed(f)}
               />
+              {geolocationAvailable() && (
+                <button
+                  type="button"
+                  className="rd-mini-btn rd-loc-mini"
+                  title="Use my current location as the destination"
+                  onClick={() => void useMyLocation('b')()}
+                >
+                  ◎
+                </button>
+              )}
             </div>
             <div className="rd-sd-row rd-sd-actions">
               <div className="rd-sd-profiles">
@@ -397,6 +485,22 @@ export function SearchDirectionsControl() {
             </div>
           </div>
         )}
+      </div>
+      {geolocationAvailable() && (
+        <button
+          type="button"
+          className={`rd-mini-btn rd-loc-btn${tracking ? ' rd-mini-btn--on' : ''}`}
+          title={tracking ? 'Stop showing my location' : 'Show my location'}
+          onClick={() => {
+            const on = !useStore.getState().location.tracking;
+            actions.setLocationTracking(on);
+            if (on) track('location_used', { context: 'map' });
+            if (!on) centeredOnce.current = false;
+          }}
+        >
+          {locating ? '…' : '◎'}
+        </button>
+      )}
       </div>
     </div>
   );
