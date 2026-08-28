@@ -1897,8 +1897,19 @@
 
 /* ---------- Location services ---------- */
 .rd-sd-toprow { display: flex; gap: 6px; align-items: flex-start; }
-.rd-loc-btn { height: 32px; width: 32px; border-radius: 999px; font-size: 15px; }
+.rd-loc-btn,
+.rd-loc-mini {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  padding: 0;
+}
+.rd-loc-btn { height: 32px; width: 32px; flex: 0 0 auto; border-radius: 999px; }
 .rd-loc-mini { flex: 0 0 auto; }
+.rd-loc-btn svg,
+.rd-loc-mini svg { display: block; }
+.rd-mini-btn--on.rd-loc-btn { color: #1a1218; }
 .rd-loc-dot {
   width: 14px;
   height: 14px;

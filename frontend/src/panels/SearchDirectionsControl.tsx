@@ -151,6 +151,28 @@ function PlaceInput({
   );
 }
 
+function TargetIcon() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      width="15"
+      height="15"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      aria-hidden="true"
+    >
+      <circle cx="12" cy="12" r="6" />
+      <circle cx="12" cy="12" r="1.8" fill="currentColor" stroke="none" />
+      <line x1="12" y1="2" x2="12" y2="5" />
+      <line x1="12" y1="19" x2="12" y2="22" />
+      <line x1="2" y1="12" x2="5" y2="12" />
+      <line x1="19" y1="12" x2="22" y2="12" />
+    </svg>
+  );
+}
+
 function endpointEl(which: 'a' | 'b'): HTMLElement {
   const el = document.createElement('div');
   const inner = document.createElement('div');
@@ -370,7 +392,7 @@ export function SearchDirectionsControl() {
               title="Use my current location as the start"
               onClick={() => void useMyLocation('a')()}
             >
-              ◎
+              <TargetIcon />
             </button>
           )}
           {(directions.a || directions.b) && (
@@ -406,7 +428,7 @@ export function SearchDirectionsControl() {
                   title="Use my current location as the destination"
                   onClick={() => void useMyLocation('b')()}
                 >
-                  ◎
+                  <TargetIcon />
                 </button>
               )}
             </div>
@@ -498,7 +520,7 @@ export function SearchDirectionsControl() {
             if (!on) centeredOnce.current = false;
           }}
         >
-          {locating ? '…' : '◎'}
+          {locating ? '…' : <TargetIcon />}
         </button>
       )}
       </div>
