@@ -625,8 +625,9 @@ export const useStore = create<AppState>((set, get) => ({
     setDirectoryNear: (near) =>
       set((s) => {
         const cur = s.ui.directory.sort;
-        // Entering near mode leads with the closest fires; leaving it drops
-        // the (now meaningless) distance sort back to the default.
+        // A freshly resolved city leads with the closest fires (the headers
+        // reflect and can re-sort this); clearing drops the now-meaningless
+        // distance sort back to the default.
         const sort: DirectorySort = near
           ? { key: 'distance', dir: 'asc' }
           : cur.key === 'distance'

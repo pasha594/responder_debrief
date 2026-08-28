@@ -257,6 +257,9 @@ export function matchesQuery(row: DirectoryRow, query: string): boolean {
 // ---------- proximity ("fires near Reno") ----------
 
 export interface DirectoryNear {
+  /** The (trimmed, lowercased) search text this place was resolved from —
+   * the city fallback only shows while the box still says this. */
+  query: string;
   label: string;
   coords: [number, number];
 }

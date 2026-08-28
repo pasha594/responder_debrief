@@ -12,6 +12,10 @@ export interface PlaceHit {
   detail: string;
   coords: [number, number]; // lon, lat
   kind: string;
+  /** Full state/region name when Photon has one (e.g. "Nevada"). */
+  state?: string;
+  /** ISO country code, uppercase (e.g. "US"). */
+  countryCode?: string;
 }
 
 /** "48.016, -120.846" / "48.016 -120.846" / "-120.846,48.016" → [lon, lat].
@@ -65,6 +69,26 @@ export async function searchPlaces(
       detail: [p.osm_value, detail].filter(Boolean).join(' · '),
       coords: f.geometry.coordinates,
       kind: p.osm_value ?? 'place',
+      state: p.state,
+      countryCode: p.countrycode?.toUpperCase(),
     };
   });
+}
+
+/** Populated-place kinds, biggest-first. */
+const CITY_RANK: Record<string, number> = { city: 0, town: 1, village: 2, hamlet: 3 };
+
+/**
+ * "Fires near Reno" wants THE Reno: the biggest US populated place with that
+ * name. Photon orders results by importance, so filtering to US city-kinds
+ * and stable-sorting by kind rank makes the first survivor the biggest city
+ * (Reno NV beats Reno TX villages and Reno County KS). Raw coordinates pass
+ * straight through. Null when nothing city-like matches in the US.
+ */
+export function pickBestCity(hits: PlaceHit[]): PlaceHit | null {
+  const coords = hits.find((h) => h.kind === 'coordinates');
+  if (coords) return coords;
+  const cities = hits.filter((h) => h.countryCode === 'US' && h.kind in CITY_RANK);
+  if (cities.length === 0) return null;
+  return [...cities].sort((a, b) => CITY_RANK[a.kind] - CITY_RANK[b.kind])[0];
 }

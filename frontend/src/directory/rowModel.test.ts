@@ -456,7 +456,7 @@ describe('near mode', () => {
       row({ corneaId: 'nocoords', name: 'Unknown', coords: null }),
     ];
     const shown = selectDirectoryRows(
-      nearRows(rows, { label: 'Reno', coords: reno }),
+      nearRows(rows, { query: 'reno', label: 'Reno', coords: reno }),
       { query: '', filter: 'all', sort },
     );
     expect(shown.map((r) => r.corneaId)).toEqual(['near1', 'near2']);
@@ -469,7 +469,7 @@ describe('near mode', () => {
     const inside = row({ corneaId: 'in', coords: [-119.8138, 39.5296 + 199 / 69.09] });
     const outside = row({ corneaId: 'out', coords: [-119.8138, 39.5296 + 201 / 69.09] });
     const shown = selectDirectoryRows(
-      nearRows([inside, outside], { label: 'Reno', coords: reno }),
+      nearRows([inside, outside], { query: 'reno', label: 'Reno', coords: reno }),
       { query: '', filter: 'all', sort },
     );
     expect(shown.map((r) => r.corneaId)).toEqual(['in']);
@@ -482,7 +482,7 @@ describe('near mode', () => {
       row({ corneaId: 'b', name: 'Beta', acres: 10, coords: [-120.2, 39.3] }),
     ];
     const shown = selectDirectoryRows(
-      nearRows(rows, { label: 'Reno', coords: reno }),
+      nearRows(rows, { query: 'reno', label: 'Reno', coords: reno }),
       { query: 'alpha', filter: 'large', sort },
     );
     expect(shown.map((r) => r.corneaId)).toEqual(['a']);

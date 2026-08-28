@@ -6,7 +6,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { DisclaimerFooter } from '../panels/DisclaimerFooter';
 import { SettingsControl } from '../panels/SettingsControl';
-import { searchPlaces, type PlaceHit } from '../api/geocode';
+import { pickBestCity, searchPlaces } from '../api/geocode';
 import { track } from '../app/analytics';
 import { useFires, useMasterCatalog } from '../api/queries';
 import { useStore } from '../state/store';
@@ -16,6 +16,7 @@ import {
   DIRECTORY_FILTERS,
   NEAR_RADIUS_MI,
   buildDirectoryRows,
+  matchesQuery,
   nearRows,
   selectDirectoryRows,
   summarizeRows,
@@ -35,6 +36,9 @@ const COLUMNS: { key: DirectorySortKey; label: string; className: string }[] = [
 
 /** Survives the map round-trip so returning lands where the user left off. */
 let savedScrollTop = 0;
+
+/** Queries Photon already answered with "no US city" — never re-asked. */
+const nilCityQueries = new Set<string>();
 
 function SkeletonRows({ desktop }: { desktop: boolean }) {
   const bars = Array.from({ length: 12 }, (_, i) => i);
@@ -80,52 +84,85 @@ export function DirectoryView() {
     [catalog.data, fires.data],
   );
   const summary = useMemo(() => summarizeRows(rows), [rows]);
-  // The near pool clones rows (distance attached), so memoize it on
-  // [rows, near] alone — recomputing per keystroke would mint new object
-  // identities and defeat DirectoryRow's memo.
-  const pool = useMemo(() => nearRows(rows, near), [rows, near]);
-  const shown = useMemo(
-    () => selectDirectoryRows(pool, { query, filter, sort }),
-    [pool, query, filter, sort],
+
+  // Match priority: fire names and states filter instantly as you type…
+  const direct = useMemo(
+    () => selectDirectoryRows(rows, { query, filter, sort }),
+    [rows, query, filter, sort],
+  );
+  const q = query.trim().toLowerCase();
+  // Mode is decided by name/state matching ALONE — the filter chips filter
+  // within whichever mode is active, they must never flip it (or lie about
+  // why nothing matched).
+  const hasDirect = useMemo(
+    () => q.length === 0 || rows.some((r) => matchesQuery(r, q)),
+    [rows, q],
   );
 
-  // ---- place autocomplete on the same search box ("Reno" → fires near Reno).
-  // Debounced Photon lookup; fire/state filtering stays instant beneath it.
-  const [placeHits, setPlaceHits] = useState<PlaceHit[]>([]);
-  const [placesOpen, setPlacesOpen] = useState(false);
+  // …and when nothing matches, the query resolves to the biggest US city
+  // with that name in the background (see the effect below); the roster then
+  // shows fires near it. Entry sorts closest-first via setDirectoryNear; the
+  // column headers re-sort the near pool like any other roster. The pool
+  // memoizes on [rows, near] because it clones rows (DirectoryRow's memo
+  // lives on row identity).
+  const cityMode = !hasDirect && near != null && near.query === q;
+  const pool = useMemo(() => nearRows(rows, near), [rows, near]);
+  const nearShown = useMemo(
+    () => selectDirectoryRows(pool, { query: '', filter, sort }),
+    [pool, filter, sort],
+  );
+  const shown = cityMode ? nearShown : direct;
+
+  // ---- background city resolution. One debounced Photon request per
+  // settled no-match query; a resolved place is remembered in the store
+  // (keyed by its query) so fire round-trips replay it with zero requests.
+  const [resolving, setResolving] = useState(false);
   const placeSeq = useRef(0);
-  // Only geocode once the user actually edits the box in THIS mount — the
-  // query survives fire round-trips in the store, and remounting must not
-  // re-fire Photon for a search the user already finished.
-  const queryTouched = useRef(false);
   useEffect(() => {
-    const q = query.trim();
     const mySeq = ++placeSeq.current;
-    if (!queryTouched.current || q.length < 3) {
-      setPlaceHits([]);
+    if (
+      hasDirect ||
+      q.length < 3 ||
+      rows.length === 0 ||
+      near?.query === q || // already resolved (or restored from the store)
+      nilCityQueries.has(q) // known to resolve to nothing — don't re-ask
+    ) {
+      setResolving(false);
       return;
     }
+    setResolving(true);
     const t = setTimeout(() => {
-      // biased to the CONUS centroid so "Moscow" means Idaho before Russia
-      searchPlaces(q, [-98.6, 39.8])
+      searchPlaces(q)
         .then((hits) => {
           if (mySeq !== placeSeq.current) return;
-          setPlaceHits(hits);
+          setResolving(false);
+          const best = pickBestCity(hits);
+          if (best) {
+            track('place_searched', { kind: best.kind, context: 'directory' });
+            actions.setDirectoryNear({
+              query: q,
+              label: best.state ? `${best.label}, ${best.state}` : best.label,
+              coords: best.coords,
+            });
+          } else {
+            nilCityQueries.add(q);
+            if (useStore.getState().ui.directory.near) actions.setDirectoryNear(null);
+          }
         })
         .catch(() => {
-          if (mySeq === placeSeq.current) setPlaceHits([]);
+          // transient — retried on the next edit or remount
+          if (mySeq === placeSeq.current) setResolving(false);
         });
     }, 350);
     return () => clearTimeout(t);
-  }, [query]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [q, hasDirect, rows.length, near?.query]);
 
-  const pickPlace = (hit: PlaceHit) => {
-    track('place_searched', { kind: hit.kind, context: 'directory' });
-    actions.setDirectoryNear({ label: hit.label, coords: hit.coords });
-    actions.setDirectoryQuery('');
-    setPlaceHits([]);
-    setPlacesOpen(false);
-  };
+  // A cleared box means no city fallback lingering for next time.
+  useEffect(() => {
+    if (q.length === 0 && near) actions.setDirectoryNear(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [q]);
 
   // Restore the roster scroll position when coming back from a fire.
   useLayoutEffect(() => {
@@ -155,14 +192,14 @@ export function DirectoryView() {
 
   const open = actions.selectFire;
 
-  // In near mode the Location column carries the distances, so its header
-  // sorts by distance (how the roster is ordered on entry) instead of state.
+  // In city mode the Location column carries the distances, so its header
+  // sorts by distance (the entry order) instead of state.
   const columns = useMemo(
     () =>
-      near
+      cityMode
         ? COLUMNS.map((c) => (c.key === 'state' ? { ...c, key: 'distance' as DirectorySortKey } : c))
         : COLUMNS,
-    [near],
+    [cityMode],
   );
 
   return (
@@ -176,87 +213,14 @@ export function DirectoryView() {
       </header>
 
       <div className="rd-dir-toolbar">
-        <div
-          className="rd-dir-searchwrap"
-          onBlur={(e) => {
-            // close only when focus truly left the wrap (input ↔ hit buttons)
-            if (!e.currentTarget.contains(e.relatedTarget as Node)) setPlacesOpen(false);
-          }}
-        >
-          <input
-            type="search"
-            className="rd-search rd-dir-search"
-            placeholder="Search fire, state, or city"
-            value={query}
-            onChange={(e) => {
-              queryTouched.current = true;
-              actions.setDirectoryQuery(e.target.value);
-            }}
-            onFocus={() => setPlacesOpen(true)}
-            onKeyDown={(e) => {
-              if (e.key === 'Escape') setPlacesOpen(false);
-              if (e.key === 'ArrowDown') {
-                const first = e.currentTarget
-                  .closest('.rd-dir-searchwrap')
-                  ?.querySelector<HTMLButtonElement>('.rd-dir-placehits button');
-                if (first) {
-                  e.preventDefault();
-                  first.focus();
-                }
-              }
-            }}
-            aria-label="Search fires by name, state, or city"
-          />
-          {placesOpen && placeHits.length > 0 && query.trim().length >= 3 && (
-            <ul
-              className="rd-place-hits rd-dir-placehits"
-              // keep the input focused through hit clicks AND scrollbar drags
-              onMouseDown={(e) => {
-                if (e.target instanceof HTMLElement && e.target.tagName !== 'BUTTON') {
-                  e.preventDefault();
-                }
-              }}
-              onKeyDown={(e) => {
-                if (e.key === 'Escape') {
-                  setPlacesOpen(false);
-                  document.querySelector<HTMLInputElement>('.rd-dir-search')?.focus();
-                }
-                if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
-                  e.preventDefault();
-                  const btns = [...e.currentTarget.querySelectorAll<HTMLButtonElement>('button')];
-                  const i = btns.indexOf(document.activeElement as HTMLButtonElement);
-                  const next = btns[i + (e.key === 'ArrowDown' ? 1 : -1)];
-                  if (next) next.focus();
-                  else if (e.key === 'ArrowUp') {
-                    document.querySelector<HTMLInputElement>('.rd-dir-search')?.focus();
-                  }
-                }
-              }}
-            >
-              <li className="rd-dir-placehead" aria-hidden="true">
-                Places — show fires nearby
-              </li>
-              {placeHits.map((h, i) => (
-                <li key={`${h.label}-${i}`}>
-                  <button type="button" onClick={() => pickPlace(h)}>
-                    {h.label}
-                    {h.detail && <span className="rd-place-detail">{h.detail}</span>}
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-        {near && (
-          <button
-            type="button"
-            className="rd-chip rd-chip--active rd-near-chip"
-            title={`Fires within ${NEAR_RADIUS_MI} miles, closest first — click to clear`}
-            onClick={() => actions.setDirectoryNear(null)}
-          >
-            Near {near.label} <span aria-hidden="true">✕</span>
-          </button>
-        )}
+        <input
+          type="search"
+          className="rd-search rd-dir-search"
+          placeholder="Search fire, state, or city"
+          value={query}
+          onChange={(e) => actions.setDirectoryQuery(e.target.value)}
+          aria-label="Search fires by name, state, or city"
+        />
         <div className="rd-chips" role="group" aria-label="Filter fires">
           {DIRECTORY_FILTERS.map((f) => (
             <button
@@ -277,6 +241,13 @@ export function DirectoryView() {
           </div>
         )}
       </div>
+
+      {cityMode && shown.length > 0 && (
+        <div className="rd-dir-nearline">
+          No fire or state names match “{query.trim()}” — showing fires within{' '}
+          {NEAR_RADIUS_MI} mi of <strong>{near.label}</strong>, closest first.
+        </div>
+      )}
 
       <div className="rd-dir-scroll" ref={scrollRef}>
         {failed && (
@@ -351,11 +322,13 @@ export function DirectoryView() {
 
         {!failed && !loading && hasRows && shown.length === 0 && (
           <div className="rd-empty">
-            {near && pool.length === 0
-              ? `No fires within ${NEAR_RADIUS_MI} miles of ${near.label}.`
-              : near
-                ? `No fires near ${near.label} match this search.`
-                : 'No fires match this search.'}
+            {resolving
+              ? `No fire or state names match — checking cities…`
+              : cityMode && pool.length === 0
+                ? `No fires within ${NEAR_RADIUS_MI} miles of ${near.label}.`
+                : cityMode
+                  ? `No fires near ${near.label} match these filters.`
+                  : 'No fires match this search.'}
           </div>
         )}
         {!failed && !loading && !hasRows && (
