@@ -416,7 +416,7 @@ export function SearchDirectionsControl() {
   useEffect(() => {
     const a = directions.a;
     const mySeq = ++rangeSeq.current;
-    if (!a || !ringsOn) {
+    if (!a || !ringsOn || directions.profile === 'hike') {
       actions.setRangeRings([]);
       return;
     }
@@ -430,7 +430,7 @@ export function SearchDirectionsControl() {
         if (mySeq === rangeSeq.current) actions.setRangeRings([]);
       }
     })();
-  }, [directions.a, ringsOn, actions]);
+  }, [directions.a, directions.profile, ringsOn, actions]);
 
   const route = directions.route;
   const showDestination = !!directions.a || !!directions.b;
@@ -554,21 +554,23 @@ export function SearchDirectionsControl() {
                     {route.trafficDelayS != null && route.trafficDelayS > 60 && (
                       <span className="rd-sd-traffic"> · +{fmtDuration(route.trafficDelayS)} traffic</span>
                     )}
-                    <label className="rd-rings-toggle rd-rings-inline">
-                      <input
-                        type="checkbox"
-                        checked={ringsOn}
-                        onChange={() => setRingsOn(!ringsOn)}
-                      />
-                      <span>Show isochrones</span>
-                    </label>
+                    {directions.profile !== 'hike' && (
+                      <label className="rd-rings-toggle rd-rings-inline">
+                        <input
+                          type="checkbox"
+                          checked={ringsOn}
+                          onChange={() => setRingsOn(!ringsOn)}
+                        />
+                        <span>Show isochrones</span>
+                      </label>
+                    )}
                   </div>
                 </div>
               )}
             </>
           )}
 
-          {showDestination && !route && (
+          {showDestination && !route && directions.profile !== 'hike' && (
             <div className="rd-sd-row rd-sd-rangelegend">
               <label className="rd-rings-toggle">
                 <input
@@ -593,7 +595,7 @@ export function SearchDirectionsControl() {
             </div>
           )}
         </div>
-        {showDestination && geolocationAvailable() && (
+        {geolocationAvailable() && (
           <button
             type="button"
             className={`rd-mini-btn rd-loc-btn${tracking ? ' rd-mini-btn--on' : ''}`}
