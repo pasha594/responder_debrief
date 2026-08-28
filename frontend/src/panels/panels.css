@@ -1947,7 +1947,15 @@
 .rd-loc-mini { flex: 0 0 auto; width: 28px; height: 28px; border-radius: var(--radius); }
 .rd-loc-btn svg,
 .rd-loc-mini svg { display: block; }
-.rd-mini-btn--on.rd-loc-btn { color: #1a1218; }
+/* active target = blue like the location dot */
+.rd-loc-btn.rd-mini-btn--on,
+.rd-loc-btn.rd-mini-btn--on:hover,
+.rd-loc-mini.rd-mini-btn--on,
+.rd-loc-mini.rd-mini-btn--on:hover {
+  background: #4285f4;
+  border-color: #4285f4;
+  color: #fff;
+}
 .rd-loc-dot {
   width: 14px;
   height: 14px;

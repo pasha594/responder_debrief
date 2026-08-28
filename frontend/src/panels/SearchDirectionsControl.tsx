@@ -21,6 +21,7 @@ import { track } from '../app/analytics';
 import { useStore } from '../state/store';
 import { useMap } from '../map/MapRoot';
 
+const MY_LOCATION_LABEL = 'My location';
 const DEBOUNCE_MS = 350;
 const MIN_CHARS = 3;
 
@@ -236,11 +237,19 @@ export function SearchDirectionsControl() {
   const markers = useRef<{ a: Marker | null; b: Marker | null }>({ a: null, b: null });
   const routeSeq = useRef(0);
 
-  // ---- live location: watch while tracking; pulsing dot follows fixes ----
+  // A target is "active" when its search box holds the user's location;
+  // dragging or re-searching rewrites the label and deactivates it.
+  const aIsMyLoc = directions.a?.label === MY_LOCATION_LABEL;
+  const bIsMyLoc = directions.b?.label === MY_LOCATION_LABEL;
+  const dotShown = tracking || aIsMyLoc || bIsMyLoc;
+
+  // ---- live location: watch while any target is active; pulsing dot follows fixes ----
   useEffect(() => {
-    if (!tracking) {
+    if (!dotShown) {
       stopWatch.current?.();
       stopWatch.current = null;
+      const st = useStore.getState();
+      if (st.location.coords) st.actions.setLocationTracking(false);
       return;
     }
     setLocating(true);
@@ -261,7 +270,7 @@ export function SearchDirectionsControl() {
       stopWatch.current?.();
       stopWatch.current = null;
     };
-  }, [tracking]);
+  }, [dotShown]);
 
   const centeredOnce = useRef(false);
   useEffect(() => {
@@ -290,7 +299,7 @@ export function SearchDirectionsControl() {
   const useMyLocation = (which: 'a' | 'b') => async () => {
     try {
       const fix = await locateOnce();
-      actions.setDirectionsPoint(which, { coords: fix.coords, label: 'My location' });
+      actions.setDirectionsPoint(which, { coords: fix.coords, label: MY_LOCATION_LABEL });
       track('location_used', { context: which });
     } catch {
       actions.showToast('Location unavailable — check browser permissions');
@@ -512,7 +521,7 @@ export function SearchDirectionsControl() {
             {showDestination && geolocationAvailable() && (
               <button
                 type="button"
-                className="rd-mini-btn rd-loc-mini"
+                className={`rd-mini-btn rd-loc-mini${aIsMyLoc ? ' rd-mini-btn--on' : ''}`}
                 title="Use my current location as the start"
                 onClick={() => void useMyLocation('a')()}
               >
@@ -535,7 +544,7 @@ export function SearchDirectionsControl() {
                 {geolocationAvailable() && (
                   <button
                     type="button"
-                    className="rd-mini-btn rd-loc-mini"
+                    className={`rd-mini-btn rd-loc-mini${bIsMyLoc ? ' rd-mini-btn--on' : ''}`}
                     title="Use my current location as the destination"
                     onClick={() => void useMyLocation('b')()}
                   >
@@ -599,9 +608,23 @@ export function SearchDirectionsControl() {
           <button
             type="button"
             className={`rd-mini-btn rd-loc-btn${tracking ? ' rd-mini-btn--on' : ''}`}
-            title={tracking ? 'Stop showing my location' : 'Show my location'}
+            title={
+              aIsMyLoc || bIsMyLoc
+                ? 'Center the map on my location'
+                : tracking
+                  ? 'Stop showing my location'
+                  : 'Show my location'
+            }
             onClick={() => {
-              const on = !useStore.getState().location.tracking;
+              const st = useStore.getState();
+              if (aIsMyLoc || bIsMyLoc) {
+                const fix = st.location.coords;
+                if (fix && map) {
+                  map.flyTo({ center: fix, zoom: Math.max(map.getZoom(), 12), duration: 600 });
+                }
+                return;
+              }
+              const on = !st.location.tracking;
               actions.setLocationTracking(on);
               if (on) track('location_used', { context: 'map' });
               if (!on) centeredOnce.current = false;
