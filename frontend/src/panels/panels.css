@@ -195,8 +195,8 @@
 /* ---------- Fire panel header ---------- */
 
 .rd-fp-header {
-  /* right padding clears the collapse button in the corner */
-  padding: 12px 44px 0 16px;
+  /* right padding clears the collapse button AND the settings gear */
+  padding: 12px 78px 0 16px;
   border-bottom: 1px solid var(--color-border);
 }
 
@@ -271,8 +271,8 @@
   gap: 2px;
   /* header padding flipped (collapse btn on the right); breathing room
      above so the tab row reads as its own band */
-  margin: 6px -44px 0 -16px;
-  padding: 0 44px 0 16px;
+  margin: 6px -78px 0 -16px;
+  padding: 0 78px 0 16px;
 }
 
 .rd-tab {
@@ -2064,30 +2064,41 @@
   flex: 0 0 auto;
 }
 
-/* On the fire map the gear floats at the visible map area's top right
-   (clear of the sidebar, tracking its collapsed/tablet widths); on the
-   directory it sits inline in the header. z 31 keeps the popover above the
-   mobile bottom sheet (z 30). */
+/* On the fire view the gear sits in the right panel's corner beside the
+   collapse arrow (the arrow is 28px at top/right 8px, so 8 + 28 + 6 gap);
+   collapsed, it tucks underneath the centered arrow. Works at every sidebar
+   width because both anchor to the app's right edge. z 31 keeps the popover
+   above the mobile bottom sheet (z 30). On the directory it sits inline in
+   the header. */
 .rd-app > .rd-settings,
 .rd-app .rd-map-toolbar ~ .rd-settings {
   position: absolute;
-  top: 12px;
-  right: calc(var(--sidebar-w) + 12px);
+  top: 8px;
+  right: 42px;
   z-index: 31;
 }
 .rd-app:has(.rd-sidebar--collapsed) > .rd-settings {
-  right: 60px;
+  top: 42px;
+  right: 10px;
 }
-@media (min-width: 768px) and (max-width: 1023px) {
-  .rd-app > .rd-settings {
-    right: 332px;
+@media (min-width: 768px) {
+  /* match the collapse button's flat in-panel look */
+  .rd-app > .rd-settings .rd-settings-gear,
+  .rd-app .rd-map-toolbar ~ .rd-settings .rd-settings-gear {
+    width: 28px;
+    height: 28px;
+    border-radius: var(--radius);
+    box-shadow: none;
+    color: var(--color-text-muted);
   }
-  .rd-app:has(.rd-sidebar--collapsed) > .rd-settings {
-    right: 60px;
+  .rd-app > .rd-settings .rd-settings-gear:hover,
+  .rd-app .rd-map-toolbar ~ .rd-settings .rd-settings-gear:hover {
+    color: var(--color-text);
+    background: var(--color-hover-bg);
   }
 }
 @media (max-width: 767px) {
-  /* below the maplibre zoom control, which owns the top-right corner here */
+  /* no sidebar here (bottom sheet) — float below the maplibre zoom control */
   .rd-app > .rd-settings,
   .rd-app .rd-map-toolbar ~ .rd-settings {
     top: 80px;

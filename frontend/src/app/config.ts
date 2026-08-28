@@ -22,9 +22,9 @@ export interface MapStyleDef {
 
 export const MAP_STYLES: Record<'dark' | 'light', MapStyleDef[]> = {
   dark: [
-    { id: 'dark', label: 'Classic dark', url: 'https://tiles.openfreemap.org/styles/dark', swatch: '#161313' },
-    { id: 'fiord', label: 'Fiord', url: 'https://tiles.openfreemap.org/styles/fiord', swatch: '#232f41' },
     { id: 'dark-matter', label: 'Dark Matter', url: 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json', swatch: '#0e0e0e' },
+    { id: 'fiord', label: 'Fiord', url: 'https://tiles.openfreemap.org/styles/fiord', swatch: '#232f41' },
+    { id: 'dark', label: 'Classic dark', url: 'https://tiles.openfreemap.org/styles/dark', swatch: '#161313' },
   ],
   light: [
     { id: 'positron', label: 'Positron', url: 'https://tiles.openfreemap.org/styles/positron', swatch: '#f4f4f2' },
