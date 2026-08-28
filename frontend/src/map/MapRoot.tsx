@@ -24,18 +24,28 @@ export function useMap(): MlMap | null {
 }
 
 /**
- * Cornea-flavored paint overrides applied on top of the classic OpenFreeMap
- * dark style — tint it toward the plum-dark aesthetic without forking it.
- * The alternate styles (Fiord, Dark Matter, …) keep their out-of-the-box look.
+ * Per-style paint overrides applied after a style loads. Classic dark gets
+ * the cornea plum tint; Dark Matter gets legibility fixes — CARTO ships
+ * major-road, sea, and park/stadium labels at #383838–#515151 on a
+ * near-black ground (verified in their style.json), so those lift to the
+ * tone of the style's own readable labels. Other variants stay stock.
  */
-const DARK_OVERRIDES: [string, string, unknown][] = [
-  ['background', 'background-color', '#161313'],
-  ['water', 'fill-color', '#292e38'],
-];
+const STYLE_OVERRIDES: Record<string, [string, string, unknown][]> = {
+  dark: [
+    ['background', 'background-color', '#161313'],
+    ['water', 'fill-color', '#292e38'],
+  ],
+  'dark-matter': [
+    ['roadname_major', 'text-color', 'rgba(189, 189, 189, 1)'], // was #383838; matches roadname_pri
+    ['watername_sea', 'text-color', 'rgba(109, 123, 129, 1)'], // was #3c3c3c; matches ocean
+    ['watername_lake_line', 'text-color', 'rgba(155, 155, 155, 1)'], // was #444; matches lake
+    ['poi_park', 'text-color', 'rgba(138, 145, 138, 1)'], // was #515151
+    ['poi_stadium', 'text-color', 'rgba(140, 140, 140, 1)'], // was #515151
+  ],
+};
 
-function applyOverrides(map: MlMap, theme: 'dark' | 'light', styleId: string) {
-  if (theme !== 'dark' || styleId !== 'dark') return;
-  for (const [layerId, prop, value] of DARK_OVERRIDES) {
+function applyOverrides(map: MlMap, styleId: string) {
+  for (const [layerId, prop, value] of STYLE_OVERRIDES[styleId] ?? []) {
     if (map.getLayer(layerId)) {
       try {
         map.setPaintProperty(layerId, prop, value);
@@ -85,7 +95,7 @@ export function MapRoot({ children }: { children: ReactNode }) {
     }));
     map.once('load', () => {
       const st = useStore.getState().ui;
-      applyOverrides(map, st.theme, mapStyleDef(st.theme, st.mapStyle[st.theme]).id);
+      applyOverrides(map, mapStyleDef(st.theme, st.mapStyle[st.theme]).id);
       setReady(map);
     });
     // Re-assert our layers after any style-swap settles.
@@ -133,7 +143,7 @@ export function MapRoot({ children }: { children: ReactNode }) {
       const ui = useStore.getState().ui;
       const def = mapStyleDef(ui.theme, ui.mapStyle[ui.theme]);
       if (def.url !== styleUrlRef.current) return;
-      applyOverrides(map, ui.theme, def.id);
+      applyOverrides(map, def.id);
       // satellite/topo hid the OLD style's layers — re-apply on the new one
       resyncBasemapUnderlay(map);
       resyncLabelContrast(map);
