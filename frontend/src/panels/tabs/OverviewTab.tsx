@@ -3,6 +3,7 @@ import { useFire } from '../../api/queries';
 import type { StructureExposureBuffer } from '../../api/types';
 import { useImsr, useMasterCatalog } from '../../api/queries';
 import { Markdown } from '../../utils/markdown';
+import { OfflineCard } from '../OfflineCard';
 
 function formatCount(n: number | null | undefined): string {
   if (n == null || !Number.isFinite(n)) return '—';
@@ -116,6 +117,8 @@ export function OverviewTab({ corneaId }: { corneaId: string }) {
 
   return (
     <div className="rd-tab-body">
+      <OfflineCard corneaId={corneaId} />
+
       <div className="rd-kv-list">
         <KvRow label="Cause" value={fire.cause ?? fire.general_cause} />
         <KvRow label="Fuel" value={fire.primary_fuel_group} />

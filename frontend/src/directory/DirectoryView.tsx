@@ -6,6 +6,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { DisclaimerFooter } from '../panels/DisclaimerFooter';
 import { SettingsControl } from '../panels/SettingsControl';
+import { OfflineFiresStrip } from './OfflineFiresStrip';
 import { pickBestCity, searchPlaces } from '../api/geocode';
 import { track } from '../app/analytics';
 import { useFires, useMasterCatalog } from '../api/queries';
@@ -211,6 +212,8 @@ export function DirectoryView() {
         </div>
         <SettingsControl />
       </header>
+
+      <OfflineFiresStrip />
 
       <div className="rd-dir-toolbar">
         <input

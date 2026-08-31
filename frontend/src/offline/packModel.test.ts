@@ -86,6 +86,7 @@ describe('buildPackPlan', () => {
       inputs({
         hotspotIndex: {
           schema: 1,
+          updated_at: '2026-08-31T11:00:00Z',
           gen: 3,
           bbox: [0, 0, 1, 1],
           days: ['2026-08-30', '2026-08-31'],

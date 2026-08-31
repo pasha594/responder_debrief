@@ -371,3 +371,17 @@
   border-bottom: 1px solid var(--color-border);
 }
 .rd-dir-nearline strong { color: var(--color-text); font-weight: 600; }
+
+
+/* ---------- offline fires strip ---------- */
+.rd-offline-strip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding-block: 10px 0;
+  padding-inline: max(24px, calc((100% - var(--rd-dir-width)) / 2));
+  font-size: 12.5px;
+}
+.rd-offline-strip-label { color: var(--color-text-muted); }
+.rd-offline-chip { cursor: pointer; }
