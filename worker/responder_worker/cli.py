@@ -45,11 +45,19 @@ def log(msg: str) -> None:
 
 # Filenames occasionally parse into impossible dates ("2026-17-00"); only
 # real calendar days may become a fire's latest_upload.
-_DAY_RE = re.compile(r"^20\d{2}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$")
-
-
 def _valid_day(s) -> bool:
-    return bool(s and _DAY_RE.match(s))
+    return cat.valid_day(s) is not None
+
+
+def _valid_ts(s) -> bool:
+    '''True for a plausible ISO timestamp (2026-08-31T02:48:40Z).'''
+    if not s:
+        return False
+    try:
+        datetime.fromisoformat(str(s).replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    return True
 
 
 # ===========================================================================
@@ -193,14 +201,42 @@ def cmd_sync_catalogs(args) -> int:
         if inc.get("fire_slug") and m:
             # Self-heal directory counts: incidents mirrored before the counts
             # existed (or by a run that skipped them as unchanged) have no
-            # map_count. Read the already-published manifest instead of
-            # re-crawling the FTP — cheap, and it converges within the hour.
-            if inc.get("map_count") is None:
+            # map_count. Fires whose state carries a fossilized garbage date
+            # (recorded before filename dates were validated) heal the same
+            # way. Read the already-published manifest instead of re-crawling
+            # the FTP — cheap, and it converges within the hour.
+            bad_dates = (
+                (inc.get("latest_upload") and not _valid_day(inc.get("latest_upload")))
+                or (inc.get("latest_upload_ts") and not _valid_ts(inc.get("latest_upload_ts")))
+            )
+            if inc.get("map_count") is None or bad_dates:
                 man = storage.get_json(
                     f"catalogs/incidents/{inc['fire_slug']}.json") or {}
                 maps = man.get("maps") or []
                 irs = man.get("ir_flights") or []
                 if maps or irs:
+                    # Manifests written before validation may carry garbage
+                    # per-map dates too — resolve each through the same chain
+                    # (validated filename date, else FTP upload time) and
+                    # republish only if something actually changed.
+                    changed = False
+                    for x in maps:
+                        if _valid_day(x.get("op_date")):
+                            continue
+                        reparsed = cat.parse_product_filename(x.get("filename") or "")
+                        op = reparsed.get("op_date")
+                        src = "filename" if op else None
+                        if not op and x.get("uploaded_at"):
+                            op, src = x["uploaded_at"][:10], "ftp"
+                        if op != x.get("op_date") or src != x.get("date_source"):
+                            x["op_date"] = op
+                            x["date_source"] = src
+                            if not cat.valid_local_minute(x.get("generated_at_local")):
+                                x["generated_at_local"] = reparsed.get("generated_at_local")
+                            changed = True
+                    if changed:
+                        storage.put_json(
+                            f"catalogs/incidents/{inc['fire_slug']}.json", man)
                     dates = [x.get("op_date") for x in maps if _valid_day(x.get("op_date"))]
                     dates += [x.get("flight_date") for x in irs if _valid_day(x.get("flight_date"))]
                     ts = [x.get("uploaded_at") for x in maps if x.get("uploaded_at")]
@@ -618,7 +654,7 @@ def _tile_and_manifest(args, storage, state, fires_by_slug, mirrors) -> None:
             maps.append(cat.map_entry(
                 parsed=parsed, kind=mf.kind, sha_id=sha_id, fire_slug=fire_slug,
                 pdf_key=mf.key, size_bytes=mf.size, geo=geo, rev=mf.rev,
-                tiling_pending=pending, uploaded_lm=mf.lm,
+                tiling_pending=pending, uploaded_lm=mf.lm, first_seen=mf.first_seen,
             ))
 
         ir_flights = _ir_flights(args, storage, state, fire, ir_by_flight)

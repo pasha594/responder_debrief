@@ -248,6 +248,70 @@ class TestIncidentManifestContract:
         w, s, e, n = t["bounds"]
         assert w < e and s < n
 
+    def test_garbage_op_date_rejected(self):
+        # "8018day" reads as month 80 — the Gold Mountain case
+        p = parse_product_filename(
+            "ops_arch_e_port_20260818_2100_GoldMountain_CANOD000123_8018day.pdf")
+        assert p["op_date"] is None
+        assert p["generated_at_local"] == "2026-08-18T21:00"
+        assert p["product"] == "ops"  # the rest of the name still parses
+
+    def test_garbage_anchor_date_rejected(self):
+        # month 17 in the generation stamp itself — the MP18 case
+        p = parse_product_filename(
+            "ops_arch_e_port_20261700_2100_MP18_NVEKD000456_1700day.pdf")
+        assert p["generated_at_local"] is None
+        assert p["op_date"] is None
+
+    def test_date_outside_sane_window_rejected(self):
+        p = parse_product_filename(
+            "ops_arch_e_port_19990816_2100_Elk_COGMF000114_817day.pdf")
+        assert p["generated_at_local"] is None
+        assert p["op_date"] is None
+
+    def test_date_source_filename(self):
+        parsed = parse_product_filename(
+            "ops_arch_e_port_20260816_2100_Elk_COGMF000114_817day.pdf")
+        entry = map_entry(
+            parsed=parsed, kind="product", sha_id="a" * 16, fire_slug="elk",
+            pdf_key="raw/incidents/elk/x.pdf", size_bytes=1, geo=None,
+            uploaded_lm="Sun, 16 Aug 2026 03:18:07 GMT",
+        )
+        assert entry["op_date"] == "2026-08-17"
+        assert entry["date_source"] == "filename"
+
+    def test_date_source_ftp_fallback(self):
+        parsed = parse_product_filename(
+            "ops_arch_e_port_20260818_2100_GoldMountain_CANOD000123_8018day.pdf")
+        entry = map_entry(
+            parsed=parsed, kind="product", sha_id="b" * 16, fire_slug="gold",
+            pdf_key="raw/incidents/gold/x.pdf", size_bytes=1, geo=None,
+            uploaded_lm="Tue, 18 Aug 2026 03:18:07 GMT",
+            first_seen="2026-08-19T00:00:00Z",
+        )
+        assert entry["op_date"] == "2026-08-18"
+        assert entry["date_source"] == "ftp"
+        assert entry["uploaded_at"] == "2026-08-18T03:18:07Z"
+
+    def test_date_source_ingested_fallback(self):
+        parsed = parse_product_filename("SomethingUnparseable.pdf")
+        entry = map_entry(
+            parsed=parsed, kind="product", sha_id="c" * 16, fire_slug="x",
+            pdf_key="raw/incidents/x/x.pdf", size_bytes=1, geo=None,
+            first_seen="2026-08-19T12:34:56Z",
+        )
+        assert entry["op_date"] == "2026-08-19"
+        assert entry["date_source"] == "ingested"
+
+    def test_date_source_none_when_nothing_known(self):
+        parsed = parse_product_filename("SomethingUnparseable.pdf")
+        entry = map_entry(
+            parsed=parsed, kind="product", sha_id="d" * 16, fire_slug="x",
+            pdf_key="raw/incidents/x/x.pdf", size_bytes=1, geo=None,
+        )
+        assert entry["op_date"] is None
+        assert entry["date_source"] is None
+
     def test_non_geo_entry(self):
         parsed = parse_product_filename(
             "mobile_72x96_land_20260816_2056_Elk_COGMF000114_817.pdf")

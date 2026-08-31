@@ -19,6 +19,10 @@ import httpx
 
 from . import config, frames
 from .ftp_index import Entry, list_dir
+
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 from .http import get
 from .state import now_iso
 
@@ -77,6 +81,7 @@ class MirroredFile:
     changed: bool
     rel_dir: str         # 'products/20260817' | 'qr' | 'ir/20260817'
     lm: str | None = None     # upstream FTP Last-Modified (RFC 1123) = upload time
+    first_seen: str | None = None  # ISO of our first successful mirror of this file
 
 
 @dataclass
@@ -188,7 +193,7 @@ class IncidentMirror:
                 url=meta.get("url", ""), size=meta.get("size"),
                 sha16=meta.get("sha16"), rev=meta.get("rev", 1),
                 local_path=None, changed=False, rel_dir=rel_dir,
-                lm=meta.get("lm"),
+                lm=meta.get("lm"), first_seen=meta.get("first_seen"),
             ))
 
     def _sync_products(self, child: Entry, inc_state: dict, fire_slug: str,
@@ -323,7 +328,7 @@ class IncidentMirror:
                 kind=meta.get("kind", fkind), filename=filename, key=key, url=e.url,
                 size=meta.get("size"), sha16=meta.get("sha16"),
                 rev=meta.get("rev", 1), local_path=None, changed=False,
-                rel_dir=rel_dir, lm=meta.get("lm"),
+                rel_dir=rel_dir, lm=meta.get("lm"), first_seen=meta.get("first_seen"),
             ))
             return
 
@@ -342,6 +347,7 @@ class IncidentMirror:
         local.write_bytes(body)
         self.storage.put_file(key, local)
 
+        first_seen = meta.get("first_seen") or _now_iso()
         inc_state["files"][rel] = {
             "etag": resp.headers.get("etag"),
             "lm": resp.headers.get("last-modified"),
@@ -350,6 +356,7 @@ class IncidentMirror:
             "rev": max(rev, 1),
             "kind": fkind,
             "url": e.url,
+            "first_seen": first_seen,
         }
         res.downloads += 1
         res.bytes_downloaded += len(body)
@@ -357,4 +364,5 @@ class IncidentMirror:
             kind=fkind, filename=filename, key=key, url=e.url, size=len(body),
             sha16=sha, rev=max(rev, 1), local_path=local, changed=changed,
             rel_dir=rel_dir, lm=resp.headers.get("last-modified"),
+            first_seen=first_seen,
         ))

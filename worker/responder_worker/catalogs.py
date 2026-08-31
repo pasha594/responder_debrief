@@ -26,6 +26,38 @@ def now_iso() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+# Filename date tokens are operator-typed and occasionally garbage ("8018day"
+# reads as month 80). Only real calendar dates in a sane window survive; the
+# rest fall back to FTP Last-Modified / first-ingest (see map_entry).
+_MIN_DATE_YEAR = 2015
+
+
+def _sane_year(year: int) -> bool:
+    return _MIN_DATE_YEAR <= year <= datetime.now(timezone.utc).year + 1
+
+
+def valid_day(s: str | None) -> str | None:
+    """'YYYY-MM-DD' if it is a real calendar day in a sane window, else None."""
+    if not s:
+        return None
+    try:
+        d = datetime.strptime(s, "%Y-%m-%d")
+    except ValueError:
+        return None
+    return s if _sane_year(d.year) else None
+
+
+def valid_local_minute(s: str | None) -> str | None:
+    """'YYYY-MM-DDTHH:MM' if real and in a sane window, else None."""
+    if not s:
+        return None
+    try:
+        d = datetime.strptime(s, "%Y-%m-%dT%H:%M")
+    except ValueError:
+        return None
+    return s if _sane_year(d.year) else None
+
+
 def parse_product_filename(filename: str) -> dict:
     """Tolerant parse of incident-map PDF names.
 
@@ -55,7 +87,8 @@ def parse_product_filename(filename: str) -> dict:
         return out
 
     d, t = m.group("date"), m.group("time")
-    out["generated_at_local"] = f"{d[:4]}-{d[4:6]}-{d[6:]}T{t[:2]}:{t[2:]}"
+    out["generated_at_local"] = valid_local_minute(
+        f"{d[:4]}-{d[4:6]}-{d[6:]}T{t[:2]}:{t[2:]}")
 
     prefix = stem[: m.start()]
     suffix = stem[m.end():]
@@ -81,7 +114,7 @@ def parse_product_filename(filename: str) -> dict:
             stail.pop()
             mmdd = pm.group("mmdd").zfill(4)
             year = d[:4]
-            out["op_date"] = f"{year}-{mmdd[:2]}-{mmdd[2:]}"
+            out["op_date"] = valid_day(f"{year}-{mmdd[:2]}-{mmdd[2:]}")
             out["period"] = (pm.group("period") or "").lower() or None
     if stail:
         um = UNIT_TOKEN_RE.match("_" + stail[-1] + "_")
@@ -293,6 +326,7 @@ def map_entry(
     rev: int = 1,
     tiling_pending: bool = False,
     uploaded_lm: str | None = None,
+    first_seen: str | None = None,
 ) -> dict:
     geo = geo or {}
     tiles = None
@@ -303,6 +337,16 @@ def map_entry(
             "maxzoom": geo["tiles"]["maxzoom"],
             "bounds": geo["tiles"]["bounds"],
         }
+    # Dating chain: the operational date stamped in the filename when it is a
+    # real date; else the FTP upload time; else when we first mirrored it.
+    uploaded_at = rfc1123_to_iso(uploaded_lm)
+    op_date = valid_day(parsed.get("op_date"))
+    date_source: str | None = "filename" if op_date else None
+    if not op_date and uploaded_at:
+        op_date, date_source = uploaded_at[:10], "ftp"
+    if not op_date and first_seen:
+        op_date, date_source = first_seen[:10], "ingested"
+
     entry = {
         "id": sha_id,
         "kind": kind,
@@ -310,10 +354,11 @@ def map_entry(
         "product_label": product_label(parsed),
         "sheet": parsed.get("sheet"),
         "orientation": parsed.get("orientation"),
-        "op_date": parsed.get("op_date"),
+        "op_date": op_date,
+        "date_source": date_source,
         "period": parsed.get("period"),
         "generated_at_local": parsed.get("generated_at_local"),
-        "uploaded_at": rfc1123_to_iso(uploaded_lm),
+        "uploaded_at": uploaded_at,
         "filename": parsed.get("filename"),
         "pdf_url": f"/{pdf_key}",
         "size_bytes": size_bytes,
