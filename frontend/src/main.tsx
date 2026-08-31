@@ -42,6 +42,16 @@ const queryClient = new QueryClient({
   },
 });
 
+// Offline app shell: prod-only (dev serves from memory and a SW would fight
+// HMR). See scripts/build-sw.mjs for the rollback-safe design.
+if (import.meta.env.PROD && 'serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').catch(() => {
+      /* shell caching is best-effort */
+    });
+  });
+}
+
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <QueryClientProvider client={queryClient}>
