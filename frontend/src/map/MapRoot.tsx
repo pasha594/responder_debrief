@@ -44,6 +44,19 @@ const STYLE_OVERRIDES: Record<string, [string, string, unknown][]> = {
   ],
 };
 
+/** Blank dark ground for offline boots — overlays carry the picture. */
+const OFFLINE_STYLE = {
+  version: 8 as const,
+  sources: {},
+  layers: [
+    {
+      id: 'background',
+      type: 'background' as const,
+      paint: { 'background-color': '#161313' },
+    },
+  ],
+};
+
 function applyOverrides(map: MlMap, styleId: string) {
   for (const [layerId, prop, value] of STYLE_OVERRIDES[styleId] ?? []) {
     if (map.getLayer(layerId)) {
@@ -63,13 +76,19 @@ export function MapRoot({ children }: { children: ReactNode }) {
   const theme = useStore((s) => s.ui.theme);
   const mapStylePref = useStore((s) => s.ui.mapStyle);
   const styleDef = mapStyleDef(theme, mapStylePref[theme]);
+  // Offline, the style URL is unreachable and the map would never fire
+  // 'load' — no layers, no overlays, nothing. A minimal inline style keeps
+  // the map alive so downloaded perimeters/hotspots/incident maps render on
+  // a plain dark ground (the v1 offline contract; no basemap in the pack).
+  const online = useStore((s) => s.offline.online);
+  const offline = !online;
 
   // Create once.
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
     const map = new maplibregl.Map({
       container: containerRef.current,
-      style: styleDef.url,
+      style: offline ? OFFLINE_STYLE : styleDef.url,
       center: [-114, 41],
       zoom: 4.3,
       minZoom: 3,
@@ -114,10 +133,13 @@ export function MapRoot({ children }: { children: ReactNode }) {
   // Theme/style swap: setStyle with transformStyle preserving rd- sources,
   // rd- layers, AND the terrain reference (the always-on 3D terrain rides on
   // the carried rd-dem source; without this the swap silently flattens it).
-  const styleUrlRef = useRef(styleDef.url);
+  const styleUrlRef = useRef(offline ? 'offline' : styleDef.url);
   useEffect(() => {
     const map = mapRef.current;
-    if (!map || styleUrlRef.current === styleDef.url) return;
+    // Offline: never swap toward a network style; when connectivity returns
+    // this re-runs (online in deps) and upgrades an offline boot in place.
+    if (!map || !online) return;
+    if (styleUrlRef.current === styleDef.url) return;
     styleUrlRef.current = styleDef.url;
     map.setStyle(styleDef.url, {
       transformStyle: (prev, next) => {
@@ -155,7 +177,7 @@ export function MapRoot({ children }: { children: ReactNode }) {
       map.off('idle', onIdle);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [styleDef.url]);
+  }, [styleDef.url, online]);
 
   // The provider wraps siblings of the map div (sidebar, timeline, tabs need
   // useMap() for fitBounds etc.), so children position against .rd-app.

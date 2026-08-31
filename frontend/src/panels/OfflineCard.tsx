@@ -3,10 +3,11 @@
  * one place: download with live progress + cancel, then downloaded state
  * with update/remove. Sizes are estimates until the download finishes.
  */
-import { useRef, useState } from 'react';
+import { useState } from 'react';
 import { useMasterCatalog } from '../api/queries';
 import { useStore } from '../state/store';
 import {
+  cancelActiveDownload,
   downloadPack,
   formatBytes,
   opfsSupported,
@@ -21,7 +22,6 @@ export function OfflineCard({ corneaId }: { corneaId: string }) {
   const online = useStore((s) => s.offline.online);
   const showToast = useStore((s) => s.actions.showToast);
   const [busy, setBusy] = useState(false);
-  const abortRef = useRef<AbortController | null>(null);
 
   if (!opfsSupported()) return null;
   const slug = catalog?.fires.find((f) => f.cornea_id === corneaId)?.fire_slug ?? null;
@@ -30,10 +30,8 @@ export function OfflineCard({ corneaId }: { corneaId: string }) {
   const otherDownloadActive = progress != null && progress.corneaId !== corneaId;
 
   const start = () => {
-    const ctl = new AbortController();
-    abortRef.current = ctl;
     setBusy(true);
-    downloadPack(corneaId, ctl.signal)
+    downloadPack(corneaId)
       .then((meta) => showToast(`Saved for offline — ${formatBytes(meta.bytes)}`))
       .catch((err: Error) => {
         if (err.message !== 'cancelled') {
@@ -58,11 +56,7 @@ export function OfflineCard({ corneaId }: { corneaId: string }) {
             {mine.total.toLocaleString()} files
             {mine.bytes > 0 ? ` · ${formatBytes(mine.bytes)}` : ''})
           </span>
-          <button
-            type="button"
-            className="rd-mini-btn"
-            onClick={() => abortRef.current?.abort()}
-          >
+          <button type="button" className="rd-mini-btn" onClick={cancelActiveDownload}>
             Cancel
           </button>
         </div>

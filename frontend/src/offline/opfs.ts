@@ -72,14 +72,38 @@ export async function readPackFile(slug: string, name: string): Promise<ArrayBuf
   }
 }
 
-export async function packFileExists(slug: string, name: string): Promise<boolean> {
+/** Stored size in bytes, or null when the file does not exist. */
+export async function packFileSize(slug: string, name: string): Promise<number | null> {
   const dir = await packDir(slug, false);
-  if (!dir) return false;
+  if (!dir) return null;
   try {
-    await dir.getFileHandle(name);
-    return true;
+    const f = await (await dir.getFileHandle(name)).getFile();
+    return f.size;
   } catch {
-    return false;
+    return null;
+  }
+}
+
+/** File names currently stored in a pack's directory. */
+export async function listPackFiles(slug: string): Promise<string[]> {
+  const dir = await packDir(slug, false);
+  if (!dir) return [];
+  const out: string[] = [];
+  for await (const [name, handle] of dir as unknown as AsyncIterable<
+    [string, FileSystemHandle]
+  >) {
+    if (handle.kind === 'file') out.push(name);
+  }
+  return out;
+}
+
+export async function deletePackFile(slug: string, name: string): Promise<void> {
+  const dir = await packDir(slug, false);
+  if (!dir) return;
+  try {
+    await dir.removeEntry(name);
+  } catch {
+    /* already gone */
   }
 }
 

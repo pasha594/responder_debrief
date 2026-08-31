@@ -30,10 +30,12 @@ import {
 } from './packModel';
 import {
   deletePack as opfsDeletePack,
+  deletePackFile,
   fileNameForUrl,
+  listPackFiles,
   listPackSlugs,
   opfsSupported,
-  packFileExists,
+  packFileSize,
   readPackFile,
   writePackFile,
 } from './opfs';
@@ -107,22 +109,49 @@ async function packResponse(url: string): Promise<Response | null> {
  * Install the global fetch wrapper. Call once at boot, before the map or any
  * query runs. Network-first while online; pack-first while offline.
  */
+/**
+ * The un-wrapped fetch. Downloads MUST use this: routing a pack update
+ * through the wrapper would let the pack's own stale files "satisfy" the
+ * update on a flaky network and silently freeze the pack in time.
+ */
+let rawFetch: typeof fetch =
+  typeof window !== 'undefined' ? window.fetch.bind(window) : fetch;
+
+/** Field networks lie: connected-but-dead wifi keeps navigator.onLine true.
+ * When the pack has the answer, don't wait more than this for the network. */
+const NETWORK_PATIENCE_MS = 8000;
+
 export function installOfflineFetch(): void {
   if (typeof window === 'undefined') return;
-  const nativeFetch = window.fetch.bind(window);
+  rawFetch = window.fetch.bind(window);
   window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
     const url =
       typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
     const method = init?.method ?? (input instanceof Request ? input.method : 'GET');
     if (method !== 'GET' || urlIndex.size + prefixIndex.length === 0) {
-      return nativeFetch(input, init);
+      return rawFetch(input, init);
     }
-    if (!navigator.onLine) {
+    const packed = urlIndex.has(url) || prefixIndex.some((p) => url.startsWith(p.prefix));
+    if (!navigator.onLine && packed) {
       const hit = await packResponse(url);
       if (hit) return hit;
     }
     try {
-      const res = await nativeFetch(input, init);
+      const netPromise = rawFetch(input, init);
+      const res = packed
+        ? await Promise.race([
+            netPromise,
+            new Promise<'slow'>((r) => setTimeout(() => r('slow'), NETWORK_PATIENCE_MS)),
+          ]).then(async (v) => {
+            if (v !== 'slow') return v;
+            const hit = await packResponse(url);
+            if (hit) {
+              netPromise.catch(() => undefined); // don't leak an unhandled rejection
+              return hit;
+            }
+            return netPromise;
+          })
+        : await netPromise;
       if (!res.ok && res.status !== 304) {
         const hit = await packResponse(url);
         if (hit) return hit;
@@ -165,29 +194,55 @@ const CONCURRENCY = 6;
 async function fetchInto(
   slug: string,
   url: string,
-  opts: { immutable: boolean },
+  opts: { immutable: boolean; signal?: AbortSignal },
 ): Promise<{ file: string; bytes: number }> {
   const file = await fileNameForUrl(url);
-  if (opts.immutable && (await packFileExists(slug, file))) {
-    return { file, bytes: 0 }; // already stored — resume/update skips it
+  if (opts.immutable) {
+    const stored = await packFileSize(slug, file);
+    if (stored !== null) return { file, bytes: stored }; // resume/update skips it
   }
-  const res = await fetch(url);
+  const res = await rawFetch(url, { signal: opts.signal });
   if (!res.ok) throw new Error(`${res.status} for ${url.slice(0, 120)}`);
   const buf = await res.arrayBuffer();
   await writePackFile(slug, file, buf);
   return { file, bytes: buf.byteLength };
 }
 
+async function rawJson<T>(url: string, signal: AbortSignal): Promise<T> {
+  const res = await rawFetch(url, { signal });
+  if (!res.ok) throw new Error(`${res.status} for ${url.slice(0, 120)}`);
+  return res.json() as Promise<T>;
+}
+
 export class PackDownloadError extends Error {}
+
+/** One download at a time; the controller lives here so ANY OfflineCard
+ * instance (tab switches remount them) can cancel the active download. */
+let activeDownload: AbortController | null = null;
+
+export function cancelActiveDownload(): void {
+  activeDownload?.abort();
+}
 
 /**
  * Download (or update) a fire's offline pack. Progress lands in the store;
- * cancellation via the returned controller. Resolves with the pack meta.
+ * cancel via cancelActiveDownload(). Resolves with the pack meta.
  */
-export async function downloadPack(
-  corneaId: string,
-  abort: AbortSignal,
-): Promise<PackMeta> {
+export async function downloadPack(corneaId: string): Promise<PackMeta> {
+  const ctl = new AbortController();
+  activeDownload?.abort();
+  activeDownload = ctl;
+  try {
+    return await runDownload(corneaId, ctl.signal);
+  } catch (err) {
+    if (ctl.signal.aborted) throw new PackDownloadError('cancelled');
+    throw err;
+  } finally {
+    if (activeDownload === ctl) activeDownload = null;
+  }
+}
+
+async function runDownload(corneaId: string, abort: AbortSignal): Promise<PackMeta> {
   const actions = useStore.getState().actions;
   const progress = (done: number, total: number, bytes: number) =>
     actions.setOfflineProgress({ corneaId, done, total, bytes });
@@ -202,24 +257,24 @@ export async function downloadPack(
   try {
     progress(0, 1, 0);
 
-    // Phase 1 — snapshots (also the enumeration inputs). Fetched fresh.
-    const catalog = (await (await fetch(`${DATA_BASE_URL}/catalogs/catalog.json`)).json()) as MasterCatalog;
+    // Phase 1 — snapshots (also the enumeration inputs). Fetched fresh via
+    // the RAW fetch: an update must never be satisfied by its own stale pack.
+    const catalog = await rawJson<MasterCatalog>(
+      `${DATA_BASE_URL}/catalogs/catalog.json`, abort);
     const entry = catalog.fires.find((f) => f.cornea_id === corneaId);
     if (!entry?.fire_slug) throw new PackDownloadError('Fire not in the catalog yet');
     const slug = entry.fire_slug;
 
-    const perimeterIndex = (await (
-      await fetch(`${FIRE_API}/fires/${encodeURIComponent(corneaId)}/perimeters`)
-    ).json()) as PerimeterIndexItem[];
+    const perimeterIndex = await rawJson<PerimeterIndexItem[]>(
+      `${FIRE_API}/fires/${encodeURIComponent(corneaId)}/perimeters`, abort);
     const manifest = entry.incident_manifest
-      ? ((await (await fetch(dataUrl(entry.incident_manifest))).json()) as IncidentManifest)
+      ? await rawJson<IncidentManifest>(dataUrl(entry.incident_manifest), abort)
       : null;
     const hotspotIndex = entry.hotspot_archive
-      ? ((await (await fetch(dataUrl(entry.hotspot_archive))).json()) as HotspotArchiveIndex)
+      ? await rawJson<HotspotArchiveIndex>(dataUrl(entry.hotspot_archive), abort)
       : null;
-    const runsCatalog = (await (
-      await fetch(`${DATA_BASE_URL}/catalogs/pyrecast_runs.json`)
-    ).json()) as PyrecastRunsCatalog;
+    const runsCatalog = await rawJson<PyrecastRunsCatalog>(
+      `${DATA_BASE_URL}/catalogs/pyrecast_runs.json`, abort);
     // Same base the app uses at runtime, so planned ToA URLs match exactly.
     setSpreadArchiveBase(runsCatalog.archive_base);
     const spreadRun = latestRun(runsCatalog, slug);
@@ -256,7 +311,7 @@ export async function downloadPack(
         forecast_days: '16',
       });
       const url = `https://api.open-meteo.com/v1/forecast?${params}`;
-      const { file } = await fetchInto(slug, url, { immutable: false });
+      const { file } = await fetchInto(slug, url, { immutable: false, signal: abort });
       weatherPrefix = { prefix, file };
     }
 
@@ -274,7 +329,10 @@ export async function downloadPack(
         const item = queue.shift();
         if (!item || abort.aborted || firstError) return;
         try {
-          const r = await fetchInto(slug, item.url, { immutable: item.immutable });
+          const r = await fetchInto(slug, item.url, {
+            immutable: item.immutable,
+            signal: abort,
+          });
           files[item.url] = r.file;
           bytes += r.bytes;
         } catch (err) {
@@ -303,6 +361,15 @@ export async function downloadPack(
       prefixes: weatherPrefix ? [weatherPrefix] : [],
     };
     await writePackFile(slug, 'pack.json', JSON.stringify(meta));
+
+    // Prune files the new plan no longer references (rotated-out sheets,
+    // superseded chunks) so updates don't grow the pack forever.
+    const referenced = new Set(Object.values(files));
+    referenced.add('pack.json');
+    if (weatherPrefix) referenced.add(weatherPrefix.file);
+    for (const name of await listPackFiles(slug)) {
+      if (!referenced.has(name)) await deletePackFile(slug, name);
+    }
 
     unindexPack(slug);
     indexPack(meta);

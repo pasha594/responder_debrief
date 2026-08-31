@@ -35,9 +35,13 @@ const INDEX_FIELDS = [
   'active',
 ].join(',');
 
+/** The exact national-index URL (also snapshot into offline packs). */
+export function firesIndexUrl(): string {
+  return `${FIRE_API}/fires?active=true&limit=500&fields=${INDEX_FIELDS}`;
+}
+
 export function fetchFires(): Promise<FiresListResponse> {
-  const url = `${FIRE_API}/fires?active=true&limit=500&fields=${INDEX_FIELDS}`;
-  return getJson<FiresListResponse>(url);
+  return getJson<FiresListResponse>(firesIndexUrl());
 }
 
 export function fetchFire(corneaId: string): Promise<FireDetail> {

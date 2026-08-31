@@ -81,7 +81,7 @@ describe('buildPackPlan', () => {
     expect(plan.files.some((f) => f.url.endsWith('/perimeters/only.json'))).toBe(true);
   });
 
-  it('hotspot chunks: closed days immutable, today mutable, gen respected', () => {
+  it('hotspot chunks: only days closed 2+ days count immutable (worker can rewrite yesterday)', () => {
     const plan = buildPackPlan(
       inputs({
         hotspotIndex: {
@@ -89,13 +89,14 @@ describe('buildPackPlan', () => {
           updated_at: '2026-08-31T11:00:00Z',
           gen: 3,
           bbox: [0, 0, 1, 1],
-          days: ['2026-08-30', '2026-08-31'],
+          days: ['2026-08-28', '2026-08-30', '2026-08-31'],
         },
       }),
     );
     const chunks = plan.files.filter((f) => f.url.includes('/g3/'));
-    expect(chunks).toHaveLength(2);
-    expect(chunks.find((c) => c.url.endsWith('2026-08-30.json'))?.immutable).toBe(true);
+    expect(chunks).toHaveLength(3);
+    expect(chunks.find((c) => c.url.endsWith('2026-08-28.json'))?.immutable).toBe(true);
+    expect(chunks.find((c) => c.url.endsWith('2026-08-30.json'))?.immutable).toBe(false);
     expect(chunks.find((c) => c.url.endsWith('2026-08-31.json'))?.immutable).toBe(false);
   });
 
@@ -140,6 +141,24 @@ describe('buildPackPlan', () => {
     expect(plan.files.some((f) => f.url.includes('/previews/incidents/test-fire/aaaa.png'))).toBe(true);
     expect(plan.files.some((f) => f.url.includes('old.png'))).toBe(false);
     expect(plan.files.some((f) => f.url.includes('f1.geojson'))).toBe(true);
+  });
+
+  it('falls back to the newest dated sheet day when nothing is in the 2-day window', () => {
+    const manifest = {
+      maps: [
+        {
+          op_date: '2026-08-25',
+          preview_url: '/previews/incidents/test-fire/new.png',
+          tiles: null,
+        },
+        { op_date: '2026-08-20', preview_url: '/previews/incidents/test-fire/old.png', tiles: null },
+      ],
+      ir_flights: [],
+    } as unknown as IncidentManifest;
+    const plan = buildPackPlan(inputs({ manifest }));
+    expect(plan.mapSheetCount).toBe(1);
+    expect(plan.files.some((f) => f.url.includes('new.png'))).toBe(true);
+    expect(plan.files.some((f) => f.url.includes('old.png'))).toBe(false);
   });
 
   it('estimate sums per-file estimates', () => {

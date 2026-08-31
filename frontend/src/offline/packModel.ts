@@ -10,6 +10,7 @@
  * PDFs, and the basemap are deliberately out of v1.
  */
 import { DATA_BASE_URL, FIRE_API } from '../app/config';
+import { firesIndexUrl } from '../api/fireApi';
 import { dataUrl } from '../api/catalogs';
 import { spreadToaUrl, toaPercentiles } from '../api/wmsUrls';
 import type {
@@ -109,7 +110,7 @@ export interface PackInputs {
 /** The snapshot JSONs every pack carries (mutable; always re-downloaded). */
 export function snapshotUrls(inp: PackInputs): string[] {
   const urls = [
-    `${FIRE_API}/fires?active=true&limit=500&fields=cornea_id,unique_slug,post_title,fire_coordinates,acres,containment,state,firetype,created_on,last_updated,poly_last_updated,active`,
+    firesIndexUrl(),
     `${DATA_BASE_URL}/catalogs/catalog.json`,
     `${DATA_BASE_URL}/catalogs/pyrecast_runs.json`,
     `${DATA_BASE_URL}/catalogs/weather_runs.json`,
@@ -148,11 +149,14 @@ export function buildPackPlan(inp: PackInputs): PackPlan {
   if (inp.hotspotIndex && inp.hotspotIndexPath) {
     const dir = dataUrl(inp.hotspotIndexPath).replace(/\/index\.json$/, '');
     const gen = inp.hotspotIndex.gen ?? 1;
-    const today = new Date(inp.nowMs).toISOString().slice(0, 10);
+    // A chunk stored while its day (or the archive's resume window — the
+    // worker can rewrite yesterday) was still open would be frozen forever by
+    // the skip-if-stored rule, so only days closed for 2+ days count immutable.
+    const closed = new Date(inp.nowMs - 2 * DAY_MS).toISOString().slice(0, 10);
     for (const day of inp.hotspotIndex.days) {
       files.push({
         url: `${dir}/g${gen}/${day}.json`,
-        immutable: day < today,
+        immutable: day < closed,
         estBytes: EST.hotspotDay,
       });
     }
@@ -170,10 +174,19 @@ export function buildPackPlan(inp: PackInputs): PackPlan {
     }
   }
 
-  // Incident maps from the last 2 days: full tile pyramids + previews.
+  // Incident maps from the last 2 days: full tile pyramids + previews. A
+  // fire whose newest sheets predate the window still packs its most recent
+  // DATED sheet day — an older ops map beats no map in the field.
   const mapCutoff = new Date(inp.nowMs - 2 * DAY_MS).toISOString().slice(0, 10);
+  const dated = (inp.manifest?.maps ?? []).filter((m) => m.op_date);
+  const anyInWindow = dated.some((m) => m.op_date! >= mapCutoff);
+  const newestDay = dated.reduce<string | null>(
+    (best, m) => (best && best >= m.op_date! ? best : m.op_date!),
+    null,
+  );
+  const effectiveCutoff = anyInWindow ? mapCutoff : newestDay ?? mapCutoff;
   for (const m of inp.manifest?.maps ?? []) {
-    if (!m.op_date || m.op_date < mapCutoff) continue;
+    if (!m.op_date || m.op_date < effectiveCutoff) continue;
     mapSheetCount += 1;
     if (m.preview_url) {
       files.push({ url: dataUrl(m.preview_url), immutable: true, estBytes: EST.preview });

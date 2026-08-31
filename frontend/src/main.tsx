@@ -44,6 +44,10 @@ const queryClient = new QueryClient({
     queries: {
       refetchOnWindowFocus: false,
       retry: 2,
+      // React Query pauses queries whenever navigator.onLine is false — but
+      // offline is exactly when the pack-serving fetch layer must run, so
+      // connectivity handling belongs to it, not to the query cache.
+      networkMode: 'always',
     },
   },
 });
@@ -52,7 +56,7 @@ const queryClient = new QueryClient({
 // HMR). See scripts/build-sw.mjs for the rollback-safe design.
 if (import.meta.env.PROD && 'serviceWorker' in navigator) {
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/sw.js').catch(() => {
+    navigator.serviceWorker.register(`${import.meta.env.BASE_URL}sw.js`).catch(() => {
       /* shell caching is best-effort */
     });
   });
