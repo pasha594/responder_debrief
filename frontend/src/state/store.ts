@@ -142,6 +142,15 @@ export interface AppState {
     future: DrawFeature[][];
   };
 
+  offline: {
+    /** Downloaded packs by fire slug (hydrated from OPFS at boot). */
+    packs: Record<string, import('../offline/packs').PackMeta>;
+    /** Active download, or null. */
+    progress: { corneaId: string; done: number; total: number; bytes: number } | null;
+    /** navigator.onLine mirror (App keeps it current). */
+    online: boolean;
+  };
+
   ui: {
     theme: 'dark' | 'light';
     sidebarTab: 'overview' | 'forecast' | 'maps' | 'draw';
@@ -226,6 +235,9 @@ export interface AppState {
     /** Enter/leave "near <place>" mode; entering sorts by distance. */
     setDirectoryNear(near: DirectoryNear | null): void;
     setMapStyle(theme: 'dark' | 'light', id: string): void;
+    setOfflinePacks(packs: Record<string, import('../offline/packs').PackMeta>): void;
+    setOfflineProgress(p: AppState['offline']['progress']): void;
+    setOnline(online: boolean): void;
   };
 }
 
@@ -297,6 +309,12 @@ export const useStore = create<AppState>((set, get) => ({
   directions: { a: null, b: null, profile: 'drive', route: null, armed: false },
 
   draw: { tool: 'none', features: [], past: [], future: [] },
+
+  offline: {
+    packs: {},
+    progress: null,
+    online: typeof navigator === 'undefined' ? true : navigator.onLine,
+  },
 
   ui: {
     theme:
@@ -635,6 +653,10 @@ export const useStore = create<AppState>((set, get) => ({
             : cur;
         return { ui: { ...s.ui, directory: { ...s.ui.directory, near, sort } } };
       }),
+    setOfflinePacks: (packs) => set((s) => ({ offline: { ...s.offline, packs } })),
+    setOfflineProgress: (progress) => set((s) => ({ offline: { ...s.offline, progress } })),
+    setOnline: (online) =>
+      set((s) => (s.offline.online === online ? s : { offline: { ...s.offline, online } })),
     setMapStyle: (theme, id) => {
       track('map_style_changed', { theme, style: id });
       try {

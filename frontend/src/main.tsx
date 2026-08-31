@@ -32,6 +32,12 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import './app/tokens.css'; // includes vendored @font-face (public/fonts/*.woff2)
 
 import { App } from './app/App';
+import { initOfflinePacks, installOfflineFetch } from './offline/packs';
+
+// Offline packs: wrap fetch before anything (map, queries) issues a request,
+// then hydrate the pack index from OPFS in the background.
+installOfflineFetch();
+void initOfflinePacks();
 
 const queryClient = new QueryClient({
   defaultOptions: {
