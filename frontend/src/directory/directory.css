@@ -385,3 +385,9 @@
 }
 .rd-offline-strip-label { color: var(--color-text-muted); }
 .rd-offline-chip { cursor: pointer; }
+
+.rd-offline-note-line {
+  padding: 8px max(24px, calc((100% - var(--rd-dir-width)) / 2)) 0;
+  font-size: 12.5px;
+  color: var(--color-text-muted);
+}

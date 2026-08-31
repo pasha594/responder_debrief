@@ -14,6 +14,8 @@ function inputs(over: Partial<PackInputs> = {}): PackInputs {
     hotspotIndex: null,
     perimeterIndex: null,
     spreadRun: null,
+    weatherRun: null,
+    weatherProducts: [],
     nowMs: NOW,
     ...over,
   };
@@ -139,7 +141,8 @@ describe('buildPackPlan', () => {
     expect(plan.mapSheetCount).toBe(1);
     expect(plan.tileCount).toBeGreaterThan(0);
     expect(plan.files.some((f) => f.url.includes('/previews/incidents/test-fire/aaaa.png'))).toBe(true);
-    expect(plan.files.some((f) => f.url.includes('old.png'))).toBe(false);
+    // previews pack for EVERY sheet (thumbnails); only tiles are windowed
+    expect(plan.files.some((f) => f.url.includes('old.png'))).toBe(true);
     expect(plan.files.some((f) => f.url.includes('f1.geojson'))).toBe(true);
   });
 
@@ -156,9 +159,45 @@ describe('buildPackPlan', () => {
       ir_flights: [],
     } as unknown as IncidentManifest;
     const plan = buildPackPlan(inputs({ manifest }));
+    // the newest dated day (08-25) is the effective window: 1 sheet's tiles
     expect(plan.mapSheetCount).toBe(1);
     expect(plan.files.some((f) => f.url.includes('new.png'))).toBe(true);
-    expect(plan.files.some((f) => f.url.includes('old.png'))).toBe(false);
+  });
+
+  it('weather frames: rendered products x capped hours + wind grids, via the app resolvers', () => {
+    const hours = Array.from({ length: 20 }, (_, i) =>
+      new Date(Date.parse('2026-08-31T00:00:00Z') + i * 3_600_000).toISOString().replace('.000Z', 'Z'),
+    );
+    const run = {
+      workspace: 'hrrr_20260831_00',
+      run_time: '2026-08-31T00:00:00Z',
+      hours,
+      frames: {
+        hours,
+        image_template: '/frames/weather/{ws}/{product}/{epoch_ms}.png',
+        wind_uv_template: '/frames/weather/{ws}/wind-uv/{epoch_ms}.json',
+      },
+    } as unknown as import('../api/types').WeatherRun;
+    const plan = buildPackPlan(inputs({ weatherRun: run, weatherProducts: ['ws', 'smoke'] }));
+    const frames = plan.files.filter((f) => f.url.includes('/frames/weather/') && f.url.includes('.png'));
+    const uv = plan.files.filter((f) => f.url.includes('wind-uv'));
+    expect(frames).toHaveLength(2 * 12); // capped at WEATHER_HOURS_CAP
+    expect(uv).toHaveLength(12);
+    expect(frames[0].url).toContain('?cv=3'); // exact match with weatherImageUrl
+  });
+
+  it('previews pack for every sheet even outside the tile window', () => {
+    const manifest = {
+      maps: [
+        { op_date: '2026-08-30', preview_url: '/previews/incidents/test-fire/a.png', tiles: null },
+        { op_date: '2026-07-01', preview_url: '/previews/incidents/test-fire/b.png', tiles: null },
+      ],
+      ir_flights: [],
+    } as unknown as IncidentManifest;
+    const plan = buildPackPlan(inputs({ manifest }));
+    expect(plan.files.some((f) => f.url.includes('/a.png'))).toBe(true);
+    expect(plan.files.some((f) => f.url.includes('/b.png'))).toBe(true);
+    expect(plan.mapSheetCount).toBe(1); // tiles still windowed
   });
 
   it('estimate sums per-file estimates', () => {

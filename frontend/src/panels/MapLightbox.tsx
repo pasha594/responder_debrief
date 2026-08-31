@@ -9,6 +9,7 @@
  * being clipped inside the scrolling tab.
  */
 import { useEffect, useRef, type KeyboardEvent as ReactKeyboardEvent } from 'react';
+import { PackImg } from '../utils/PackImg';
 import { createPortal } from 'react-dom';
 import { dataUrl } from '../api/catalogs';
 import type { IncidentMapEntry } from '../api/types';
@@ -120,7 +121,7 @@ export function MapLightbox({
         </div>
         <div className="rd-lightbox-body">
           {entry.preview_url ? (
-            <img className="rd-lightbox-img" src={dataUrl(entry.preview_url)} alt={title} />
+            <PackImg className="rd-lightbox-img" src={dataUrl(entry.preview_url)} alt={title} />
           ) : (
             <div className="rd-lightbox-empty">
               No preview available — open the PDF to read this sheet.

@@ -76,6 +76,12 @@ function ensureMember(
  * must not wedge stepping) and after a 2 s fallback timeout.
  */
 function preloadImage(url: string, cb: () => void): () => void {
+  // Offline: Image() bypasses the pack-serving fetch wrapper entirely — skip
+  // the warm-up and let the source's own (wrapped) fetch do the work.
+  if (typeof navigator !== 'undefined' && !navigator.onLine) {
+    const t = setTimeout(cb, 0);
+    return () => clearTimeout(t);
+  }
   let done = false;
   const finish = () => {
     if (done) return;

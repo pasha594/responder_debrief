@@ -5,6 +5,7 @@
  * overlayable sheets drape on the map, flat sheets open a lightbox.
  */
 import { useMemo, useState } from 'react';
+import { PackImg } from '../../utils/PackImg';
 import { useFire, useIncidentManifest, useMasterCatalog } from '../../api/queries';
 import { dataUrl } from '../../api/catalogs';
 import type { IncidentMapEntry, IrFlight } from '../../api/types';
@@ -38,24 +39,23 @@ function useManifestForFire(corneaId: string | null) {
 }
 
 function Thumb({ entry }: { entry: IncidentMapEntry }) {
-  if (!entry.preview_url) {
-    return (
-      <div className="rd-thumb rd-thumb--fallback" aria-hidden="true">
-        <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
-          <rect x="2.5" y="2.5" width="15" height="15" rx="2" stroke="currentColor" />
-          <path d="M2.5 13l4-4 4 4 3-3 4 4" stroke="currentColor" fill="none" />
-        </svg>
-      </div>
-    );
-  }
+  const fallback = (
+    <div className="rd-thumb rd-thumb--fallback" aria-hidden="true">
+      <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+        <rect x="2.5" y="2.5" width="15" height="15" rx="2" stroke="currentColor" />
+        <path d="M2.5 13l4-4 4 4 3-3 4 4" stroke="currentColor" fill="none" />
+      </svg>
+    </div>
+  );
+  if (!entry.preview_url) return fallback;
   return (
-    <img
+    <PackImg
       className="rd-thumb"
       src={dataUrl(entry.preview_url)}
       alt=""
-      loading="lazy"
       width={56}
       height={56}
+      fallback={fallback}
     />
   );
 }

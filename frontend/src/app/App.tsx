@@ -179,11 +179,10 @@ function UrlStateSync() {
   return null;
 }
 
-/** Mirrors navigator.onLine into the store and shows the offline banner. */
-function OfflineStatus() {
-  const online = useStore((s) => s.offline.online);
+/** Mirrors navigator.onLine into the store (no visible UI — the directory
+ * and the offline card carry the messaging). */
+function OnlineSync() {
   const setOnline = useStore((s) => s.actions.setOnline);
-  const hasPacks = useStore((s) => Object.keys(s.offline.packs).length > 0);
   useEffect(() => {
     const sync = () => setOnline(navigator.onLine);
     window.addEventListener('online', sync);
@@ -194,12 +193,7 @@ function OfflineStatus() {
       window.removeEventListener('offline', sync);
     };
   }, [setOnline]);
-  if (online) return null;
-  return (
-    <div className="rd-offline-banner">
-      Offline{hasPacks ? ' — showing downloaded data' : ' — no downloaded fires on this device'}
-    </div>
-  );
+  return null;
 }
 
 function Toast() {
@@ -293,7 +287,7 @@ export function App() {
         </ErrorBoundary>
       )}
       <Toast />
-      <OfflineStatus />
+      <OnlineSync />
     </div>
   );
 }

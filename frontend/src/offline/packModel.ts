@@ -12,12 +12,13 @@
 import { DATA_BASE_URL, FIRE_API } from '../app/config';
 import { firesIndexUrl } from '../api/fireApi';
 import { dataUrl } from '../api/catalogs';
-import { spreadToaUrl, toaPercentiles } from '../api/wmsUrls';
+import { spreadToaUrl, toaPercentiles, weatherImageUrl, windUvUrl } from '../api/wmsUrls';
 import type {
   HotspotArchiveIndex,
   IncidentManifest,
   PerimeterIndexItem,
   PyrecastRun,
+  WeatherRun,
 } from '../api/types';
 
 export interface PackFilePlan {
@@ -26,6 +27,10 @@ export interface PackFilePlan {
   immutable: boolean;
   /** Rough size for the pre-download estimate, bytes. */
   estBytes: number;
+  /** Best-effort: a 404 skips the file instead of failing the pack (weather
+   * frames — the worker renders only products with data, e.g. no apcp01 on
+   * dry runs — mirroring the app's own graceful degradation). */
+  optional?: boolean;
 }
 
 export interface PackPlan {
@@ -45,7 +50,14 @@ const EST = {
   toaTif: 3_400_000,
   preview: 60_000,
   json: 150_000,
+  weatherFrame: 3_000_000,
+  windUv: 120_000,
 };
+
+/** CONUS weather frames are ~3 MB each; cap the packed forecast horizon so a
+ * 48-hour cycle can't balloon the pack (the field brief cares about the next
+ * shifts, not hour 47). */
+export const WEATHER_HOURS_CAP = 12;
 
 // ---------- tile math (standard slippy scheme, mirrors MapLibre) ----------
 
@@ -104,6 +116,9 @@ export interface PackInputs {
   hotspotIndex: HotspotArchiveIndex | null;
   perimeterIndex: PerimeterIndexItem[] | null;
   spreadRun: PyrecastRun | null;
+  /** The run WeatherSection would render (renderable-first) + its products. */
+  weatherRun: WeatherRun | null;
+  weatherProducts: string[];
   nowMs: number;
 }
 
@@ -174,6 +189,28 @@ export function buildPackPlan(inp: PackInputs): PackPlan {
     }
   }
 
+  // Weather raster layers: the active run's frames for every rendered
+  // product, capped to the first WEATHER_HOURS_CAP forecast hours, plus the
+  // wind U/V grids for the arrow overlay. URLs come from the same resolvers
+  // the map uses, so offline serving matches byte-for-byte.
+  if (inp.weatherRun?.frames) {
+    const hours = inp.weatherRun.frames.hours.slice(0, WEATHER_HOURS_CAP);
+    for (const product of inp.weatherProducts) {
+      for (const h of hours) {
+        files.push({
+          url: weatherImageUrl(inp.weatherRun, product, h),
+          immutable: true,
+          estBytes: EST.weatherFrame,
+          optional: true,
+        });
+      }
+    }
+    for (const h of hours) {
+      const uv = windUvUrl(inp.weatherRun, h);
+      if (uv) files.push({ url: uv, immutable: true, estBytes: EST.windUv, optional: true });
+    }
+  }
+
   // Incident maps from the last 2 days: full tile pyramids + previews. A
   // fire whose newest sheets predate the window still packs its most recent
   // DATED sheet day — an older ops map beats no map in the field.
@@ -186,11 +223,12 @@ export function buildPackPlan(inp: PackInputs): PackPlan {
   );
   const effectiveCutoff = anyInWindow ? mapCutoff : newestDay ?? mapCutoff;
   for (const m of inp.manifest?.maps ?? []) {
-    if (!m.op_date || m.op_date < effectiveCutoff) continue;
-    mapSheetCount += 1;
+    // Thumbnails for the whole Maps tab (small); tile pyramids stay windowed.
     if (m.preview_url) {
       files.push({ url: dataUrl(m.preview_url), immutable: true, estBytes: EST.preview });
     }
+    if (!m.op_date || m.op_date < effectiveCutoff) continue;
+    mapSheetCount += 1;
     if (m.tiles) {
       const urls = sheetTileUrls(m.tiles);
       tileCount += urls.length;

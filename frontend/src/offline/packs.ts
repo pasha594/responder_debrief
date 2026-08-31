@@ -20,8 +20,9 @@ import type {
   MasterCatalog,
   PerimeterIndexItem,
   PyrecastRunsCatalog,
+  WeatherRunsCatalog,
 } from '../api/types';
-import { latestRun } from '../api/queries';
+import { isRenderableWeatherRun, latestRun } from '../api/queries';
 import { setSpreadArchiveBase } from '../api/wmsUrls';
 import {
   buildPackPlan,
@@ -278,6 +279,12 @@ async function runDownload(corneaId: string, abort: AbortSignal): Promise<PackMe
     // Same base the app uses at runtime, so planned ToA URLs match exactly.
     setSpreadArchiveBase(runsCatalog.archive_base);
     const spreadRun = latestRun(runsCatalog, slug);
+    const weatherCatalog = await rawJson<WeatherRunsCatalog>(
+      `${DATA_BASE_URL}/catalogs/weather_runs.json`, abort);
+    const hrrr = weatherCatalog.models?.hrrr;
+    // Exactly the run WeatherSection picks (renderable-first fallback).
+    const weatherRun = hrrr?.runs?.find(isRenderableWeatherRun) ?? hrrr?.runs?.[0] ?? null;
+    const weatherProducts = hrrr ? Object.keys(hrrr.products ?? {}) : [];
 
     const inputs: PackInputs = {
       corneaId,
@@ -288,6 +295,8 @@ async function runDownload(corneaId: string, abort: AbortSignal): Promise<PackMe
       hotspotIndex,
       perimeterIndex,
       spreadRun,
+      weatherRun,
+      weatherProducts,
       nowMs: Date.now(),
     };
     const plan = buildPackPlan(inputs);
@@ -336,6 +345,11 @@ async function runDownload(corneaId: string, abort: AbortSignal): Promise<PackMe
           files[item.url] = r.file;
           bytes += r.bytes;
         } catch (err) {
+          if (item.optional) {
+            // best-effort content (weather frames a dry run never rendered)
+            done += 1;
+            continue;
+          }
           // A pack with silent holes is worse than a failed download.
           firstError = err;
           return;

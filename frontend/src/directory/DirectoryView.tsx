@@ -80,10 +80,19 @@ export function DirectoryView() {
   const isDesktop = useIsDesktop();
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  const rows = useMemo(
+  const online = useStore((s) => s.offline.online);
+  const packs = useStore((s) => s.offline.packs);
+  const allRows = useMemo(
     () => buildDirectoryRows(catalog.data, fires.data),
     [catalog.data, fires.data],
   );
+  // No service: the roster is a stale snapshot and only downloaded fires can
+  // actually open — show just those.
+  const rows = useMemo(() => {
+    if (online) return allRows;
+    const downloaded = new Set(Object.keys(packs));
+    return allRows.filter((r) => r.fireSlug && downloaded.has(r.fireSlug));
+  }, [allRows, online, packs]);
   const summary = useMemo(() => summarizeRows(rows), [rows]);
 
   // Match priority: fire names and states filter instantly as you type…
@@ -213,6 +222,11 @@ export function DirectoryView() {
         <SettingsControl />
       </header>
 
+      {!online && (
+        <div className="rd-offline-note-line">
+          No service — showing fires downloaded on this device.
+        </div>
+      )}
       <OfflineFiresStrip />
 
       <div className="rd-dir-toolbar">
