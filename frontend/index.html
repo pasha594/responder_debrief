@@ -9,13 +9,22 @@
     <meta http-equiv="Content-Security-Policy" content="upgrade-insecure-requests" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <link rel="icon" type="image/svg+xml" href="favicon.svg" />
+    <!-- Solid filled icon for search engines: Google rejects the sparse
+         transparent SVG and shows a globe without this. -->
+    <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
     <meta name="theme-color" content="#1a1218" />
     <meta
       name="description"
-      content="Responder Brief — get up to speed on a wildfire before deployment: perimeters, hotspots, spread forecasts, fire weather, and incident maps on one timeline."
+      content="Wildfire situational awareness for responders: incident maps, perimeters, hotspots, and forecasts all in one place."
     />
+    <meta property="og:title" content="Responder Brief" />
+    <meta
+      property="og:description"
+      content="Wildfire situational awareness for responders: incident maps, perimeters, hotspots, and forecasts all in one place."
+    />
+    <meta property="og:image" content="https://incibrief.com/icons/icon-512.png" />
     <title>Responder Brief</title>
     <script>
       // Theme before first paint: explicit choice wins, else dark (field default).
