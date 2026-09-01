@@ -217,6 +217,12 @@ export function DirectoryView() {
       <header className="rd-dir-header">
         <div className="rd-dir-brand">
           <h1 className="rd-dir-wordmark">Responder Brief</h1>
+          {/* On-page copy of the meta description: search engines prefer
+              prominent prose near the top over footer boilerplate. */}
+          <p className="rd-dir-tagline">
+            Wildfire situational awareness for responders: incident maps, perimeters,
+            hotspots, and forecasts all in one place.
+          </p>
           <div className="rd-dir-subtitle">{subtitle}</div>
         </div>
         <SettingsControl />
