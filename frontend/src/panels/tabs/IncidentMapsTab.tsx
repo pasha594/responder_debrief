@@ -9,6 +9,7 @@ import { PackImg } from '../../utils/PackImg';
 import { useFire, useIncidentManifest, useMasterCatalog } from '../../api/queries';
 import { dataUrl } from '../../api/catalogs';
 import type { IncidentMapEntry, IrFlight } from '../../api/types';
+import type React from 'react';
 import { useMap } from '../../map/MapRoot';
 import { useStore } from '../../state/store';
 import { formatBytes, formatTime, zoneAbbr } from '../../utils/format';
@@ -130,8 +131,24 @@ function MapRow({
     );
   }
 
+  // The whole row overlays the sheet (the button stays as the explicit,
+  // toggling control). Clicks that land on a control inside the row are
+  // that control's business.
+  const overlayable = action === 'overlay';
+  const onRowClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!overlayable || active) return;
+    if ((e.target as HTMLElement).closest('button, a, input, label')) return;
+    actions.setIncidentMap(entry.id);
+  };
+
   return (
-    <div className={`rd-map-row${active ? ' rd-map-row--active' : ''}`}>
+    <div
+      className={`rd-map-row${active ? ' rd-map-row--active' : ''}${
+        overlayable && !active ? ' rd-map-row--clickable' : ''
+      }`}
+      onClick={onRowClick}
+      title={overlayable && !active ? 'Show this map on the map' : undefined}
+    >
       <Thumb entry={entry} />
       <div className="rd-map-row-body">
         <div className="rd-map-row-title">{entry.product_label}</div>
