@@ -1,0 +1,17 @@
+---
+description: "Diffalo state-command guardrails for this app. No accounts, no clientState, no pinned fire paths. expectText is the dump-dom gate, not map readiness."
+alwaysApply: true
+---
+
+# Diffalo reviews in this app — no accounts, no fixed fire URL
+
+The generic Diffalo skill tells agents to "mint a fresh account" for the state command. That instruction is wrong here and caused a failed review.
+
+- **Never emit `account`.** This SPA has no sign-in. An `account` field makes Diffalo demand a sign-in command that does not exist.
+- **Never emit `clientState`.** Diffalo refuses it without an account in the released CLI. Stride-Labs/diffalo#221 lifts that restriction for web; delete this line once it ships and you have the new CLI.
+- **Never invent a fire slug, and never pin one in `diffalo.json`.** Which fires are active changes daily. `scripts/diffalo-state.mjs` picks one at run time from the live fire API. `routeKey` is an exact pathname match, so a `places.fire` or `recordable.routes["/fire/…"]` entry goes stale within weeks and the gate then applies the home tagline to a fire page — a 90-second timeout.
+- **Fire stories use `state: { name: "fire-detail" }` and no `place`.** A state's route wins over `place` and `startRoute`, and there is deliberately no `fire` place to name.
+- **Global `expectText` is the `<title>`, on purpose.** It feeds the dump-dom gate (`--dump-dom --disable-gpu`, tags stripped, `<title>` included) and means "the SPA shell loaded", not "the map is up". Per-route `expectText` *replaces* the global list, so only static pages get stronger text.
+- **Map readiness goes in the state command's `ready` field**, which the recording browser waits on: `rd-fire-perimeter` (perimeter GeoJSON has landed) or `rd-fire-shell` (chrome mounted, map may still be empty). A post-mount string in `expectText` burns 90 seconds and fails.
+- **`env` is a top-level key, not `app.env`.** The `app` block reads only `install`, `dev` and `cwd`, so anything under `app.env` is dropped without a warning and the review records the app with no `VITE_DATA_BASE_URL`. An earlier version of this config made that mistake.
+- **`VITE_DATA_BASE_URL` is on `f005`.** `https://f005.backblazeb2.com/file/responder-debrief-data` serves the catalogs; `f004` returns 404 for every path. Same earlier version had `f004`, which was invisible because it sat under `app.env` anyway.

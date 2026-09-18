@@ -120,7 +120,7 @@ function isMapUsable(map: MlMap): boolean {
   return !internals._removed && !!internals.style;
 }
 
-export function useMapLayerSync(): void {
+export function useMapLayerSync(): boolean {
   const map = useMap();
   const view = useStore((s) => s.view);
   const layers = useStore((s) => s.layers);
@@ -391,4 +391,7 @@ export function useMapLayerSync(): void {
       map.flyTo({ center, zoom: 10, duration: 1200 });
     }
   }, [map, view, spreadRun, catalogFire, fires, perimeterFeature]);
+
+  // Diffalo records once this is true — the perimeter GeoJSON has landed.
+  return perimeterFeature != null;
 }

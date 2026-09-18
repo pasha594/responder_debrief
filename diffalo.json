@@ -1,0 +1,41 @@
+{
+  "$schema": "https://www.diffalo.com/schema/diffalo-v1.json",
+  "version": 1,
+  "app": {
+    "install": "npm ci",
+    "dev": "npm run dev",
+    "cwd": "frontend",
+    "reviewMode": "manual"
+  },
+  "env": {
+    "VITE_DATA_BASE_URL": "https://f005.backblazeb2.com/file/responder-debrief-data"
+  },
+  "recordable": {
+    "entryPath": "/",
+    "expectText": ["Responder Brief"],
+    "absentText": [
+      "Sign in",
+      "Log in",
+      "Unauthorized",
+      "Something went wrong",
+      "Cannot GET"
+    ],
+    "places": {
+      "directory": "/",
+      "health": "/health",
+      "sources": "/sources"
+    },
+    "routes": {
+      "/": {
+        "expectText": ["Wildfire situational awareness for responders"]
+      },
+      "/health": {
+        "expectText": ["Ingestion health"]
+      },
+      "/sources": {
+        "expectText": ["Sources"]
+      }
+    },
+    "stateCommand": "node ../scripts/diffalo-state.mjs"
+  }
+}

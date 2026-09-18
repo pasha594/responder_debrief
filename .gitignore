@@ -13,3 +13,5 @@ coverage/
 frontend/public/data/
 .claude/
 worker/out/
+.diffalo/
+brief.json

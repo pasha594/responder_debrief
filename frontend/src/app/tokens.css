@@ -151,6 +151,18 @@ a {
   background: transparent;
 }
 
+/* Diffalo waits on this after the perimeter GeoJSON lands — 1×1 so
+   Playwright sees a box, opacity 0 so the map does not. */
+.rd-fire-perimeter-ready {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
 .rd-toast {
   position: absolute;
   top: 12px;

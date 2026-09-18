@@ -11,6 +11,7 @@ export function BackControl() {
     <button
       type="button"
       className="rd-back-control"
+      data-testid="rd-fire-shell"
       onClick={() => backToDirectory()}
       title="Back to all fires"
     >
