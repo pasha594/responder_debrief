@@ -918,7 +918,8 @@
   margin-top: 6px;
 }
 
-/* PyreCast credit (over the map, bottom-left, clear of the scale bar) */
+/* PyreCast credit (over the map, bottom-left; +40px clears the attribution,
+   which reaches this far across a tablet-width map until it first collapses) */
 
 .rd-credit {
   position: fixed;
@@ -1046,7 +1047,9 @@
      the map. (It out-stacks the sidebar at z-index 25, so without this offset
      it paints on top of the panel instead.) */
   right: calc(var(--sidebar-w) + 12px);
-  bottom: calc(var(--timeline-h) + 12px);
+  /* The corner stacks attribution, then the scale bar, then this card
+     (scale bar's 42px + its 28px height + 8px gap). */
+  bottom: calc(var(--timeline-h) + 78px);
   z-index: 25;
   max-width: 260px;
   padding: 8px 10px;
@@ -1063,6 +1066,64 @@
 /* Collapsed sidebar is a 48px rail. */
 .rd-legendbar--rail {
   right: 60px;
+}
+
+/* ---------- Scale bar ---------- */
+
+/* Bottom-right corner of the visible map, directly above the attribution
+   (12px gutter + its 24px + 6px gap). Two rows share one line — miles (feet
+   up close) above it, kilometers (meters) below — each as wide as the round
+   distance it names, right-aligned into the corner. */
+.rd-scalebar {
+  position: absolute;
+  right: calc(var(--sidebar-w) + 12px);
+  bottom: calc(var(--timeline-h) + 42px);
+  z-index: 25;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  pointer-events: none; /* a map tap under it is still a map tap */
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 13px;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text);
+}
+
+.rd-scalebar--rail {
+  right: 60px;
+}
+
+.rd-scalebar-row {
+  box-sizing: border-box;
+  padding: 0 4px;
+  white-space: nowrap;
+  background: var(--overlay-bg);
+  border: 0 solid var(--color-text);
+  border-width: 0 2px;
+}
+.rd-scalebar-row--imperial {
+  border-bottom-width: 2px;
+}
+.rd-scalebar-row--metric {
+  border-top-width: 2px;
+  margin-top: -2px; /* one shared line, not two stacked */
+}
+
+/* MapLibre's own bottom-right corner (the attribution) belongs to the
+   full-bleed canvas, so it sat under the sidebar with one end poking out into
+   this corner. Beside a sidebar it follows the visible map instead, on the
+   overlays' 12px gutter. Phones keep MapLibre's corner (under the sheet). */
+@media (min-width: 768px) {
+  .rd-map-root .maplibregl-ctrl-bottom-right {
+    right: var(--sidebar-w);
+  }
+  .rd-app:has(.rd-sidebar--collapsed) .rd-map-root .maplibregl-ctrl-bottom-right {
+    right: 48px;
+  }
+  .rd-map-root .maplibregl-ctrl-bottom-right .maplibregl-ctrl {
+    margin: 0 12px 12px 0;
+  }
 }
 
 .rd-legendbar-caption,
@@ -1284,6 +1345,22 @@
   }
   .rd-legendbar {
     display: none; /* legends live inside the tabs on mobile */
+  }
+  /* The sheet covers the bottom of the map: the scale rides just above it at
+     peek and half (same 45% the sheet takes), in step with its snap. At full
+     there is no map left to measure. */
+  .rd-scalebar {
+    right: 12px;
+    transition: bottom 200ms ease;
+  }
+  .rd-scalebar--sheet-peek {
+    bottom: calc(var(--timeline-h) + 108px);
+  }
+  .rd-scalebar--sheet-half {
+    bottom: calc(var(--timeline-h) + 45% + 12px);
+  }
+  .rd-scalebar--sheet-full {
+    display: none;
   }
   /* comfortable touch targets */
   .rd-chip,

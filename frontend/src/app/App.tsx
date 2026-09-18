@@ -18,6 +18,7 @@ import { HealthView } from '../panels/HealthView';
 import { SourcesView } from '../panels/SourcesView';
 import { Timeline } from '../timeline/Timeline';
 import { LegendBar } from '../panels/LegendBar';
+import { ScaleBar } from '../panels/ScaleBar';
 import { PyrecastCredit } from '../panels/PyrecastCredit';
 import { ErrorBoundary } from '../utils/ErrorBoundary';
 import { useTimelineDomain } from '../timeline/useTimelineDomain';
@@ -242,6 +243,9 @@ function FireMapView() {
       </ErrorBoundary>
       <ErrorBoundary label="Legend">
         <LegendBar />
+      </ErrorBoundary>
+      <ErrorBoundary label="Scale">
+        <ScaleBar />
       </ErrorBoundary>
       <ErrorBoundary label="Credit">
         <PyrecastCredit />

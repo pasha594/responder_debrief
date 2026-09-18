@@ -96,7 +96,8 @@ export function MapRoot({ children }: { children: ReactNode }) {
       attributionControl: { compact: true },
     });
     map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right');
-    map.addControl(new maplibregl.ScaleControl({ unit: 'imperial' }), 'bottom-left');
+    // The scale bar is ours (panels/ScaleBar): MapLibre's corners belong to
+    // the full-bleed canvas, which runs under the sidebar and the sheet.
     mapRef.current = map;
     if (import.meta.env.DEV) {
       (window as unknown as { __rdMap: MlMap }).__rdMap = map;
