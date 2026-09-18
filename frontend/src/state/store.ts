@@ -249,6 +249,14 @@ export function routeClickClaims(d: AppState['directions']): boolean {
   return (!!d.a !== !!d.b) || (d.armed && !d.a && !d.b);
 }
 
+/** An armed draw tool only makes sense while the Draw tab's palette is on
+ * screen — anything that takes the panel off that tab disarms it, so map taps
+ * go back to being taps. Marks and undo history stay. Identity is kept when
+ * already idle: the draw layer re-renders on slice identity. */
+function disarmDraw(draw: AppState['draw']): AppState['draw'] {
+  return draw.tool === 'none' ? draw : { ...draw, tool: 'none' };
+}
+
 /**
  * Per-theme basemap style, persisted like the theme itself. Unknown or
  * removed ids fall back to each theme's default (the first catalog entry).
@@ -337,6 +345,10 @@ export const useStore = create<AppState>((set, get) => ({
       set((s) => ({
         view: { mode: 'fire', corneaId },
         ui: { ...s.ui, sidebarTab: 'overview', sheetSnap: 'half' },
+        // The tab snaps back to Overview — same rule as setSidebarTab. (A NEW
+        // fire's hydrate resets the tool anyway; re-selecting the open fire
+        // doesn't re-hydrate.)
+        draw: disarmDraw(s.draw),
         // Per-fire view state starts clean on every fire switch (user
         // feedback: carrying layer picks between fires was confusing). A
         // shared URL's params re-apply AFTER this reset, so deep links keep
@@ -366,6 +378,7 @@ export const useStore = create<AppState>((set, get) => ({
     backToDirectory: () =>
       set((s) => ({
         view: { mode: 'directory' },
+        draw: disarmDraw(s.draw),
         time: { ...s.time, playing: false },
         layers: {
           ...s.layers,
@@ -555,7 +568,11 @@ export const useStore = create<AppState>((set, get) => ({
       }
       set((s) => ({ ui: { ...s.ui, theme } }));
     },
-    setSidebarTab: (sidebarTab) => set((s) => ({ ui: { ...s.ui, sidebarTab } })),
+    setSidebarTab: (sidebarTab) =>
+      set((s) => ({
+        ui: { ...s.ui, sidebarTab },
+        draw: sidebarTab === 'draw' ? s.draw : disarmDraw(s.draw),
+      })),
     setSidebarCollapsed: (sidebarCollapsed) => set((s) => ({ ui: { ...s.ui, sidebarCollapsed } })),
     setBasemap: (basemap) => {
       track('basemap_changed', { basemap });

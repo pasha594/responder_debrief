@@ -82,4 +82,55 @@ describe('draw slice', () => {
     expect(d.future).toEqual([]);
     expect(d.tool).toBe('none');
   });
+
+  it('leaving the Draw tab disarms the tool; marks and history stay', () => {
+    const { actions } = useStore.getState();
+    actions.setSidebarTab('draw');
+    actions.drawCommit([A]);
+    actions.drawCommit([A, B]);
+    actions.drawUndo();
+    actions.setDrawTool('marker:camp');
+
+    actions.setSidebarTab('forecast');
+    const d = useStore.getState().draw;
+    expect(d.tool).toBe('none');
+    expect(d.features).toEqual([A]);
+    expect(d.past).toEqual([[]]);
+    expect(d.future).toEqual([[A, B]]);
+
+    // coming back doesn't re-arm — the palette starts with nothing picked
+    actions.setSidebarTab('draw');
+    expect(useStore.getState().draw.tool).toBe('none');
+  });
+
+  it('re-tapping the Draw tab keeps the picked tool', () => {
+    const { actions } = useStore.getState();
+    actions.setSidebarTab('draw');
+    actions.setDrawTool('erase');
+    actions.setSidebarTab('draw');
+    expect(useStore.getState().draw.tool).toBe('erase');
+  });
+
+  it('tab switches with no tool picked leave the draw slice untouched', () => {
+    const { actions } = useStore.getState();
+    actions.setSidebarTab('draw');
+    const before = useStore.getState().draw;
+    actions.setSidebarTab('overview');
+    // same identity: the draw layer re-renders on slice identity
+    expect(useStore.getState().draw).toBe(before);
+  });
+
+  it('opening a fire or going back to the directory disarms too', () => {
+    const { actions } = useStore.getState();
+    actions.setSidebarTab('draw');
+    actions.setDrawTool('freehand');
+    actions.selectFire('fire-1'); // tab snaps back to Overview
+    expect(useStore.getState().ui.sidebarTab).toBe('overview');
+    expect(useStore.getState().draw.tool).toBe('none');
+
+    actions.setSidebarTab('draw');
+    actions.setDrawTool('line:hand');
+    actions.backToDirectory();
+    expect(useStore.getState().draw.tool).toBe('none');
+  });
 });
