@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  DEFAULT_DIRECTORY_SORT,
   NEAR_RADIUS_MI,
   buildDirectoryRows,
   compareRows,
@@ -395,6 +396,35 @@ describe('files column sorts by upload time', () => {
     const sort = { key: 'files' as const, dir: 'desc' as const };
     const out = [d, c, b, a].sort((x, y) => compareRows(x, y, sort)).map((r) => r.name);
     expect(out).toEqual(['A', 'B', 'C', 'D']);
+  });
+});
+
+describe('files column and fires mirrored before their counts are known', () => {
+  it('ranks the "✓" rows with the fires that have files, not with the ones that have none', () => {
+    const timed = row({ name: 'Timed', mapCount: 4, latestUploadTs: '2026-08-21T10:00:00Z' });
+    const check = row({ name: 'Zulu check', hasIncidentMaps: true, mapCount: 0, irCount: 0 });
+    const none = row({ name: 'Alpha none', hasIncidentMaps: false, mapCount: 0, irCount: 0 });
+    const out = [none, check, timed]
+      .sort((x, y) => compareRows(x, y, DEFAULT_DIRECTORY_SORT))
+      .map((r) => r.name);
+    expect(out).toEqual(['Timed', 'Zulu check', 'Alpha none']);
+  });
+});
+
+describe('default roster order', () => {
+  it('opens on newest FTP upload first; fires without files sink in name order', () => {
+    const fresh = row({ name: 'Fresh', acres: 40, mapCount: 2, latestUploadTs: '2026-08-21T10:00:00Z' });
+    const older = row({ name: 'Older', acres: 90_000, mapCount: 30, latestUploadTs: '2026-08-02T10:00:00Z' });
+    const hugeNoFiles = row({ name: 'Zeta', acres: 400_000, mapCount: 0, irCount: 0 });
+    const smallNoFiles = row({ name: 'Alpha', acres: 5, mapCount: 0, irCount: 0 });
+    expect(DEFAULT_DIRECTORY_SORT).toEqual({ key: 'files', dir: 'desc' });
+    const out = selectDirectoryRows([hugeNoFiles, older, smallNoFiles, fresh], {
+      query: '',
+      filter: 'all',
+      sort: DEFAULT_DIRECTORY_SORT,
+    }).map((r) => r.name);
+    // size no longer leads: a 40-acre fire with this morning's maps beats a 400k-acre one with none
+    expect(out).toEqual(['Fresh', 'Older', 'Alpha', 'Zeta']);
   });
 });
 

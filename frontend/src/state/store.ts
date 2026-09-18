@@ -9,6 +9,7 @@ import { DEFAULT_PLAYBACK_SPEED } from '../app/config';
 import type { Percentile, SpreadProduct, WeatherProduct } from '../api/types';
 import { TOA_DEFAULT_WITHIN_HOURS } from '../spread/toaBands';
 import type { DirectoryFilter, DirectoryNear, DirectorySort, DirectorySortKey } from '../directory/rowModel';
+import { DEFAULT_DIRECTORY_SORT } from '../directory/rowModel';
 import { MAP_STYLES } from '../app/config';
 
 /**
@@ -335,7 +336,7 @@ export const useStore = create<AppState>((set, get) => ({
     sheetSnap: 'peek',
     legendKey: null,
     toast: null,
-    directory: { query: '', filter: 'all', sort: { key: 'acres', dir: 'desc' }, near: null },
+    directory: { query: '', filter: 'all', sort: DEFAULT_DIRECTORY_SORT, near: null },
     mapStyle: initMapStyle(),
   },
 
@@ -666,7 +667,7 @@ export const useStore = create<AppState>((set, get) => ({
         const sort: DirectorySort = near
           ? { key: 'distance', dir: 'asc' }
           : cur.key === 'distance'
-            ? { key: 'acres', dir: 'desc' }
+            ? DEFAULT_DIRECTORY_SORT
             : cur;
         return { ui: { ...s.ui, directory: { ...s.ui.directory, near, sort } } };
       }),

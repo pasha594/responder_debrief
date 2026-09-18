@@ -224,9 +224,6 @@ function DirectoryRowImpl({ row, nowMs, variant, onOpen }: DirectoryRowProps) {
         </span>
         {c.perimeterSub && <div className="rd-dir-sub">{c.perimeterSub}</div>}
       </td>
-      <td className="rd-dir-c-fcst">
-        <ForecastCell c={c} />
-      </td>
       <td className="rd-dir-c-ftp">
         {!c.ftp && c.files === DASH ? (
           <span className="rd-muted">{DASH}</span>
@@ -236,6 +233,9 @@ function DirectoryRowImpl({ row, nowMs, variant, onOpen }: DirectoryRowProps) {
             {c.ftpSub && <div className="rd-dir-sub">{c.ftpSub}</div>}
           </>
         )}
+      </td>
+      <td className="rd-dir-c-fcst">
+        <ForecastCell c={c} />
       </td>
     </tr>
   );

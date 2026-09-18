@@ -31,8 +31,8 @@ const COLUMNS: { key: DirectorySortKey; label: string; className: string }[] = [
   { key: 'acres', label: 'Size', className: 'rd-dir-c-num' },
   { key: 'started', label: 'Started', className: 'rd-dir-c-started' },
   { key: 'perimeter', label: 'Perimeter', className: 'rd-dir-c-perim' },
-  { key: 'forecast', label: 'Forecast', className: 'rd-dir-c-fcst' },
   { key: 'files', label: 'FTP files', className: 'rd-dir-c-ftp' },
+  { key: 'forecast', label: 'Forecast', className: 'rd-dir-c-fcst' },
 ];
 
 /** Survives the map round-trip so returning lands where the user left off. */

@@ -298,6 +298,10 @@ export interface DirectorySort {
   dir: 'asc' | 'desc';
 }
 
+/** How the roster opens, and what leaving near mode falls back to: newest FTP
+ * upload first. Fires with no FTP files sink to the bottom, in name order. */
+export const DEFAULT_DIRECTORY_SORT: DirectorySort = { key: 'files', dir: 'desc' };
+
 /** Sort value: string for text columns, number for the rest; null sorts last. */
 function sortValue(row: DirectoryRow, key: DirectorySortKey): string | number | null {
   switch (key) {
@@ -318,8 +322,9 @@ function sortValue(row: DirectoryRow, key: DirectorySortKey): string | number | 
       return row.distanceMi ?? null;
     case 'files': {
       // Sort by freshness like the other data columns. A fire with files
-      // but an unknown upload time still ranks above one with none at all.
-      if (!(row.mapCount + row.irCount)) return null;
+      // but an unknown upload time still ranks above one with none at all —
+      // and so does one mirrored before its counts are known (the cell's "✓").
+      if (!(row.mapCount + row.irCount) && !row.hasIncidentMaps) return null;
       const ts = row.latestUploadTs ?? row.latestUpload;
       return ts ? (orNull(Date.parse(ts)) ?? 0) : 0;
     }
