@@ -7,7 +7,12 @@
  */
 import { useEffect, useState } from 'react';
 import { useMap } from '../map/MapRoot';
-import { scaleReadings, type ScaleReadings } from '../map/scaleReadings';
+import {
+  panStableMetersPerPixel,
+  scaleReadings,
+  type ScaleLock,
+  type ScaleReadings,
+} from '../map/scaleReadings';
 import { useStore } from '../state/store';
 
 /** Widest a bar gets; round distances land between half of this and all of it. */
@@ -31,21 +36,34 @@ export function ScaleBar() {
 
   useEffect(() => {
     if (!map) return;
+    let lock: ScaleLock | null = null;
     const update = () => {
-      // Same sampling as MapLibre's own control: the ground distance across
-      // MAX_WIDTH_PX at the vertical middle of the map (scale varies with
-      // latitude, so pans move it too — 'move' covers zoom and pan alike).
-      const y = map.getContainer().clientHeight / 2;
-      const meters = map.unproject([0, y]).distanceTo(map.unproject([MAX_WIDTH_PX, y]));
-      const next = scaleReadings(meters, MAX_WIDTH_PX);
+      // From the camera, never from the ground: see panStableMetersPerPixel
+      // for why measuring (unproject) or trusting getZoom() wobbles on pans.
+      const centerElevationM = map.getCameraTargetElevation();
+      const stable = panStableMetersPerPixel(
+        {
+          lat: map.getCenter().lat,
+          zoom: map.getZoom(),
+          pitchDeg: map.getPitch(),
+          verticalFovDeg: map.getVerticalFieldOfView(),
+          viewportHeightPx: map.getContainer().clientHeight,
+          centerElevationM,
+          // meters above sea level in MapLibre 5 (it was center-relative in 3/4)
+          groundElevationM: map.queryTerrainElevation(map.getCenter()) ?? centerElevationM,
+        },
+        lock,
+      );
+      lock = stable.lock;
+      const next = scaleReadings(stable.metersPerPixel * MAX_WIDTH_PX, MAX_WIDTH_PX);
       setReadings((prev) => (sameReadings(prev, next) ? prev : next));
     };
     update();
-    map.on('move', update);
-    map.on('resize', update);
+    // 'idle' catches the terrain tiles landing after the camera has settled.
+    const events = ['move', 'moveend', 'resize', 'idle'] as const;
+    for (const ev of events) map.on(ev, update);
     return () => {
-      map.off('move', update);
-      map.off('resize', update);
+      for (const ev of events) map.off(ev, update);
     };
   }, [map]);
 
