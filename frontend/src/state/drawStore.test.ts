@@ -129,7 +129,7 @@ describe('draw slice', () => {
     expect(useStore.getState().draw.tool).toBe('none');
 
     actions.setSidebarTab('draw');
-    actions.setDrawTool('line:hand');
+    actions.setDrawTool('line:handline');
     actions.backToDirectory();
     expect(useStore.getState().draw.tool).toBe('none');
   });
