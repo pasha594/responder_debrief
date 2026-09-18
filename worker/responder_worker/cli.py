@@ -29,11 +29,14 @@ from .fires import fetch_active_fires, fetch_perimeter_count
 from .ftp_index import list_dir
 from .http import get_optional, make_client
 from .matching import (
+    DATE_SANITY_SLACK_DAYS,
     IncidentCandidate,
     candidate_dir_name,
     extract_unit_tokens,
+    folder_predates_fire,
     match_candidate,
     normalize_name,
+    parse_when,
 )
 from .mirror import IncidentMirror, MirroredFile, MirrorResult
 
@@ -463,30 +466,76 @@ def _rank_candidates(cands: list[IncidentCandidate], fires: list[dict],
 
 
 def _gather_unit_tokens(client, cand: IncidentCandidate) -> Counter:
-    """Unit-token evidence from newest daily Products|GIS dir + QR filenames."""
+    """Unit-token evidence from newest daily Products|GIS dir + QR filenames.
+
+    The same listings also date the folder: the newest file (and, as a
+    fallback, child-dir) mtimes land on the candidate for the matcher's date
+    sanity check — no extra requests.
+    """
     tokens: Counter = Counter()
+
+    def see(entries) -> None:
+        for e in entries:
+            if not e.mtime:
+                continue
+            if e.is_dir:
+                if not cand.newest_dir_mtime or e.mtime > cand.newest_dir_mtime:
+                    cand.newest_dir_mtime = e.mtime
+            elif not cand.newest_file_mtime or e.mtime > cand.newest_file_mtime:
+                cand.newest_file_mtime = e.mtime
+
     children = list_dir(client, cand.dir_url)
+    see(children)
     for child in children:
         if not child.is_dir:
             continue
         lname = child.name.lower()
         if lname in ("products", "gis"):
             entries = list_dir(client, child.url)
+            see(entries)
             dailies = sorted(
                 (e for e in entries if e.is_dir and e.name.isdigit() and len(e.name) == 8),
                 key=lambda e: e.name, reverse=True,
             )
             for daily in dailies[:2]:
                 files = list_dir(client, daily.url)
+                see(files)
                 tokens += extract_unit_tokens([f.name for f in files if not f.is_dir],
                                               year=cand.year)
                 if tokens:
                     break
         elif lname == "qr":
             files = list_dir(client, child.url)
+            see(files)
             tokens += extract_unit_tokens([f.name for f in files if not f.is_dir],
                                           year=cand.year)
     return tokens
+
+
+def _cached_match_predates_fire(rec: dict, fires_by_slug: dict) -> str | None:
+    """Reason when a cached NAME match fails the date sanity check, else None.
+
+    Unchanged folders skip matching entirely, so a bad match made before the
+    check existed would otherwise live forever. The record's own upload
+    stamps (real mirrored files) are better evidence than any listing mtime;
+    the newest of them is used, so only a folder that is stale by every
+    measure is rejected.
+    """
+    m = rec.get("match") or {}
+    if m.get("method") not in ("name_exact", "name_fuzzy"):
+        return None
+    fire = fires_by_slug.get(rec.get("fire_slug"))
+    if not fire:
+        return None
+    stamps = [rec.get(k) for k in ("latest_upload_ts", "latest_upload", "dir_mtime")]
+    dated = [(when, raw) for raw in stamps if (when := parse_when(raw))]
+    if not dated:
+        return None
+    newest = max(dated)[1]
+    if not folder_predates_fire(newest, fire.get("created_on")):
+        return None
+    return (f"newest upload {newest} is more than {DATE_SANITY_SLACK_DAYS} days "
+            f"before the fire was created ({fire.get('created_on')})")
 
 
 def _tile_and_manifest(args, storage, state, fires_by_slug, mirrors) -> None:
@@ -1111,6 +1160,7 @@ def _zero_mirror_entry() -> dict:
         "files_downloaded": 0,
         "bytes_downloaded": 0,
         "failed_incidents": [],
+        "date_rejected": [],
         "deadline_hit": False,
         "gdal_available": geopdf.gdal_available(),
     }
@@ -1160,6 +1210,7 @@ def cmd_sync_incidents(args) -> int:
         cands = _rank_candidates(cands, fires, priority)
         unchanged_skips = 0
         failed_incidents: list[str] = []
+        date_rejected: list[str] = []  # cached name matches dropped by the date check
         log(f"[incidents] candidate incident dirs: {len(cands)}"
             + (f" (priority: {', '.join(priority)})" if priority else "")
             + " — ordered priority, then acreage desc")
@@ -1181,6 +1232,21 @@ def cmd_sync_incidents(args) -> int:
                 continue
             # deterministic evidence (skip listing work when unchanged & known)
             prev = state["incidents"].get(cand.key)
+            # Re-validate a cached name match before trusting it: detach the
+            # folder (its mirrored files stay — retention) and fall through
+            # to a fresh match, which applies the same date check.
+            stale = _cached_match_predates_fire(prev, fires_by_slug) if prev else None
+            if stale:
+                log(f"[incidents] {cand.key}: cached {prev['match'].get('method')} match to "
+                    f"{prev.get('fire_slug')} REJECTED — {stale}")
+                prev["match_rejected"] = {
+                    "fire_slug": prev.get("fire_slug"),
+                    "method": prev["match"].get("method"),
+                    "reason": stale,
+                    "at": cat.now_iso(),
+                }
+                prev["match"] = None
+                date_rejected.append(cand.key)
             # --since widens the mirror window, so an unchanged dir still
             # needs re-listing on a backfill run.
             if (prev and not args.force and not args.since
@@ -1229,6 +1295,7 @@ def cmd_sync_incidents(args) -> int:
                 failed_incidents.append(cand.key)
                 continue
             state["incidents"][cand.key]["dir_url"] = cand.dir_url
+            state["incidents"][cand.key].pop("match_rejected", None)
             log(f"[incidents] {cand.key}: listings={res.listings} "
                 f"downloads={res.downloads} ({res.bytes_downloaded/1e6:.1f} MB) "
                 f"unchanged={res.skipped_unchanged} too_big={res.skipped_too_big}")
@@ -1254,8 +1321,8 @@ def cmd_sync_incidents(args) -> int:
         for inc_key, rec in list(state["incidents"].items()):
             slug = rec.get("fire_slug")
             if (inc_key in mirrors or slug not in rebuilt_slugs
-                    or not rec.get("files")):
-                continue
+                    or not rec.get("files") or not rec.get("match")):
+                continue  # (no match = detached by the date check)
             fire = fires_by_slug.get(slug)
             if fire is None:
                 continue
@@ -1281,7 +1348,7 @@ def cmd_sync_incidents(args) -> int:
         incident_matches = {}
         for inc_key, inc in state["incidents"].items():
             mrec = inc.get("match") or {}
-            if inc.get("fire_slug"):
+            if inc.get("fire_slug") and mrec:  # detached records carry no match
                 incident_matches[inc["fire_slug"]] = {
                     "method": mrec.get("method"),
                     "confidence": mrec.get("confidence"),
@@ -1331,8 +1398,12 @@ def cmd_sync_incidents(args) -> int:
             "started_at": job_started,
             "finished_at": cat.now_iso(),
             "ok": True,
-            "note": (f"{len(failed_incidents)} incident(s) skipped on FTP errors"
-                     if failed_incidents else None),
+            "note": "; ".join(filter(None, [
+                f"{len(failed_incidents)} incident(s) skipped on FTP errors"
+                if failed_incidents else None,
+                f"{len(date_rejected)} stale name match(es) dropped by the date check"
+                if date_rejected else None,
+            ])) or None,
             "catalog_version": version,
             "candidates": len(cands),
             "unchanged_skips": unchanged_skips,
@@ -1340,6 +1411,7 @@ def cmd_sync_incidents(args) -> int:
             "files_downloaded": downloads,
             "bytes_downloaded": dl_bytes,
             "failed_incidents": failed_incidents,
+            "date_rejected": date_rejected,
             "deadline_hit": frames.deadline_passed(),
             "gdal_available": geopdf.gdal_available(),
         }, log=log)

@@ -11,6 +11,8 @@ import urllib.parse
 from collections import Counter
 from dataclasses import dataclass, field
 
+from datetime import datetime, timedelta, timezone
+
 from rapidfuzz import fuzz
 
 from . import config
@@ -95,6 +97,43 @@ def name_variants(normalized: str) -> list[str]:
     return variants
 
 
+#: Date sanity for NAME matches. A folder whose newest upload is more than
+#: this many days OLDER than a fire's creation cannot be that fire's folder:
+#: teams post maps once a fire exists, not months before. Names recur within a
+#: GACC (April's "Corral" fire in Arizona vs September's "Corrals" in New
+#: Mexico; Colorado's "Beehive" vs South Dakota's "Bee Hive"), so a name alone
+#: must never bridge that gap. Unit-token matches and manual overrides are
+#: deterministic and are not subject to it.
+DATE_SANITY_SLACK_DAYS = 7
+
+
+def parse_when(value: object) -> datetime | None:
+    """ISO stamps ('2026-09-17T19:53:09Z'), autoindex mtimes ('2026-04-26
+    02:00') and bare days ('2026-04-26') -> aware UTC datetime, else None."""
+    if not isinstance(value, str) or not value.strip():
+        return None
+    text = value.strip().replace("Z", "+00:00")
+    try:
+        dt = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
+
+def folder_predates_fire(
+    newest_activity: str | None,
+    created_on: str | None,
+    slack_days: int = DATE_SANITY_SLACK_DAYS,
+) -> bool:
+    """True when the folder's newest upload is more than `slack_days` before
+    the fire was created. Missing or unparseable evidence never vetoes."""
+    newest = parse_when(newest_activity)
+    created = parse_when(created_on)
+    if newest is None or created is None:
+        return False
+    return newest < created - timedelta(days=slack_days)
+
+
 @dataclass
 class IncidentCandidate:
     region: str            # GACC key into config.GACC_STATES
@@ -103,6 +142,20 @@ class IncidentCandidate:
     dir_url: str
     dir_mtime: str | None = None
     unit_tokens: Counter = field(default_factory=Counter)  # from filenames
+    #: Newest FILE / child-DIR mtimes seen while gathering evidence (autoindex
+    #: "YYYY-MM-DD HH:MM" strings, so they order lexicographically).
+    newest_file_mtime: str | None = None
+    newest_dir_mtime: str | None = None
+
+    @property
+    def newest_activity(self) -> str | None:
+        """When this folder last saw an upload. File mtimes are the real
+        signal; a directory's own mtime moves for non-upload reasons, so it
+        only stands in when no files were listed (IR-only folders)."""
+        if self.newest_file_mtime:
+            return self.newest_file_mtime
+        stamps = [m for m in (self.dir_mtime, self.newest_dir_mtime) if m]
+        return max(stamps) if stamps else None
 
     @property
     def key(self) -> str:
@@ -170,6 +223,10 @@ def match_candidate(
     # 2. fuzzy name fallback, constrained by GACC states
     states = _allowed_states(cand.region)
     pool = [f for f in fires if states is None or (f.get("state") in states)]
+    # Date sanity: a folder that went quiet more than a week before a fire
+    # even existed belongs to an earlier incident with a similar name.
+    newest = cand.newest_activity
+    pool = [f for f in pool if not folder_predates_fire(newest, f.get("created_on"))]
     dir_norm = normalize_name(cand.dir_name)
     dir_forms = name_variants(dir_norm)
 

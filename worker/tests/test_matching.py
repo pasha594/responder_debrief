@@ -4,10 +4,12 @@ GACC-state constraint, pyrecast slug matching — pinned to real observed names.
 from collections import Counter
 
 from responder_worker.matching import (
+    DATE_SANITY_SLACK_DAYS,
     IncidentCandidate,
     UNIT_TOKEN_RE,
     candidate_dir_name,
     extract_unit_tokens,
+    folder_predates_fire,
     is_placeholder_dir,
     match_candidate,
     match_pyrecast_slug,
@@ -16,12 +18,13 @@ from responder_worker.matching import (
 )
 
 
-def _fire(slug, title, state, uid=None):
+def _fire(slug, title, state, uid=None, created_on=None):
     return {
         "fire_slug": slug,
         "post_title": title,
         "state": state,
         "unique_fire_id": uid,
+        "created_on": created_on,
     }
 
 
@@ -178,6 +181,113 @@ class TestMatchCandidate:
         m = match_candidate(cand, fires, {"rocky_mtn/2026/2026_Mystery": "elk"})
         assert m and m.method == "override" and m.fire_slug == "elk"
         assert match_candidate(cand, fires, {"rocky_mtn/2026/2026_Mystery": "ignore"}) is None
+
+
+# ---------------------------------------------------------------------------
+# date sanity: a folder that went quiet >1 week before a fire existed is not
+# that fire's folder (pinned to the two real mismatches found 2026-09-18)
+# ---------------------------------------------------------------------------
+
+class TestDateSanity:
+    def test_predates_basics(self):
+        created = "2026-09-17T19:53:09Z"
+        assert DATE_SANITY_SLACK_DAYS == 7
+        assert folder_predates_fire("2026-04-26T02:00:33Z", created) is True   # 144 days
+        assert folder_predates_fire("2026-09-09 12:00", created) is True       # 8+ days, autoindex form
+        assert folder_predates_fire("2026-09-12", created) is False            # 5 days, bare day
+        assert folder_predates_fire("2026-09-10T19:53:09Z", created) is False  # exactly 7 days: allowed
+        assert folder_predates_fire("2026-09-18 08:00", created) is False      # after creation
+
+    def test_missing_or_garbage_evidence_never_vetoes(self):
+        assert folder_predates_fire(None, "2026-09-17T19:53:09Z") is False
+        assert folder_predates_fire("2026-04-26 02:00", None) is False
+        assert folder_predates_fire("not a date", "2026-09-17T19:53:09Z") is False
+        assert folder_predates_fire("2026-04-26 02:00", "") is False
+
+    def _corral(self, **kw):
+        return IncidentCandidate(
+            region="southwest", year=2026, dir_name="2026_Corral",
+            dir_url="https://x/southwest/2026/2026_Corral/",
+            unit_tokens=Counter({"2026-AZASF-000120": 3}), **kw,
+        )
+
+    def test_corral_az_folder_does_not_match_corrals_nm(self):
+        # April's Arizona "Corral" folder vs a New Mexico "Corrals" fire created
+        # in September: fuzzy 92.3, same GACC, token for a fire no longer active.
+        fires = [_fire("corrals", "Corrals", "NM", uid="2026-NMN2S-000682",
+                       created_on="2026-09-17T19:53:09Z")]
+        cand = self._corral(dir_mtime="2026-04-24 18:11",
+                            newest_file_mtime="2026-04-26 02:00")
+        assert match_candidate(cand, fires) is None
+
+    def test_beehive_co_folder_does_not_match_bee_hive_sd(self):
+        fires = [_fire("bee-hive", "Bee Hive", "SD", uid="2026-SDCRA-000093",
+                       created_on="2026-07-28T20:00:00Z")]
+        cand = IncidentCandidate(
+            region="rocky_mtn", year=2026, dir_name="2026_Beehive",
+            dir_url="https://x/", newest_file_mtime="2026-06-15 21:40",
+        )
+        assert match_candidate(cand, fires) is None
+
+    def test_recent_folder_still_fuzzy_matches(self):
+        fires = [_fire("corrals", "Corrals", "NM", created_on="2026-09-17T19:53:09Z")]
+        cand = self._corral(newest_file_mtime="2026-09-18 03:10")
+        m = match_candidate(cand, fires)
+        assert m and m.method == "name_fuzzy" and m.fire_slug == "corrals"
+
+    def test_within_a_week_before_creation_is_allowed(self):
+        # The API record can lag the first maps by a few days.
+        fires = [_fire("corrals", "Corrals", "NM", created_on="2026-09-17T19:53:09Z")]
+        cand = self._corral(newest_file_mtime="2026-09-12 09:00")
+        assert match_candidate(cand, fires) is not None
+
+    def test_exact_name_is_subject_to_it_too(self):
+        fires = [_fire("willow", "Willow", "CO", created_on="2026-09-01T00:00:00Z")]
+        stale = IncidentCandidate(region="rocky_mtn", year=2026, dir_name="2026_Willow",
+                                  dir_url="https://x/", newest_file_mtime="2026-05-02 10:00")
+        fresh = IncidentCandidate(region="rocky_mtn", year=2026, dir_name="2026_Willow",
+                                  dir_url="https://x/", newest_file_mtime="2026-09-03 10:00")
+        assert match_candidate(stale, fires) is None
+        assert match_candidate(fresh, fires).method == "name_exact"
+
+    def test_stale_folder_cannot_tie_out_the_right_fire(self):
+        # Two same-named fires in one GACC: only the one old enough to own the
+        # folder stays in the pool, so there is no tie.
+        fires = [
+            _fire("willow-old", "Willow", "CO", created_on="2026-04-28T00:00:00Z"),
+            _fire("willow-new", "Willow", "WY", created_on="2026-09-10T00:00:00Z"),
+        ]
+        cand = IncidentCandidate(region="rocky_mtn", year=2026, dir_name="2026_Willow",
+                                 dir_url="https://x/", newest_file_mtime="2026-05-20 10:00")
+        m = match_candidate(cand, fires)
+        assert m and m.fire_slug == "willow-old"
+
+    def test_unit_id_and_overrides_are_not_subject_to_it(self):
+        fires = [_fire("corrals", "Corrals", "NM", uid="2026-AZASF-000120",
+                       created_on="2026-09-17T19:53:09Z")]
+        cand = self._corral(newest_file_mtime="2026-04-26 02:00")
+        m = match_candidate(cand, fires)
+        assert m and m.method == "unit_id"
+        other = [_fire("corrals", "Corrals", "NM", created_on="2026-09-17T19:53:09Z")]
+        pinned = match_candidate(cand, other, {"southwest/2026/2026_Corral": "corrals"})
+        assert pinned and pinned.method == "override"
+
+    def test_file_mtimes_beat_directory_mtimes(self):
+        # A touched directory must not resurrect a stale folder; with no files
+        # listed (IR-only folders) the directory stamps stand in.
+        stale_files = self._corral(dir_mtime="2026-09-18 01:00",
+                                   newest_dir_mtime="2026-09-18 01:00",
+                                   newest_file_mtime="2026-04-26 02:00")
+        assert stale_files.newest_activity == "2026-04-26 02:00"
+        dirs_only = self._corral(dir_mtime="2026-04-24 18:11",
+                                 newest_dir_mtime="2026-04-25 07:30")
+        assert dirs_only.newest_activity == "2026-04-25 07:30"
+        assert self._corral().newest_activity is None
+
+    def test_fire_without_created_on_is_not_vetoed(self):
+        fires = [_fire("corrals", "Corrals", "NM")]
+        cand = self._corral(newest_file_mtime="2026-04-26 02:00")
+        assert match_candidate(cand, fires) is not None
 
 
 # ---------------------------------------------------------------------------
