@@ -44,6 +44,7 @@ function histBoxForIncidents(
   return c ? [c[0] - 0.6, c[1] - 0.5, c[0] + 0.6, c[1] + 0.5] : null;
 }
 import { hotspotLayer } from './layers/hotspotLayer';
+import { hotspotFlamesLayer } from './layers/hotspotFlamesLayer';
 import { spreadForecastLayer } from './layers/spreadForecastLayer';
 import { weatherLayers } from './layers/weatherLayers';
 import { windArrowsLayer } from './layers/windArrowsLayer';
@@ -72,6 +73,7 @@ const MANAGERS: LayerManager[] = [
   historicPerimetersLayer,
   perimeterLayer,
   hotspotLayer,
+  hotspotFlamesLayer,
   firePinsLayer,
   drawLayer,
   terrainControl,
@@ -297,7 +299,7 @@ export function useMapLayerSync(): boolean {
       const st = useStore.getState();
       if (st.draw.tool !== 'none') return;
       const d = st.directions;
-      if (!d.armed && !d.a && !d.b) return; // idle browsing — clicks are clicks
+      if (!d.armed && !d.a && !d.b) return; // idle browsing — panels/DroppedPin's click
       const p = {
         coords: [e.lngLat.lng, e.lngLat.lat] as [number, number],
         label: `${e.lngLat.lat.toFixed(5)}, ${e.lngLat.lng.toFixed(5)}`,

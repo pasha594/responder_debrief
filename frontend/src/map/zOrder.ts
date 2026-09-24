@@ -42,6 +42,7 @@ export const RD_LAYER_ORDER = [
   'rd-perimeter-fill',
   'rd-perimeter-line',
   'rd-hotspots',
+  'rd-hotspot-flames', // custom 3D layer: flames stand on the freshest dots
   'rd-fire-pins',
   // user annotations (Draw tab) ride above every data layer
   'rd-draw-line',
@@ -83,23 +84,53 @@ export function beforeIdFor(map: MlMap, id: RdLayerId): string | undefined {
   return undefined;
 }
 
-/** Re-assert canonical order (after style swaps or out-of-order adds). */
-export function ensureOrder(map: MlMap): void {
-  const symbolId = firstSymbolLayerId(map);
-  const ids = RD_LAYER_ORDER.filter((id) => map.getLayer(id));
+/** The canonical placement, as moves — applied to the map, or to a plain
+ * array first to find out whether anything would actually change. */
+function placeCanonically(
+  ids: readonly RdLayerId[],
+  symbolId: string | undefined,
+  move: (id: string, beforeId?: string) => void,
+): void {
   // Place top→bottom within each group so every move targets a settled layer.
   let prevAbove: string | undefined;
   for (let i = ids.length - 1; i >= 0; i--) {
     const id = ids[i];
     if (BELOW_LABELS.has(id)) continue;
-    map.moveLayer(id, prevAbove);
+    move(id, prevAbove);
     prevAbove = id;
   }
   let prevBelow = symbolId;
   for (let i = ids.length - 1; i >= 0; i--) {
     const id = ids[i];
     if (!BELOW_LABELS.has(id)) continue;
-    map.moveLayer(id, prevBelow);
+    move(id, prevBelow);
     prevBelow = id;
   }
+}
+
+/**
+ * Re-assert canonical order (after style swaps or out-of-order adds).
+ *
+ * It must touch nothing when the order is already right. MapRoot runs this on
+ * every 'styledata', and MapLibre's moveLayer marks the style changed even
+ * when the layer does not move — which fires 'styledata' again on the next
+ * frame. Moving unconditionally made that an endless loop: after the first
+ * style change of a session (a layer toggle, a timeline tick) the map redrew
+ * itself ~30×/s forever, with nothing on screen changing.
+ */
+export function ensureOrder(map: MlMap): void {
+  const symbolId = firstSymbolLayerId(map);
+  // getLayersOrder, not getStyle().layers: the serialized style leaves custom
+  // layers (the hotspot flames) out.
+  const order = map.getLayersOrder();
+  const ids = RD_LAYER_ORDER.filter((id) => order.includes(id));
+
+  const want = order.slice();
+  placeCanonically(ids, symbolId, (id, beforeId) => {
+    want.splice(want.indexOf(id), 1);
+    want.splice(beforeId ? want.indexOf(beforeId) : want.length, 0, id);
+  });
+  if (want.every((id, i) => id === order[i])) return;
+
+  placeCanonically(ids, symbolId, (id, beforeId) => map.moveLayer(id, beforeId));
 }
