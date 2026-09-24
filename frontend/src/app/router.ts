@@ -10,7 +10,6 @@
  * read first and immediately rewritten to the path form.
  */
 import { useEffect, useState } from 'react';
-import { trackPageview } from './analytics';
 
 const BASE = import.meta.env.BASE_URL; // '/' in dev, '/responder_debrief/' on Pages
 
@@ -70,10 +69,10 @@ export function navNotify(): void {
 export function useRoute(): Route {
   const [route, setRoute] = useState<Route>(() => parseLocation());
   useEffect(() => {
-    trackPageview(); // initial load
+    // Pageviews are the PostHog SDK's own history autocapture (path changes
+    // only), see app/analytics.ts.
     const onChange = () => {
       setRoute(parseLocation());
-      trackPageview(); // dedupes internally on unchanged path
     };
     window.addEventListener('popstate', onChange);
     window.addEventListener(NAV_EVENT, onChange);

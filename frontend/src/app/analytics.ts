@@ -1,54 +1,50 @@
 /**
- * PostHog via its plain HTTP batch API — no SDK, no cookies, ~1 request per
- * 10 s of activity. Volume discipline is the design center: every event is a
- * DISCRETE user action from the explicit list below. Nothing continuous is
- * ever instrumented (scrubbing, playback ticks, pointer/camera moves, URL
- * writes), and two backstops guarantee usage can't run away even if a noisy
- * call site slips in later:
- *   - rate limiter: at most MAX_PER_MINUTE events/min, MAX_PER_SESSION/page
- *     load — beyond that events are silently dropped;
- *   - per-view dedupe: `trackOncePer(scope, ...)` logs an event once per
- *     scope (e.g. once per fire view), used for anything a user can repeat
- *     rapidly (draw strokes, play/pause).
+ * PostHog, through its official browser SDK, loaded late so it never
+ * competes with the first paint: the SDK is dynamically imported once the
+ * page has loaded and the browser goes idle. Calls made before then queue in
+ * memory and replay on init.
+ *
+ * The SDK brings sessions, pageviews on PATH changes (the share-state sync's
+ * query-string rewrites never count — see its history autocapture), page
+ * leave, device and referrer properties, click autocapture, and session
+ * replay (recording also needs replay switched on in the PostHog project).
+ *
+ * Our explicit events keep their names and call sites. Two backstops from the
+ * hand-rolled client still guard them — a noisy call site can't flood:
+ *   - rate limiter: at most MAX_PER_MINUTE explicit events a minute and
+ *     MAX_PER_PAGE_LOAD per page load, beyond which they are dropped;
+ *   - per-view dedupe: `trackOncePer(scope, ...)` logs an action once per
+ *     scope (e.g. once per fire view), for anything a user repeats rapidly.
+ *
  * Disabled entirely without a key (dev builds log to console.debug instead).
  */
+import type { PostHog } from 'posthog-js';
 
 const KEY = import.meta.env.VITE_POSTHOG_KEY as string | undefined;
 const HOST = (import.meta.env.VITE_POSTHOG_HOST as string | undefined) ?? 'https://us.i.posthog.com';
 
+/** PostHog's dated behavior snapshot: pins SDK defaults until we opt into a
+ * newer one. Among others it sets pageview capture to 'history_change'. */
+export const POSTHOG_DEFAULTS = '2026-08-30';
+
 const MAX_PER_MINUTE = 30;
-const MAX_PER_SESSION = 300;
-const FLUSH_MS = 10_000;
-const FLUSH_AT = 10;
+const MAX_PER_PAGE_LOAD = 300;
+/** Pre-load queue bound: the SDK normally arrives within seconds. */
+const MAX_PENDING = 100;
+/** Fallback delay where requestIdleCallback is missing (Safari). */
+const IDLE_FALLBACK_MS = 1500;
+const IDLE_TIMEOUT_MS = 3000;
 
-interface QueuedEvent {
-  event: string;
-  properties: Record<string, unknown>;
-  timestamp: string;
-}
-
-let queue: QueuedEvent[] = [];
-let flushTimer: ReturnType<typeof setTimeout> | null = null;
-let sessionCount = 0;
+let client: PostHog | null = null;
+let pending: [string, Record<string, unknown>][] = [];
+let loading: Promise<void> | null = null;
+let pageLoadCount = 0;
 let minuteCount = 0;
 let minuteStart = 0;
 const oncePerScope = new Map<string, Set<string>>();
 
-function distinctId(): string {
-  try {
-    let id = localStorage.getItem('rd_did');
-    if (!id) {
-      id = crypto.randomUUID();
-      localStorage.setItem('rd_did', id);
-    }
-    return id;
-  } catch {
-    return 'anon';
-  }
-}
-
 function allowed(): boolean {
-  if (sessionCount >= MAX_PER_SESSION) return false;
+  if (pageLoadCount >= MAX_PER_PAGE_LOAD) return false;
   const now = Date.now();
   if (now - minuteStart > 60_000) {
     minuteStart = now;
@@ -56,33 +52,8 @@ function allowed(): boolean {
   }
   if (minuteCount >= MAX_PER_MINUTE) return false;
   minuteCount += 1;
-  sessionCount += 1;
+  pageLoadCount += 1;
   return true;
-}
-
-function send(body: string, beacon: boolean): void {
-  const url = `${HOST}/batch/`;
-  if (beacon && navigator.sendBeacon) {
-    navigator.sendBeacon(url, body);
-    return;
-  }
-  void fetch(url, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body,
-    keepalive: true,
-  }).catch(() => undefined);
-}
-
-function flush(beacon = false): void {
-  if (flushTimer) {
-    clearTimeout(flushTimer);
-    flushTimer = null;
-  }
-  if (!queue.length || !KEY) return;
-  const body = JSON.stringify({ api_key: KEY, batch: queue });
-  queue = [];
-  send(body, beacon);
 }
 
 /** One discrete user action. Silently dropped beyond the rate limits. */
@@ -92,13 +63,8 @@ export function track(event: string, properties: Record<string, unknown> = {}): 
     return;
   }
   if (!allowed()) return;
-  queue.push({
-    event,
-    properties: { distinct_id: distinctId(), ...properties },
-    timestamp: new Date().toISOString(),
-  });
-  if (queue.length >= FLUSH_AT) flush();
-  else if (!flushTimer) flushTimer = setTimeout(() => flush(), FLUSH_MS);
+  if (client) client.capture(event, properties);
+  else if (pending.length < MAX_PENDING) pending.push([event, properties]);
 }
 
 /** Once per (scope, event+detail) — for actions a user repeats rapidly.
@@ -123,33 +89,69 @@ export function resetScope(scope: string): void {
   oncePerScope.delete(scope);
 }
 
-/** Pageview on PATH change only — search-param rewrites (share-state URL
- * sync) must never count. */
-let lastPath: string | null = null;
-export function trackPageview(): void {
-  const path = window.location.pathname;
-  if (path === lastPath) return;
-  lastPath = path;
-  track('$pageview', { $current_url: window.location.origin + path });
+function load(): Promise<void> {
+  if (!KEY) return Promise.resolve();
+  loading ??= (async () => {
+    try {
+      const { default: posthog } = await import('posthog-js');
+      posthog.init(KEY, {
+        api_host: HOST,
+        defaults: POSTHOG_DEFAULTS,
+        // localStorage only: no cookies, as before the SDK.
+        persistence: 'localStorage',
+      });
+      client = posthog;
+      // Queued events replay WITHOUT their original timestamps on purpose:
+      // they predate the session the SDK just started, and PostHog drops
+      // events that are older than their session's id from session stats.
+      const queued = pending;
+      pending = [];
+      for (const [event, properties] of queued) posthog.capture(event, properties);
+      try {
+        localStorage.removeItem('rd_did'); // the hand-rolled client's device id
+      } catch {
+        /* storage blocked */
+      }
+    } catch {
+      // Blocked by an extension, or offline before the chunk was ever cached.
+      // Analytics is best-effort: allow one retry when connectivity returns.
+      loading = null;
+      if (typeof window !== 'undefined') {
+        window.addEventListener('online', () => void load(), { once: true });
+      }
+    }
+  })();
+  return loading;
 }
 
-// Guarded for node test environments that stub a partial `window`.
-if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
-  window.addEventListener('pagehide', () => flush(true));
-  document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'hidden') flush(true);
-  });
+/** Load the SDK once the page has loaded and the browser is idle. */
+export function startAnalytics(): void {
+  if (!KEY || typeof window === 'undefined') return;
+  const whenIdle = () => {
+    const ric = (window as Window & {
+      requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => number;
+    }).requestIdleCallback;
+    if (ric) ric(() => void load(), { timeout: IDLE_TIMEOUT_MS });
+    else setTimeout(() => void load(), IDLE_FALLBACK_MS);
+  };
+  if (document.readyState === 'complete') whenIdle();
+  else window.addEventListener('load', whenIdle, { once: true });
 }
 
-/** Test seam. */
+/** Test seams. */
 export function _resetForTest(): void {
-  queue = [];
-  sessionCount = 0;
+  client = null;
+  pending = [];
+  loading = null;
+  pageLoadCount = 0;
   minuteCount = 0;
   minuteStart = 0;
-  lastPath = null;
   oncePerScope.clear();
 }
-export function _sessionCountForTest(): number {
-  return sessionCount;
+export function _pageLoadCountForTest(): number {
+  return pageLoadCount;
 }
+export function _pendingCountForTest(): number {
+  return pending.length;
+}
+export const _loadForTest = load;

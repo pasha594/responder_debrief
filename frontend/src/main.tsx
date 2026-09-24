@@ -33,6 +33,7 @@ import './app/tokens.css'; // includes vendored @font-face (public/fonts/*.woff2
 
 import { App } from './app/App';
 import { initOfflinePacks, installOfflineFetch } from './offline/packs';
+import { startAnalytics } from './app/analytics';
 
 // Offline packs: wrap fetch before anything (map, queries) issues a request,
 // then hydrate the pack index from OPFS in the background.
@@ -69,3 +70,6 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
     </QueryClientProvider>
   </React.StrictMode>,
 );
+
+// Analytics last: the PostHog SDK loads once the page is up and idle.
+startAnalytics();
