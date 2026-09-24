@@ -2,15 +2,14 @@
  * Dropped pin, Google Maps' way: on an idle map (no draw tool armed, the
  * directions flow not engaged) a plain click drops a pin and opens a card at
  * the bottom of the visible map with the spot's coordinates, its street
- * address when it has one (rare out on a fire), and Directions — which routes
- * there from the user's current location. The next click anywhere on the map
- * only dismisses the pin; the one after drops a new one. Click rules live in
- * map/pinDrop.ts.
+ * address when it has one (rare out on a fire), and Directions — which opens
+ * the route search with the pin as the destination. The next click anywhere
+ * on the map only dismisses the pin; the one after drops a new one. Click
+ * rules live in map/pinDrop.ts.
  */
 import { useEffect, useRef } from 'react';
 import { Marker, type MapMouseEvent } from 'maplibre-gl';
 import { useStreetAddress } from '../api/queries';
-import { MY_LOCATION_LABEL, geolocationAvailable, locateOnce } from '../app/geolocation';
 import { track, trackOncePer } from '../app/analytics';
 import { useMap } from '../map/MapRoot';
 import {
@@ -20,6 +19,8 @@ import {
   pinClickAction,
 } from '../map/pinDrop';
 import { useStore } from '../state/store';
+import { useIsDesktop } from '../utils/useMediaQuery';
+import { focusRouteStart } from './SearchDirectionsControl';
 
 /** Long enough to tell a click from the first half of a double-click. */
 const CLICK_HOLD_MS = 300;
@@ -58,6 +59,7 @@ export function DroppedPin() {
   const sheetSnap = useStore((s) => s.ui.sheetSnap);
   const rail = useStore((s) => s.ui.sidebarCollapsed);
   const actions = useStore((s) => s.actions);
+  const isDesktop = useIsDesktop();
   const { data: address } = useStreetAddress(pin, online);
   const cardRef = useRef<HTMLElement>(null);
 
@@ -151,30 +153,14 @@ export function DroppedPin() {
   if (!pin) return null;
   const coords = `${pin[1].toFixed(5)}, ${pin[0].toFixed(5)}`;
 
-  // Destination = the pin (setting it clears the pin); start = my location,
-  // live-followed like the search bar's own "use my location".
+  // The pin becomes the destination (which clears it) and the route search
+  // waits on an empty start: type a place, click the map for another pin, or
+  // take the location target beside the field. The cursor goes there too,
+  // except on phones, where it would pop the keyboard over the map.
   const directionsHere = () => {
     track('pin_directions');
     actions.setDirectionsPoint('b', { coords: pin, label: address?.line1 ?? coords });
-    const startHere = (from: [number, number]) => {
-      useStore.getState().actions.setDirectionsPoint('a', { coords: from, label: MY_LOCATION_LABEL });
-      track('location_used', { context: 'pin' });
-    };
-    const fix = useStore.getState().location.coords;
-    if (fix) {
-      startHere(fix);
-      return;
-    }
-    if (!geolocationAvailable()) return; // the empty start field asks instead
-    locateOnce()
-      .then(({ coords: from }) => {
-        // Only if this is still the route the button started, start unfilled.
-        const d = useStore.getState().directions;
-        if (d.b?.coords === pin && !d.a) startHere(from);
-      })
-      .catch(() => {
-        useStore.getState().actions.showToast('Location unavailable — check browser permissions');
-      });
+    if (isDesktop) focusRouteStart();
   };
 
   return (

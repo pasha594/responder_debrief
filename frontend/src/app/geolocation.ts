@@ -5,9 +5,6 @@
 
 export type LonLat = [number, number];
 
-/** Route-endpoint label meaning "follow my live location" (see SearchDirectionsControl). */
-export const MY_LOCATION_LABEL = 'My location';
-
 const OPTS: PositionOptions = {
   enableHighAccuracy: true,
   timeout: 12_000,

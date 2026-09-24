@@ -6,7 +6,7 @@
  * a pin is dragged. Drive-time rings (15/30/60 min) draw automatically
  * around A. Endpoints are draggable Markers.
  */
-import { useEffect, useRef, useState } from 'react';
+import { createRef, useEffect, useRef, useState, type RefObject } from 'react';
 import { Marker } from 'maplibre-gl';
 import { searchPlaces, type PlaceHit } from '../api/geocode';
 import {
@@ -16,18 +16,25 @@ import {
   type RouteProfile,
 } from '../api/routing';
 import { RANGE_COLORS } from '../map/layers/rangeLayer';
-import {
-  MY_LOCATION_LABEL,
-  geolocationAvailable,
-  locateOnce,
-  watchLocation,
-} from '../app/geolocation';
+import { geolocationAvailable, locateOnce, watchLocation } from '../app/geolocation';
 import { track } from '../app/analytics';
 import { useStore } from '../state/store';
 import { useMap } from '../map/MapRoot';
 
+const MY_LOCATION_LABEL = 'My location';
 const DEBOUNCE_MS = 350;
 const MIN_CHARS = 3;
+
+/** The start (A) field. Only the fire map mounts this control, so one
+ * module-level ref is enough. */
+const startInput = createRef<HTMLInputElement>();
+
+/** Cursor into the start field — the dropped pin's "Directions" hands the
+ * user straight to it. Call it from the click itself, as a tap on the field
+ * would: touch browsers only move focus during a user gesture. */
+export function focusRouteStart(): void {
+  startInput.current?.focus();
+}
 
 function fmtDistance(m: number): string {
   const mi = m / 1609.344;
@@ -55,12 +62,14 @@ function PlaceInput({
   onPick,
   onClear,
   onFocusChange,
+  inputRef,
 }: {
   placeholder: string;
   value: string;
   onPick: (hit: PlaceHit) => void;
   onClear?: () => void;
   onFocusChange?: (focused: boolean) => void;
+  inputRef?: RefObject<HTMLInputElement>;
 }) {
   const [text, setText] = useState(value);
   const [hits, setHits] = useState<PlaceHit[]>([]);
@@ -130,6 +139,7 @@ function PlaceInput({
   return (
     <div className="rd-place-input">
       <input
+        ref={inputRef}
         type="text"
         value={text}
         placeholder={placeholder}
@@ -516,6 +526,7 @@ export function SearchDirectionsControl() {
               <span className="rd-route-pin rd-route-pin--a rd-sd-badge">A</span>
             )}
             <PlaceInput
+              inputRef={startInput}
               placeholder="Search place or coordinates"
               value={directions.a?.label ?? ''}
               onPick={setPoint('a')}
