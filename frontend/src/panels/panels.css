@@ -1047,10 +1047,10 @@
      the map. (It out-stacks the sidebar at z-index 25, so without this offset
      it paints on top of the panel instead.) */
   right: calc(var(--sidebar-w) + 12px);
-  /* The corner stacks attribution, then the scale bar with the compass on
-     top, then this card: the scale bar's 42px + its 28px height + the
-     compass's 6px gap and 29px button + 8px gap. */
-  bottom: calc(var(--timeline-h) + 113px);
+  /* The corner stacks attribution, then the scale bar with the compass dial
+     on top, then this card: the scale bar's 42px + its 28px height + the
+     dial's 6px gap and 44px + 8px gap. */
+  bottom: calc(var(--timeline-h) + 128px);
   z-index: 25;
   max-width: 260px;
   padding: 8px 10px;
@@ -1118,11 +1118,64 @@
   align-items: flex-end;
 }
 
-/* Compass above the scale bar: MapLibre's control, the same look as the zoom
-   buttons. The stack ignores pointers, the compass takes them. */
+/* Compass dial above the scale bar, on the overlays' translucent ground.
+   The stack ignores pointers; the dial takes them. */
 .rd-compass {
+  --compass-north: #e5484d;
+  box-sizing: border-box;
+  width: 44px;
+  height: 44px;
   margin-bottom: 6px;
+  padding: 0;
   pointer-events: auto;
+  cursor: grab;
+  touch-action: none; /* a drag turns the map; it never scrolls the page */
+  color: var(--color-text);
+  background: var(--overlay-bg);
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+  border: 1px solid var(--color-border);
+  border-radius: 50%;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
+}
+.rd-compass:active {
+  cursor: grabbing;
+}
+.rd-compass:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+.rd-compass svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.rd-compass-tick {
+  fill: none;
+  stroke: var(--color-text-muted);
+  stroke-width: 1;
+  stroke-linecap: round;
+}
+.rd-compass-tick--major {
+  stroke: var(--color-text);
+  stroke-width: 1.4;
+}
+.rd-compass-tick--cardinal {
+  stroke: var(--color-text);
+  stroke-width: 1.6;
+}
+.rd-compass-north {
+  fill: var(--compass-north);
+}
+.rd-compass-n {
+  fill: none;
+  stroke: var(--color-text);
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.rd-compass-pin {
+  fill: var(--color-text-muted);
 }
 
 /* MapLibre's own bottom-right corner (the attribution) belongs to the
