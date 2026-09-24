@@ -41,6 +41,10 @@ export function mapStyleDef(theme: 'dark' | 'light', id: string): MapStyleDef {
 /** Playback speed default: model-hours advanced per wall-clock second. */
 export const DEFAULT_PLAYBACK_SPEED = 10;
 
+/** The ground a fire map opens on (the Map / Satellite / Topo pills). Share
+ * links carry `bm` only when the view differs from it. */
+export const DEFAULT_BASEMAP: 'map' | 'satellite' | 'topo' = 'topo';
+
 /** Hotspot fetch settings. */
 export const HOTSPOT_LIMIT = 50000;
 export const HOTSPOT_NATIONAL_MIN_ZOOM = 6;

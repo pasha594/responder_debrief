@@ -21,7 +21,7 @@ function mkState(): AppState {
       incidentMap: { mapId: null, series: null, opacity: 0.75 },
       irFlight: { flightId: null },
     },
-    ui: { basemap: 'map' },
+    ui: { basemap: 'topo' }, // DEFAULT_BASEMAP
   } as unknown as AppState;
 }
 
@@ -91,6 +91,16 @@ describe('urlState buildSearch/decodeSearch', () => {
       series: 'ops|Ops Map|landscape',
       irFlight: '20260819_c0800_Aircraft3',
     });
+  });
+
+  it('encodes the vector Map explicitly now that Topo is the default', () => {
+    const s = mkState();
+    const mapView: AppState = { ...s, ui: { ...s.ui, basemap: 'map' } };
+    expect(buildSearch(mapView)).toBe('?bm=map');
+    expect(decodeSearch('?bm=map').basemap).toBe('map');
+    // links shared while Map was the default carry bm=topo — still honored
+    expect(decodeSearch('?bm=topo').basemap).toBe('topo');
+    expect(decodeSearch('?').basemap).toBeUndefined();
   });
 
   it('drops invalid values instead of importing them', () => {

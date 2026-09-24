@@ -5,7 +5,7 @@
  */
 import { create } from 'zustand';
 import { resetScope, track, trackOncePer } from '../app/analytics';
-import { DEFAULT_PLAYBACK_SPEED } from '../app/config';
+import { DEFAULT_BASEMAP, DEFAULT_PLAYBACK_SPEED } from '../app/config';
 import type { Percentile, SpreadProduct, WeatherProduct } from '../api/types';
 import { TOA_DEFAULT_WITHIN_HOURS } from '../spread/toaBands';
 import type { DirectoryFilter, DirectoryNear, DirectorySort, DirectorySortKey } from '../directory/rowModel';
@@ -331,7 +331,7 @@ export const useStore = create<AppState>((set, get) => ({
         ? ((document.documentElement.dataset.theme as 'dark' | 'light') ?? 'dark')
         : 'dark',
     sidebarTab: 'overview',
-    basemap: 'map',
+    basemap: DEFAULT_BASEMAP,
     sidebarCollapsed: false,
     sheetSnap: 'peek',
     legendKey: null,

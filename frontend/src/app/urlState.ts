@@ -13,12 +13,13 @@
  *   ri 1 → road incidents shown
  *   wx  visible weather products, dot-separated: tmpf.rh
  *   ff  fire forecast: {product}.{percentile}, e.g. time-of-arrival.50
- *   bm  basemap: satellite | topo
+ *   bm  basemap: map | satellite | topo (absent = DEFAULT_BASEMAP, topo)
  *   map single map-sheet overlay (sheet id)
  *   mv  map-sheet version series on the timeline (series key)
  *   ir  IR flight shown on the map
  */
 import type { AppState } from '../state/store';
+import { DEFAULT_BASEMAP } from './config';
 import type { Percentile, SpreadProduct, WeatherProduct } from '../api/types';
 import { RENDERED_WEATHER_PRODUCTS } from '../api/types';
 
@@ -40,7 +41,7 @@ export interface UrlViewState {
   incidents?: true;
   weather?: WeatherProduct[];
   spread?: { product: SpreadProduct; percentile: Percentile };
-  basemap?: 'satellite' | 'topo';
+  basemap?: 'map' | 'satellite' | 'topo';
   mapId?: string;
   series?: string;
   irFlight?: string;
@@ -80,7 +81,7 @@ export function buildSearch(s: AppState): string {
   if (s.layers.spread.visible) {
     q.set('ff', `${s.layers.spread.product}.${s.layers.spread.percentile}`);
   }
-  if (s.ui.basemap !== 'map') q.set('bm', s.ui.basemap);
+  if (s.ui.basemap !== DEFAULT_BASEMAP) q.set('bm', s.ui.basemap);
   if (s.layers.incidentMap.series) q.set('mv', s.layers.incidentMap.series);
   else if (s.layers.incidentMap.mapId) q.set('map', s.layers.incidentMap.mapId);
   if (s.layers.irFlight.flightId) q.set('ir', s.layers.irFlight.flightId);
@@ -124,7 +125,8 @@ export function decodeSearch(search: string): UrlViewState {
   }
 
   const bm = q.get('bm');
-  if (bm === 'satellite' || bm === 'topo') out.basemap = bm;
+  // 'topo' still decodes: links shared while Map was the default carry it.
+  if (bm === 'map' || bm === 'satellite' || bm === 'topo') out.basemap = bm;
 
   const mv = q.get('mv');
   const map = q.get('map');

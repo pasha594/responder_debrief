@@ -46,7 +46,7 @@ const PERCENTILES = [10, 30, 50, 70, 90];
 const WEATHER_PRODUCTS = [
   'tmpf', 'rh', 'ws', 'wg', 'ffwi', 'smoke', 'apcp01',
 ];
-const BASEMAPS = ['satellite', 'topo'];
+const BASEMAPS = ['map', 'satellite', 'topo']; // topo is the app default
 const TIME_RE = /^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})Z$/;
 const FIRE_QUERY_PARAMS = [
   't', 'hs', 'pm', 'hist', 'tr', 'ri', 'wx', 'ff', 'bm', 'map', 'mv', 'ir',
