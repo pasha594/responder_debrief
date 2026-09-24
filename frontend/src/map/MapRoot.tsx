@@ -123,6 +123,19 @@ export function MapRoot({ children }: { children: ReactNode }) {
     map.on('styledata', () => {
       if (map.isStyleLoaded()) ensureOrder(map);
     });
+    // MapLibre 5.x bug, fixed in 6: on 3D terrain every easeTo / flyTo /
+    // fitBounds sets `_elevationFreeze` and never clears it (only the
+    // `freezeElevation: true` path does), so the camera stops following the
+    // ground until the next drag or wheel gesture. Its elevation goes stale,
+    // and once it sits above the real ground every basemap label fails the
+    // terrain depth test and vanishes. Clear it when the animation ends, as
+    // MapLibre 6 does. Drop this after upgrading.
+    map.on('moveend', () => {
+      const cam = map as unknown as { _elevationFreeze?: boolean };
+      if (!cam._elevationFreeze || map.isMoving()) return;
+      cam._elevationFreeze = false;
+      map.triggerRepaint(); // the next frame re-reads the ground elevation
+    });
     return () => {
       ro.disconnect();
       mapRef.current = null;
