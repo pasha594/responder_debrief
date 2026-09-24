@@ -273,6 +273,25 @@ function fetchGrid(url: string): Promise<WindUvGrid | null> {
   return p;
 }
 
+/** A U/V grid someone already downloaded (the arrows, or the flames). */
+export function cachedWindGrid(url: string): WindUvGrid | undefined {
+  return gridCache.get(url);
+}
+
+/** Download a U/V grid once, sharing the arrows' cache and in-flight requests. */
+export function loadWindGrid(url: string): Promise<WindUvGrid | null> {
+  return fetchGrid(url);
+}
+
+/** Bilinear U/V (m/s) at a longitude/latitude; null over nodata. */
+export function windAtLngLat(
+  grid: WindUvGrid,
+  lon: number,
+  lat: number,
+): { u: number; v: number } | null {
+  return sampleWind(grid, lon, mercY(lat));
+}
+
 /** Speed→size ramp at one zoom tier (3 mph → lo, 50 mph → hi). */
 function speedSize(lo: number, hi: number): unknown[] {
   return ['interpolate', ['linear'], ['get', 'speed'], 3, lo, 50, hi];

@@ -23,12 +23,26 @@
  *  - when nothing falls inside the 12 h window it stays paused even while
  *    the camera moves; the library also holds still when no flame is in
  *    view, below its min zoom, and for people who ask for reduced motion.
+ *
+ * The tips lean with the wind at the playhead (see flameWind.ts): the
+ * timeline strip's hourly wind at the fire origin, or HRRR at the present.
  */
 import type { CustomLayerInterface, Map as MlMap } from 'maplibre-gl';
 import type { HotspotFeatureCollection } from '../../api/types';
+import { windUvUrl } from '../../api/wmsUrls';
+import { resolveWeatherFrame } from '../../timeline/framePlan';
 import { beforeIdFor } from '../zOrder';
-import type { LayerManager } from '../layerTypes';
+import type { LayerContext, LayerManager } from '../layerTypes';
 import { FireLayer } from '../vendor/fire-layer/fire-layer.js';
+import {
+  flameWindOption,
+  isAtPresent,
+  sameFlameWind,
+  windAtTime,
+  windFromUv,
+  type FlameWindOption,
+} from './flameWind';
+import { cachedWindGrid, loadWindGrid, windAtLngLat } from './windArrowsLayer';
 
 const LYR = 'rd-hotspot-flames';
 
@@ -125,6 +139,45 @@ let settleTimer: ReturnType<typeof setTimeout> | null = null;
 let animating = false;
 let lastCurrentTime: number | null = null;
 let lastNow: number | null = null;
+let lastWind: FlameWindOption | null = null;
+/** Latest context, for an HRRR grid that lands after update() returned. */
+let windCtx: LayerContext | null = null;
+/** HRRR grids that failed to load — the strip's wind covers those hours. */
+const failedGrids = new Set<string>();
+
+/**
+ * Lean the tips with the wind at the playhead, at the fire origin: the timeline
+ * strip's hourly wind anywhere on the timeline, and at the present HRRR's
+ * current hour (the wind arrows' grid) once it is downloaded. Until it lands,
+ * or when no HRRR run covers the hour, the strip's wind stands in.
+ */
+function syncWind(ctx: LayerContext): void {
+  if (!fire) return;
+  windCtx = ctx;
+  let wind = windAtTime(ctx.originWeather, ctx.currentTime);
+  const coords = ctx.originCoords;
+  const run = ctx.weatherRun;
+  if (coords && run && isAtPresent(ctx.currentTime, ctx.now)) {
+    const frame = resolveWeatherFrame(run, ctx.currentTime);
+    const url = frame ? windUvUrl(run, frame.hourIso) : null;
+    if (url && !failedGrids.has(url)) {
+      const grid = cachedWindGrid(url);
+      if (grid) {
+        const uv = windAtLngLat(grid, coords[0], coords[1]);
+        if (uv) wind = windFromUv(uv.u, uv.v);
+      } else {
+        void loadWindGrid(url).then((g) => {
+          if (!g) failedGrids.add(url);
+          else if (windCtx) syncWind(windCtx);
+        });
+      }
+    }
+  }
+  const opt = flameWindOption(wind);
+  if (sameFlameWind(opt, lastWind)) return;
+  lastWind = opt;
+  fire.setOptions({ wind: opt });
+}
 
 /**
  * Run the flames' own repaint loop only while something is burning and the
@@ -188,6 +241,8 @@ export const hotspotFlamesLayer: LayerManager = {
     animating = false;
     lastCurrentTime = null;
     lastNow = null;
+    lastWind = null;
+    windCtx = null;
     clearSettle();
     ensureLayer(map);
     onStyleData = () => {
@@ -220,6 +275,9 @@ export const hotspotFlamesLayer: LayerManager = {
     lastCurrentTime = ctx.currentTime;
     lastNow = ctx.now;
     if (scrubbed) poke();
+
+    // Before the minute early-out: wind follows the raw playhead and data.
+    syncWind(ctx);
 
     // Same clock as the circles: frozen at the present when scrubbed into
     // the future, quantized to the minute so repeat ticks are free.
@@ -254,5 +312,7 @@ export const hotspotFlamesLayer: LayerManager = {
     animating = false;
     lastCurrentTime = null;
     lastNow = null;
+    lastWind = null;
+    windCtx = null;
   },
 };

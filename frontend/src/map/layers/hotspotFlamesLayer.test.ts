@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Map as MlMap } from 'maplibre-gl';
-import type { HotspotFeatureCollection } from '../../api/types';
+import type { HotspotFeatureCollection, WeatherRun } from '../../api/types';
+import { windUvUrl } from '../../api/wmsUrls';
+import type { HourlyWeather } from '../../timeline/weatherStripModel';
 import type { LayerContext } from '../layerTypes';
 import {
   FLAME_MAX_AGE_MS,
@@ -39,10 +41,27 @@ const flames = vi.hoisted(() => {
     setTimeRange() {
       return this;
     }
+    wind: unknown = undefined;
+    setOptions(o: { wind?: unknown }) {
+      if ('wind' in o) this.wind = o.wind;
+      return this;
+    }
   }
   return { FakeFireLayer };
 });
 vi.mock('../vendor/fire-layer/fire-layer.js', () => ({ FireLayer: flames.FakeFireLayer }));
+
+// The HRRR grid cache the wind arrows own, as the flames see it.
+const hrrr = vi.hoisted(() => ({
+  cached: new Map<string, unknown>(),
+  load: vi.fn<(url: string) => Promise<unknown>>(),
+  uv: { u: 0, v: -10 } as { u: number; v: number } | null, // air moving south: from the north
+}));
+vi.mock('./windArrowsLayer', () => ({
+  cachedWindGrid: (url: string) => hrrr.cached.get(url),
+  loadWindGrid: (url: string) => hrrr.load(url),
+  windAtLngLat: () => hrrr.uv,
+}));
 
 const H = 3_600_000;
 const T0 = Date.parse('2026-09-18T12:00:00Z');
@@ -149,12 +168,14 @@ function ctx(
   data: number[] | HotspotFeatureCollection,
   now: number,
   currentTime = now,
+  extra: Partial<LayerContext> = {},
 ): LayerContext {
   return {
     layers: { hotspots: { visible: true } },
     hotspots: Array.isArray(data) ? fc(data) : data,
     currentTime,
     now,
+    ...extra,
   } as unknown as LayerContext;
 }
 
@@ -245,5 +266,70 @@ describe('flames move only with the camera or the playhead', () => {
     hotspotFlamesLayer.unmount(map);
     expect(fake.listenerCount('move')).toBe(0);
     expect(vi.getTimerCount()).toBe(0);
+  });
+});
+
+describe('flame tips lean with the wind at the playhead', () => {
+  let fake: ReturnType<typeof fakeMap>;
+  let map: MlMap;
+  const layer = () => flames.FakeFireLayer.last!;
+  const wind = () => layer().wind as { from: number; strength: number } | null | undefined;
+
+  const hour = (t: number, windMph: number, windFromDeg: number): HourlyWeather => ({
+    t, tempF: 70, code: 0, windMph, windFromDeg,
+  });
+  // The strip: 15 mph from the west all morning.
+  const originWeather = [hour(T0 - 2 * H, 15, 270), hour(T0 - H, 15, 270), hour(T0, 15, 270)];
+  const originCoords: [number, number] = [-120, 48];
+  const weatherRun = {
+    workspace: 'hrrr_test',
+    frames: {
+      hours: [new Date(T0).toISOString()],
+      wind_uv_template: '/frames/weather/{ws}/wind_uv/{epoch_ms}.json',
+    },
+  } as unknown as WeatherRun;
+  const hrrrUrl = windUvUrl(weatherRun, new Date(T0).toISOString())!;
+  const weather = { originWeather, originCoords, weatherRun };
+
+  beforeEach(() => {
+    hrrr.cached.clear();
+    hrrr.load.mockReset();
+    hrrr.load.mockResolvedValue(null);
+    fake = fakeMap();
+    map = fake as unknown as MlMap;
+    hotspotFlamesLayer.mount(map);
+  });
+  afterEach(() => hotspotFlamesLayer.unmount(map));
+
+  it("follows the strip's wind away from the present, without touching HRRR", () => {
+    hotspotFlamesLayer.update(map, ctx([T0 - 2 * H], T0, T0 - 90 * 60_000, weather));
+    expect(wind()!.from).toBeCloseTo(270);
+    expect(wind()!.strength).toBeCloseTo(0.5); // 15 of the 30 mph full lean
+    expect(hrrr.load).not.toHaveBeenCalled();
+  });
+
+  it("uses HRRR's current hour at the present once its grid is downloaded", () => {
+    hrrr.cached.set(hrrrUrl, {});
+    hotspotFlamesLayer.update(map, ctx([T0 - H], T0, T0, weather));
+    expect(wind()!.from).toBeCloseTo(0);
+    expect(wind()!.strength).toBeCloseTo(22.37 / 30, 2);
+  });
+
+  it("leans with the strip while HRRR downloads, then switches to it", async () => {
+    let land!: (grid: unknown) => void;
+    hrrr.load.mockImplementation(() => new Promise((r) => (land = r)));
+    hotspotFlamesLayer.update(map, ctx([T0 - H], T0, T0, weather));
+    expect(hrrr.load).toHaveBeenCalledWith(hrrrUrl);
+    expect(wind()!.from).toBeCloseTo(270);
+    hrrr.cached.set(hrrrUrl, {});
+    land({});
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(wind()!.from).toBeCloseTo(0);
+  });
+
+  it('keeps the flames upright with no wind data', () => {
+    hotspotFlamesLayer.update(map, ctx([T0 - H], T0));
+    expect(wind()).toBeUndefined();
   });
 });

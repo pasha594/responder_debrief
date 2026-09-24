@@ -22,6 +22,7 @@ import {
   useWeatherRuns,
 } from '../api/queries';
 import { useFireHotspots } from '../api/useFireHotspots';
+import { useOriginWeather } from '../api/openMeteo';
 import { HOTSPOT_BBOX_SNAP_DEG, HOTSPOT_NATIONAL_MIN_ZOOM } from '../app/config';
 import {
   boundsToLatFirst,
@@ -154,6 +155,11 @@ export function useMapLayerSync(): boolean {
   );
   const weatherRun = useMemo(() => latestWeatherRun(weatherRuns), [weatherRuns]);
 
+  // The timeline weather strip's own query (same key, one shared download):
+  // the hotspot flames lean with its hourly wind at the fire origin.
+  const domainStart = useStore((s) => s.time.domain[0]);
+  const { data: originWeather, coords: originCoords } = useOriginWeather(corneaId, domainStart);
+
   const { data: incidentManifest } = useIncidentManifest(
     catalogFire?.incident_manifest ?? null,
   );
@@ -218,6 +224,8 @@ export function useMapLayerSync(): boolean {
       spreadRun,
       weatherRun,
       incidentManifest,
+      originWeather,
+      originCoords,
       onSelectFire: actions.selectFire,
       onFrameError: () => {
         invalidateForecasts();
@@ -244,6 +252,8 @@ export function useMapLayerSync(): boolean {
       spreadRun,
       weatherRun,
       incidentManifest,
+      originWeather,
+      originCoords,
     ],
   );
 

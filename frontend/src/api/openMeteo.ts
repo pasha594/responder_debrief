@@ -50,11 +50,13 @@ async function fetchOriginWeather(
 /**
  * Hourly point weather at the selected fire's origin, spanning the timeline
  * domain. Null coords (fire still loading) → query disabled, strip hidden.
+ * `coords` is the [lon, lat] actually queried (rounded), so other readers of
+ * this data (the flames' wind) can sample other sources at the same point.
  */
 export function useOriginWeather(
   corneaId: string | null,
   domainStart: number,
-): { data: HourlyWeather[] | undefined } {
+): { data: HourlyWeather[] | undefined; coords: [number, number] | null } {
   const { data: catalog } = useMasterCatalog();
   const { data: fire } = useFire(corneaId);
 
@@ -80,5 +82,10 @@ export function useOriginWeather(
     gcTime: 60 * 60_000,
     retry: 1,
   });
-  return { data };
+  // Stable identity: callers put it in memo deps.
+  const queried = useMemo<[number, number] | null>(
+    () => (lat !== null && lon !== null ? [lon, lat] : null),
+    [lat, lon],
+  );
+  return { data, coords: queried };
 }

@@ -39,6 +39,10 @@ export interface LayerContext {
   spreadRun: PyrecastRun | null;
   weatherRun: WeatherRun | null;
   incidentManifest: IncidentManifest | undefined;
+  /** The timeline weather strip's hourly point weather at the fire origin. */
+  originWeather: import('../timeline/weatherStripModel').HourlyWeather[] | undefined;
+  /** [lon, lat] that point weather was queried at. */
+  originCoords: [number, number] | null;
 
   /** Callbacks up into app state. */
   onSelectFire: (corneaId: string) => void;
