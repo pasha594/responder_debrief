@@ -12,7 +12,6 @@ export function ReleaseNotesView() {
           ← All fires
         </a>
         <h1>Release notes</h1>
-        <p className="rd-sources-sub">What's new in Incibrief, day by day. Newest first.</p>
       </header>
       {RELEASE_NOTES.map((day) => (
         <section key={day.date} className="rd-release-day">
