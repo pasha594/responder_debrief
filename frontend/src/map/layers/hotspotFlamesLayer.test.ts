@@ -145,16 +145,20 @@ function fakeMap() {
   };
 }
 
-function ctx(times: number[], now: number): LayerContext {
+function ctx(
+  data: number[] | HotspotFeatureCollection,
+  now: number,
+  currentTime = now,
+): LayerContext {
   return {
     layers: { hotspots: { visible: true } },
-    hotspots: fc(times),
-    currentTime: now,
+    hotspots: Array.isArray(data) ? fc(data) : data,
+    currentTime,
     now,
   } as unknown as LayerContext;
 }
 
-describe('flames move only with the camera', () => {
+describe('flames move only with the camera or the playhead', () => {
   let fake: ReturnType<typeof fakeMap>;
   let map: MlMap;
   const layer = () => flames.FakeFireLayer.last!;
@@ -201,6 +205,36 @@ describe('flames move only with the camera', () => {
   it('stays still on camera moves when nothing is burning', () => {
     hotspotFlamesLayer.update(map, ctx([T0 - 30 * H], T0));
     fake.emit('move');
+    expect(layer().paused).toBe(true);
+    expect(layer().resumes).toBe(0);
+  });
+
+  it('animates while the timeline is scrubbed, then settles after FLAME_SETTLE_MS', () => {
+    const times = [T0 - 2 * H];
+    hotspotFlamesLayer.update(map, ctx(times, T0));
+    expect(layer().paused).toBe(true);
+    hotspotFlamesLayer.update(map, ctx(times, T0, T0 - H)); // drag back an hour
+    expect(layer().paused).toBe(false);
+    vi.advanceTimersByTime(FLAME_SETTLE_MS - 1);
+    hotspotFlamesLayer.update(map, ctx(times, T0, T0 - 90 * 60_000)); // still dragging
+    vi.advanceTimersByTime(FLAME_SETTLE_MS - 1);
+    expect(layer().paused).toBe(false);
+    vi.advanceTimersByTime(1);
+    expect(layer().paused).toBe(true);
+    expect(layer().resumes).toBe(1);
+  });
+
+  it('counts a scrub smaller than the minute the flames are quantized to', () => {
+    const data = fc([T0 - H]); // same query result both times, as in the app
+    hotspotFlamesLayer.update(map, ctx(data, T0));
+    hotspotFlamesLayer.update(map, ctx(data, T0, T0 - 10_000));
+    expect(layer().paused).toBe(false);
+  });
+
+  it('ignores the 60 s clock tick that keeps a live playhead at the present', () => {
+    const data = fc([T0 - H]);
+    hotspotFlamesLayer.update(map, ctx(data, T0));
+    hotspotFlamesLayer.update(map, ctx(data, T0 + 60_000)); // now and currentTime move together
     expect(layer().paused).toBe(true);
     expect(layer().resumes).toBe(0);
   });

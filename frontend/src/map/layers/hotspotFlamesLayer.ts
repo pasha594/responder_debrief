@@ -10,10 +10,11 @@
  * map (terrain, rasters, every circle) on every frame, and MapLibre's label
  * placement turns any frame cap set from inside the map back into full
  * speed. So the flames only move while the map is repainting anyway:
- *  - they animate while the camera moves (pan, zoom, tilt, rotate) and for
- *    FLAME_SETTLE_MS after it stops, then hold a still pose. Still flames
- *    stay drawn in 3D and cost nothing while the map is at rest, which also
- *    lets session replay skip the unchanged frames;
+ *  - they animate while the camera moves (pan, zoom, tilt, rotate) or the
+ *    playhead does (scrub, step, playback), and for FLAME_SETTLE_MS after
+ *    the last move, then hold a still pose. Still flames stay drawn in 3D
+ *    and cost nothing while the map is at rest, which also lets session
+ *    replay skip the unchanged frames;
  *  - the layer holds just the detections near the playhead (the 12 h window
  *    plus slack either side) and is re-fed when the playhead leaves that
  *    slack, so a fire's months of history never reach the GPU;
@@ -119,15 +120,16 @@ let index: FlameIndex = { features: [], times: new Float64Array(0) };
 let loaded: [number, number] | null = null;
 let lastTEff: number | null = null;
 let shown = false;
-let onMove: (() => void) | null = null;
 /** Pending end of the post-move settle: non-null while the flames may move. */
 let settleTimer: ReturnType<typeof setTimeout> | null = null;
 let animating = false;
+let lastCurrentTime: number | null = null;
+let lastNow: number | null = null;
 
 /**
  * Run the flames' own repaint loop only while something is burning and the
- * camera moved within the last FLAME_SETTLE_MS. Paused flames keep their
- * pose and are still drawn whenever the map repaints for any other reason.
+ * camera or playhead moved within the last FLAME_SETTLE_MS. Paused flames keep
+ * their pose and are still drawn whenever the map repaints for any other reason.
  */
 function syncAnimation(): void {
   if (!fire) return;
@@ -141,6 +143,20 @@ function syncAnimation(): void {
 function clearSettle(): void {
   if (settleTimer !== null) clearTimeout(settleTimer);
   settleTimer = null;
+}
+
+/**
+ * Camera or timeline activity: the flames may move until FLAME_SETTLE_MS after
+ * the latest one. Camera 'move' events and playback ticks arrive every frame,
+ * so a continuous gesture keeps pushing the deadline back until it stops.
+ */
+function poke(): void {
+  clearSettle();
+  settleTimer = setTimeout(() => {
+    settleTimer = null;
+    syncAnimation();
+  }, FLAME_SETTLE_MS);
+  syncAnimation();
 }
 
 function quantize(t: number): number {
@@ -170,23 +186,16 @@ export const hotspotFlamesLayer: LayerManager = {
     lastTEff = null;
     shown = false;
     animating = false;
+    lastCurrentTime = null;
+    lastNow = null;
     clearSettle();
     ensureLayer(map);
     onStyleData = () => {
       if (map.isStyleLoaded()) ensureLayer(map);
     };
     map.on('styledata', onStyleData);
-    // 'move' fires on every camera frame (pan, zoom, tilt, rotate, flyTo), so
-    // each one pushes the settle deadline back until the camera stops.
-    onMove = () => {
-      clearSettle();
-      settleTimer = setTimeout(() => {
-        settleTimer = null;
-        syncAnimation();
-      }, FLAME_SETTLE_MS);
-      syncAnimation();
-    };
-    map.on('move', onMove);
+    // 'move' fires on every camera frame: pan, zoom, tilt, rotate, flyTo.
+    map.on('move', poke);
   },
 
   update(map, ctx) {
@@ -201,6 +210,16 @@ export const hotspotFlamesLayer: LayerManager = {
       loaded = null; // whatever the layer holds is stale
       lastTEff = null;
     }
+
+    // A playhead move (scrub, step, playback) animates the flames like a camera
+    // move. The 60 s clock tick that keeps a live playhead pinned to the
+    // present moves currentTime together with now, so it does not count.
+    // Checked before the minute quantizing below: a small scrub still counts.
+    const scrubbed =
+      lastCurrentTime !== null && ctx.currentTime !== lastCurrentTime && ctx.now === lastNow;
+    lastCurrentTime = ctx.currentTime;
+    lastNow = ctx.now;
+    if (scrubbed) poke();
 
     // Same clock as the circles: frozen at the present when scrubbed into
     // the future, quantized to the minute so repeat ticks are free.
@@ -223,8 +242,7 @@ export const hotspotFlamesLayer: LayerManager = {
   unmount(map) {
     if (onStyleData) map.off('styledata', onStyleData);
     onStyleData = null;
-    if (onMove) map.off('move', onMove);
-    onMove = null;
+    map.off('move', poke);
     clearSettle();
     if (map.getLayer(LYR)) map.removeLayer(LYR);
     fire = null;
@@ -234,5 +252,7 @@ export const hotspotFlamesLayer: LayerManager = {
     lastTEff = null;
     shown = false;
     animating = false;
+    lastCurrentTime = null;
+    lastNow = null;
   },
 };
