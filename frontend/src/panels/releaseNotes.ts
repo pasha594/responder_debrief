@@ -9,6 +9,7 @@
  * tooling, pipeline internals); pipeline work stays when users feel it, like
  * maps arriving faster. Days with no user-facing change get no entry.
  * Spell out uncommon acronyms. Mark bug fixes with `fix: true`, listed last.
+ * Use firefighter terms: satellite detections are "hotspots", not "heat".
  */
 
 export interface ReleaseNote {
@@ -29,9 +30,9 @@ export const RELEASE_NOTES: ReleaseDay[] = [
     date: '2026-09-24',
     notes: [
       {
-        title: 'Flames on fresh heat',
+        title: 'Flames on fresh hotspots',
         summary:
-          'Heat detections from the last 12 hours show 3D flames that lean with the wind at the selected time.',
+          'Hotspots from the last 12 hours show 3D flames that lean with the wind at the selected time.',
       },
       {
         title: 'Drop a pin',
@@ -139,7 +140,7 @@ export const RELEASE_NOTES: ReleaseDay[] = [
       {
         title: 'Offline fires',
         summary:
-          "Download a fire from its Overview tab to use it with no signal: perimeters, heat, forecast, incident maps and 12 hours of weather.",
+          "Download a fire from its Overview tab to use it with no signal: perimeters, hotspots, forecast, incident maps and 12 hours of weather.",
       },
       {
         title: 'Install as an app',
@@ -241,15 +242,15 @@ export const RELEASE_NOTES: ReleaseDay[] = [
       },
       {
         title: 'Smoother scrubbing',
-        summary: 'Dragging the timeline through heat and perimeter history is faster and smoother.',
+        summary: 'Dragging the timeline through hotspot and perimeter history is faster and smoother.',
       },
       {
         title: 'Sources page',
         summary: "A new page lists every official source behind Incibrief's data.",
       },
       {
-        title: 'Newest heat on long fires',
-        summary: 'Long-running fires no longer lose their most recent heat detections.',
+        title: 'Newest hotspots on long fires',
+        summary: 'Long-running fires no longer lose their most recent hotspots.',
         fix: true,
       },
     ],
@@ -273,7 +274,7 @@ export const RELEASE_NOTES: ReleaseDay[] = [
       },
       {
         title: 'IR from KMZ files',
-        summary: 'Infrared (IR) heat from flights posted only as Google Earth (KMZ) files now shows on the map.',
+        summary: 'Infrared (IR) flight data posted only as Google Earth (KMZ) files now shows on the map.',
       },
       {
         title: 'Layers tab',
@@ -358,7 +359,7 @@ export const RELEASE_NOTES: ReleaseDay[] = [
     notes: [
       {
         title: 'First release',
-        summary: 'Active fires, perimeters, satellite heat, spread forecasts, weather and incident maps on one map.',
+        summary: 'Active fires, perimeters, satellite hotspots, spread forecasts, weather and incident maps on one map.',
       },
       {
         title: 'Fire list',
@@ -375,12 +376,12 @@ export const RELEASE_NOTES: ReleaseDay[] = [
           "Maps posted by incident teams are grouped by date, ops maps first. Maps that can't go on the map open in a viewer.",
       },
       {
-        title: 'Heat by age',
-        summary: 'Heat detections fade from yellow to orange to purple over two days, and hide after three.',
+        title: 'Hotspots by age',
+        summary: 'Hotspots fade from yellow to orange to purple over two days, and hide after three.',
       },
       {
         title: 'Timeline markers',
-        summary: 'The timeline marks perimeter updates and forecast releases, with a graph of heat activity.',
+        summary: 'The timeline marks perimeter updates and forecast releases, with a graph of hotspot activity.',
       },
     ],
   },
