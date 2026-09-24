@@ -14,6 +14,7 @@ import { BasemapControl } from '../panels/BasemapControl';
 import { PitchControl } from '../panels/PitchControl';
 import { SettingsControl } from '../panels/SettingsControl';
 import { SearchDirectionsControl } from '../panels/SearchDirectionsControl';
+import { DroppedPin } from '../panels/DroppedPin';
 import { HealthView } from '../panels/HealthView';
 import { SourcesView } from '../panels/SourcesView';
 import { Timeline } from '../timeline/Timeline';
@@ -246,6 +247,9 @@ function FireMapView() {
       </ErrorBoundary>
       <ErrorBoundary label="Scale">
         <ScaleBar />
+      </ErrorBoundary>
+      <ErrorBoundary label="Dropped pin">
+        <DroppedPin />
       </ErrorBoundary>
       <ErrorBoundary label="Credit">
         <PyrecastCredit />

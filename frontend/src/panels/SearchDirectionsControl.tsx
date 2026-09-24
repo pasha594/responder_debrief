@@ -16,12 +16,16 @@ import {
   type RouteProfile,
 } from '../api/routing';
 import { RANGE_COLORS } from '../map/layers/rangeLayer';
-import { geolocationAvailable, locateOnce, watchLocation } from '../app/geolocation';
+import {
+  MY_LOCATION_LABEL,
+  geolocationAvailable,
+  locateOnce,
+  watchLocation,
+} from '../app/geolocation';
 import { track } from '../app/analytics';
 import { useStore } from '../state/store';
 import { useMap } from '../map/MapRoot';
 
-const MY_LOCATION_LABEL = 'My location';
 const DEBOUNCE_MS = 350;
 const MIN_CHARS = 3;
 

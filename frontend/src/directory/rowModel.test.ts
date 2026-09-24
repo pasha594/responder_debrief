@@ -4,7 +4,6 @@ import {
   NEAR_RADIUS_MI,
   buildDirectoryRows,
   compareRows,
-  distanceMiles,
   matchesFilter,
   matchesQuery,
   nearRows,
@@ -13,6 +12,7 @@ import {
   summarizeRows,
   type DirectoryRow,
 } from './rowModel';
+import { distanceMiles } from '../api/geo';
 import { isPrescribed } from '../api/fireFields';
 import type { CatalogFire, FireSummary, FiresListResponse, MasterCatalog } from '../api/types';
 

@@ -22,6 +22,7 @@ import {
 import type { PerimeterIndexItem, PyrecastRun, WeatherRun } from './types';
 import { fetchHistoricPerimeters } from './nifcHistory';
 import { fetchIncidents } from './tomtomTraffic';
+import { reverseStreetAddress } from './geocode';
 
 export const useFires = () =>
   useQuery({
@@ -124,6 +125,19 @@ export const useHistoricPerimeters = (
     enabled: enabled && !!bbox,
     staleTime: Infinity,
     gcTime: 30 * 60_000,
+  });
+
+/** Street address under the dropped pin (null when there is none). Keyed on
+ * the 5-decimal coordinates the pin card prints; one try — Nominatim's
+ * policy frowns on retry storms, and the card reads fine without it. */
+export const useStreetAddress = (at: [number, number] | null, enabled: boolean) =>
+  useQuery({
+    queryKey: ['street-address', at?.[0].toFixed(5), at?.[1].toFixed(5)],
+    queryFn: ({ signal }) => reverseStreetAddress(at!, signal),
+    enabled: enabled && !!at,
+    staleTime: Infinity,
+    gcTime: 30 * 60_000,
+    retry: false,
   });
 
 /** Worker-archived hotspot history (daily chunks; index revalidates). */

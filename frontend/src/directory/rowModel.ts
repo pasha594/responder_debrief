@@ -11,7 +11,7 @@
  * would cost one detail request per fire.
  */
 import { isPrescribed } from '../api/fireFields';
-import { parseFireCoordinates } from '../api/geo';
+import { distanceMiles, parseFireCoordinates } from '../api/geo';
 import type { CatalogFire, FireSummary, FiresListResponse, MasterCatalog } from '../api/types';
 
 export interface DirectoryRow {
@@ -266,19 +266,6 @@ export interface DirectoryNear {
 
 /** Radius for the "near <place>" directory mode. */
 export const NEAR_RADIUS_MI = 200;
-
-const EARTH_RADIUS_MI = 3958.8;
-
-/** Great-circle distance in miles between two [lon, lat] points. */
-export function distanceMiles(a: [number, number], b: [number, number]): number {
-  const toRad = Math.PI / 180;
-  const dLat = (b[1] - a[1]) * toRad;
-  const dLon = (b[0] - a[0]) * toRad;
-  const h =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos(a[1] * toRad) * Math.cos(b[1] * toRad) * Math.sin(dLon / 2) ** 2;
-  return 2 * EARTH_RADIUS_MI * Math.asin(Math.min(1, Math.sqrt(h)));
-}
 
 // ---------- sorting ----------
 

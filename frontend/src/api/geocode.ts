@@ -3,9 +3,22 @@
  * autocomplete) plus raw-coordinate parsing, because responders trade
  * "48.016, -120.846" strings constantly. Fair use: the UI debounces and
  * requires 3+ characters before querying.
+ *
+ * The reverse direction (the street address under a dropped pin) goes to
+ * Nominatim instead: Photon only knows house numbers mapped in OSM itself,
+ * while Nominatim also carries the US Census TIGER address ranges — which is
+ * most rural addresses (Photon finds nothing at 1091 Central Park Dr,
+ * Paradise; Nominatim does).
  */
+import { distanceMiles } from './geo';
 
 const PHOTON = 'https://photon.komoot.io/api/';
+const NOMINATIM_REVERSE = 'https://nominatim.openstreetmap.org/reverse';
+/** Nominatim's usage policy: at most one request per second per client. */
+const NOMINATIM_GAP_MS = 1000;
+/** A house number farther than this from the pin belongs to another spot. */
+const ADDRESS_MAX_M = 150;
+const METERS_PER_MILE = 1609.344;
 
 export interface PlaceHit {
   label: string;
@@ -91,4 +104,83 @@ export function pickBestCity(hits: PlaceHit[]): PlaceHit | null {
   const cities = hits.filter((h) => h.countryCode === 'US' && h.kind in CITY_RANK);
   if (cities.length === 0) return null;
   return [...cities].sort((a, b) => CITY_RANK[a.kind] - CITY_RANK[b.kind])[0];
+}
+
+/** A street address, split the way an envelope (or Google's card) reads. */
+export interface StreetAddress {
+  /** "1091 Central Park Drive" */
+  line1: string;
+  /** "Paradise, CA 95969" — whichever of the parts exist */
+  line2: string;
+}
+
+interface NominatimReverse {
+  lat?: string;
+  lon?: string;
+  address?: Record<string, string | undefined>;
+}
+
+/**
+ * The street address (house number + road) AT `at`, or null. Null is the
+ * usual answer on a fire: out in wildland Nominatim's nearest object is a
+ * road, a creek, or just the county.
+ */
+export function streetAddressFrom(
+  res: NominatimReverse,
+  at: [number, number],
+): StreetAddress | null {
+  const a = res.address;
+  if (!a?.house_number || !a.road) return null;
+  const hit: [number, number] = [Number(res.lon), Number(res.lat)];
+  if (!hit.every(Number.isFinite)) return null;
+  if (distanceMiles(at, hit) * METERS_PER_MILE > ADDRESS_MAX_M) return null;
+  const locality = a.city ?? a.town ?? a.village ?? a.hamlet ?? a.county;
+  // US addresses read with the postal abbreviation: "US-CA" → "CA".
+  const iso = a['ISO3166-2-lvl4'];
+  const region = a.country_code === 'us' && iso?.startsWith('US-') ? iso.slice(3) : a.state;
+  const regionZip = [region, a.postcode].filter(Boolean).join(' ');
+  return {
+    line1: `${a.house_number} ${a.road}`,
+    line2: [locality, regionZip].filter(Boolean).join(', '),
+  };
+}
+
+let nominatimNextSlot = 0;
+
+/** Wait for this client's next Nominatim slot (NOMINATIM_GAP_MS apart). */
+function nominatimSlot(signal?: AbortSignal): Promise<void> {
+  const now = Date.now();
+  const at = Math.max(now, nominatimNextSlot);
+  nominatimNextSlot = at + NOMINATIM_GAP_MS;
+  if (at === now) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(resolve, at - now);
+    signal?.addEventListener(
+      'abort',
+      () => {
+        clearTimeout(timer);
+        reject(signal.reason);
+      },
+      { once: true },
+    );
+  });
+}
+
+/** Street address at a [lon, lat] point, or null when there isn't one. */
+export async function reverseStreetAddress(
+  at: [number, number],
+  signal?: AbortSignal,
+): Promise<StreetAddress | null> {
+  await nominatimSlot(signal);
+  const params = new URLSearchParams({
+    lat: at[1].toFixed(5),
+    lon: at[0].toFixed(5),
+    format: 'jsonv2',
+    zoom: '18', // building level
+    addressdetails: '1',
+    'accept-language': 'en',
+  });
+  const res = await fetch(`${NOMINATIM_REVERSE}?${params}`, { signal });
+  if (!res.ok) throw new Error(`reverse geocode ${res.status}`);
+  return streetAddressFrom((await res.json()) as NominatimReverse, at);
 }

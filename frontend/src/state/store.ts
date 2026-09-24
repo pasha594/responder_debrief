@@ -135,6 +135,10 @@ export interface AppState {
     armed: boolean;
   };
 
+  /** Google-style dropped pin [lon, lat]: a plain click on an idle map marks
+   * a spot and opens its card (see panels/DroppedPin). */
+  droppedPin: [number, number] | null;
+
   draw: {
     /** Active tool: none, a marker symbol id, freehand line, or eraser. */
     tool: DrawTool;
@@ -213,6 +217,8 @@ export interface AppState {
     setDirectionsRoute(route: import('../api/routing').RouteResult | null): void;
     setDirectionsArmed(armed: boolean): void;
     clearDirections(): void;
+    dropPin(coords: [number, number]): void;
+    clearDroppedPin(): void;
     setTheme(theme: 'dark' | 'light'): void;
     setSidebarTab(tab: AppState['ui']['sidebarTab']): void;
     setSidebarCollapsed(collapsed: boolean): void;
@@ -317,6 +323,8 @@ export const useStore = create<AppState>((set, get) => ({
 
   directions: { a: null, b: null, profile: 'drive', route: null, armed: false },
 
+  droppedPin: null,
+
   draw: { tool: 'none', features: [], past: [], future: [] },
 
   offline: {
@@ -370,6 +378,7 @@ export const useStore = create<AppState>((set, get) => ({
           a: null, b: null, profile: s.directions.profile,
           route: null, armed: false, picking: null,
         },
+        droppedPin: null,
         range: { rings: [] },
 
   location: { coords: null, accuracy: null, tracking: false },
@@ -380,6 +389,7 @@ export const useStore = create<AppState>((set, get) => ({
       set((s) => ({
         view: { mode: 'directory' },
         draw: disarmDraw(s.draw),
+        droppedPin: null,
         time: { ...s.time, playing: false },
         layers: {
           ...s.layers,
@@ -526,6 +536,9 @@ export const useStore = create<AppState>((set, get) => ({
     setDirectionsPoint: (which, p) =>
       set((s) => ({
         directions: { ...s.directions, [which]: p, route: null },
+        // Directions own map clicks from here (and "Directions" on the pin
+        // card hands its spot over as B).
+        droppedPin: p ? null : s.droppedPin,
       })),
     setDirectionsArmed: (armed) =>
       set((s) => ({ directions: { ...s.directions, armed } })),
@@ -559,6 +572,9 @@ export const useStore = create<AppState>((set, get) => ({
   location: { coords: null, accuracy: null, tracking: false },
       })),
 
+    dropPin: (coords) => set(() => ({ droppedPin: coords })),
+    clearDroppedPin: () => set(() => ({ droppedPin: null })),
+
     setTheme: (theme) => {
       track('theme_changed', { theme });
       document.documentElement.dataset.theme = theme;
@@ -583,7 +599,10 @@ export const useStore = create<AppState>((set, get) => ({
       if (tool !== 'none' && tool !== 'erase') {
         trackOncePer('fire-view', 'draw_used', { tool: tool.split(':')[0] });
       }
-      set((s) => ({ draw: { ...s.draw, tool } }));
+      set((s) => ({
+        draw: { ...s.draw, tool },
+        droppedPin: tool === 'none' ? s.droppedPin : null,
+      }));
     },
     drawCommit: (features) =>
       set((s) => ({

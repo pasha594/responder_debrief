@@ -2240,6 +2240,145 @@
   100% { transform: scale(3.2); opacity: 0; }
 }
 
+/* ---------- Dropped pin (plain map click → pin + card) ---------- */
+/* The fire pins' teardrop, smaller and cream so it never reads as a fire.
+   MapLibre owns the marker root's transform, so the landing animates the
+   svg inside it. */
+.rd-drop-pin { cursor: default; }
+.rd-drop-pin svg {
+  display: block;
+  overflow: visible;
+  filter: drop-shadow(0 2px 3px rgba(0, 0, 0, 0.45));
+  animation: rd-pin-drop 200ms cubic-bezier(0.3, 1.4, 0.6, 1);
+}
+.rd-drop-pin-body {
+  fill: #fdfcf9;
+  stroke: rgba(35, 18, 25, 0.6);
+  stroke-width: 1.5;
+  stroke-linejoin: round;
+}
+.rd-drop-pin-core { fill: #3b1d29; }
+@keyframes rd-pin-drop {
+  from { transform: translateY(-14px); opacity: 0; }
+  to { transform: none; opacity: 1; }
+}
+
+/* The card: bottom-center of the VISIBLE map (the sidebar covers the
+   canvas's right edge), above the timeline. Over the legend (25) and map
+   chips (26), under the toolbar and its search dropdown (28). */
+.rd-pin-card {
+  position: absolute;
+  left: calc((100% - var(--sidebar-w)) / 2);
+  translate: -50% 0;
+  bottom: calc(var(--timeline-h) + 12px);
+  z-index: 27;
+  width: 340px;
+  max-width: calc(100% - var(--sidebar-w) - 24px);
+  padding: 10px 10px 10px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.45);
+  animation: rd-pin-card-in 160ms ease-out;
+}
+/* Collapsed sidebar is a 48px rail. */
+.rd-pin-card--rail {
+  left: calc((100% - 48px) / 2);
+  max-width: calc(100% - 72px);
+}
+@keyframes rd-pin-card-in {
+  from { transform: translateY(8px); opacity: 0; }
+  to { transform: none; opacity: 1; }
+}
+.rd-pin-card-head { display: flex; align-items: flex-start; gap: 8px; }
+.rd-pin-card-title {
+  flex: 1;
+  min-width: 0;
+  padding-top: 2px;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+.rd-pin-card-sub {
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--color-text-muted);
+}
+.rd-pin-card-foot {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 6px;
+}
+/* One click selects the whole pair, ready to copy. */
+.rd-pin-card-coords {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  -webkit-user-select: all;
+  user-select: all;
+}
+.rd-pin-card-go {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 14px 0 11px;
+  border-radius: 999px;
+  background: var(--color-accent);
+  color: #1a1218;
+  font-size: 13px;
+  font-weight: 600;
+}
+.rd-pin-card-go:hover { filter: brightness(1.06); }
+.rd-pin-card-go svg { display: block; }
+.rd-pin-card-x {
+  flex: 0 0 auto;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  color: var(--color-text-muted);
+  border-radius: 50%;
+}
+.rd-pin-card-x:hover {
+  color: var(--color-text);
+  background: var(--color-hover-bg);
+}
+.rd-pin-card-go:focus-visible,
+.rd-pin-card-x:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .rd-drop-pin svg,
+  .rd-pin-card { animation: none; }
+}
+/* Phones: full width, riding just above the sheet in step with its snap
+   (as the scale bar does). At full there is no map left to point at. */
+@media (max-width: 767px) {
+  .rd-pin-card {
+    left: 12px;
+    right: 12px;
+    translate: none;
+    width: auto;
+    max-width: none;
+    bottom: calc(var(--timeline-h) + 108px);
+    transition: bottom 200ms ease;
+  }
+  .rd-pin-card--sheet-half { bottom: calc(var(--timeline-h) + 45% + 12px); }
+  .rd-pin-card--sheet-full { display: none; }
+  .rd-pin-card-x { width: 32px; height: 32px; margin: -4px -4px 0 0; }
+}
+
 
 /* ---------- Settings (gear + popover) ---------- */
 .rd-settings { position: relative; }
