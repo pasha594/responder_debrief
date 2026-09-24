@@ -4,6 +4,9 @@
  * zooms. It lives out here with the other map overlays rather than in
  * MapLibre's own corner because that corner is the full-bleed canvas's — under
  * the sidebar on desktop and under the sheet on phones.
+ *
+ * The compass rides at the top of the same stack, so it stays right above the
+ * bar through sidebar collapse and every sheet snap.
  */
 import { useEffect, useState } from 'react';
 import { useMap } from '../map/MapRoot';
@@ -14,6 +17,7 @@ import {
   type ScaleReadings,
 } from '../map/scaleReadings';
 import { useStore } from '../state/store';
+import { MapCompass } from './MapCompass';
 
 /** Widest a bar gets; round distances land between half of this and all of it. */
 const MAX_WIDTH_PX = 100;
@@ -75,14 +79,19 @@ export function ScaleBar() {
       className={`rd-scalebar rd-scalebar--sheet-${sheetSnap}${
         sidebarCollapsed ? ' rd-scalebar--rail' : ''
       }`}
-      role="img"
-      aria-label={`Map scale: ${imperial.label}, ${metric.label}`}
     >
-      <div className="rd-scalebar-row rd-scalebar-row--imperial" style={{ width: imperial.widthPx }}>
-        {imperial.label}
-      </div>
-      <div className="rd-scalebar-row rd-scalebar-row--metric" style={{ width: metric.widthPx }}>
-        {metric.label}
+      <MapCompass />
+      <div
+        className="rd-scalebar-rows"
+        role="img"
+        aria-label={`Map scale: ${imperial.label}, ${metric.label}`}
+      >
+        <div className="rd-scalebar-row rd-scalebar-row--imperial" style={{ width: imperial.widthPx }}>
+          {imperial.label}
+        </div>
+        <div className="rd-scalebar-row rd-scalebar-row--metric" style={{ width: metric.widthPx }}>
+          {metric.label}
+        </div>
       </div>
     </div>
   );

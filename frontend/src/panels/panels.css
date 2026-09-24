@@ -1047,9 +1047,10 @@
      the map. (It out-stacks the sidebar at z-index 25, so without this offset
      it paints on top of the panel instead.) */
   right: calc(var(--sidebar-w) + 12px);
-  /* The corner stacks attribution, then the scale bar, then this card
-     (scale bar's 42px + its 28px height + 8px gap). */
-  bottom: calc(var(--timeline-h) + 78px);
+  /* The corner stacks attribution, then the scale bar with the compass on
+     top, then this card: the scale bar's 42px + its 28px height + the
+     compass's 6px gap and 29px button + 8px gap. */
+  bottom: calc(var(--timeline-h) + 113px);
   z-index: 25;
   max-width: 260px;
   padding: 8px 10px;
@@ -1108,6 +1109,20 @@
 .rd-scalebar-row--metric {
   border-top-width: 2px;
   margin-top: -2px; /* one shared line, not two stacked */
+}
+
+/* The two rows, right-aligned like the stack they sit in. */
+.rd-scalebar-rows {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+}
+
+/* Compass above the scale bar: MapLibre's control, the same look as the zoom
+   buttons. The stack ignores pointers, the compass takes them. */
+.rd-compass {
+  margin-bottom: 6px;
+  pointer-events: auto;
 }
 
 /* MapLibre's own bottom-right corner (the attribution) belongs to the
