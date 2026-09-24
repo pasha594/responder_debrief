@@ -12,6 +12,7 @@ import 'maplibre-gl/dist/maplibre-gl.css';
 import { mapStyleDef } from '../app/config';
 import { resyncBasemapUnderlay } from './layers/basemapUnderlay';
 import { resyncLabelContrast } from './layers/labelContrast';
+import { addNaturalLabels } from './layers/naturalLabels';
 import { resyncRdLabelFonts } from './glyphFonts';
 import { useStore } from '../state/store';
 import { ensureOrder } from './zOrder';
@@ -26,9 +27,10 @@ export function useMap(): MlMap | null {
 /**
  * Per-style paint overrides applied after a style loads. Classic dark gets
  * the cornea plum tint; Dark Matter gets legibility fixes — CARTO ships
- * major-road, sea, and park/stadium labels at #383838–#515151 on a
- * near-black ground (verified in their style.json), so those lift to the
- * tone of the style's own readable labels. Other variants stay stock.
+ * major-road and park/stadium labels at #383838–#515151 on a near-black
+ * ground (verified in their style.json), so those lift to the tone of the
+ * style's own readable labels. (Its water labels are replaced wholesale by
+ * the natural-feature set.) Other variants stay stock.
  */
 const STYLE_OVERRIDES: Record<string, [string, string, unknown][]> = {
   dark: [
@@ -37,8 +39,6 @@ const STYLE_OVERRIDES: Record<string, [string, string, unknown][]> = {
   ],
   'dark-matter': [
     ['roadname_major', 'text-color', 'rgba(189, 189, 189, 1)'], // was #383838; matches roadname_pri
-    ['watername_sea', 'text-color', 'rgba(109, 123, 129, 1)'], // was #3c3c3c; matches ocean
-    ['watername_lake_line', 'text-color', 'rgba(155, 155, 155, 1)'], // was #444; matches lake
     ['poi_park', 'text-color', 'rgba(138, 145, 138, 1)'], // was #515151
     ['poi_stadium', 'text-color', 'rgba(140, 140, 140, 1)'], // was #515151
   ],
@@ -116,6 +116,7 @@ export function MapRoot({ children }: { children: ReactNode }) {
     map.once('load', () => {
       const st = useStore.getState().ui;
       applyOverrides(map, mapStyleDef(st.theme, st.mapStyle[st.theme]).id);
+      addNaturalLabels(map, st.theme);
       setReady(map);
     });
     // Re-assert our layers after any style-swap settles.
@@ -167,6 +168,7 @@ export function MapRoot({ children }: { children: ReactNode }) {
       const def = mapStyleDef(ui.theme, ui.mapStyle[ui.theme]);
       if (def.url !== styleUrlRef.current) return;
       applyOverrides(map, def.id);
+      addNaturalLabels(map, ui.theme);
       // satellite/topo hid the OLD style's layers — re-apply on the new one
       resyncBasemapUnderlay(map);
       resyncLabelContrast(map);

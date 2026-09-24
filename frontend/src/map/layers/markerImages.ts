@@ -12,6 +12,8 @@ export const PIN_WILDFIRE_SELECTED = 'rd-pin-wildfire-selected';
 export const PIN_PRESCRIBED_SELECTED = 'rd-pin-prescribed-selected';
 export const HEX_IMAGE = 'rd-hex';
 export const WIND_ARROW_IMAGE = 'rd-wind-arrow';
+/** Summit triangle for the basemap's peak labels (SDF). */
+export const PEAK_IMAGE = 'rd-peak';
 
 const PIXEL_RATIO = 2;
 
@@ -194,6 +196,23 @@ function drawArrowSdf(): RawImage {
   return { data: img, pixelRatio: PIXEL_RATIO };
 }
 
+/** Small apex-up summit triangle (SDF, ~9 CSS px wide at 2x). */
+function drawPeakSdf(): RawImage {
+  const size = 32;
+  const sdfRadius = 6;
+  const cutoff = 0.25;
+  const img = new ImageData(size, size);
+  const c = (size - 1) / 2;
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const dist = triDist(x - c, y - c, 9, 15);
+      const a = Math.round(255 - 255 * (dist / sdfRadius + cutoff));
+      img.data[(y * size + x) * 4 + 3] = Math.max(0, Math.min(255, a));
+    }
+  }
+  return { data: img, pixelRatio: PIXEL_RATIO };
+}
+
 function makeImage(id: string): RawImage | null {
   switch (id) {
     case PIN_WILDFIRE:
@@ -208,6 +227,8 @@ function makeImage(id: string): RawImage | null {
       return drawHexSdf();
     case WIND_ARROW_IMAGE:
       return drawArrowSdf();
+    case PEAK_IMAGE:
+      return drawPeakSdf();
     default:
       return null;
   }
@@ -220,6 +241,7 @@ const ALL_IDS = [
   PIN_PRESCRIBED_SELECTED,
   HEX_IMAGE,
   WIND_ARROW_IMAGE,
+  PEAK_IMAGE,
 ];
 
 function addIfMissing(map: MlMap, id: string): void {
