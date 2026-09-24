@@ -1,11 +1,18 @@
 /**
- * Draw tab: annotate the map for a briefing. Pick a symbol and tap the map
- * to place it; freehand to sketch line work; erase taps features away.
- * Undo/redo/clear cover the session; annotations persist per fire on this
- * device (localStorage) — nothing is uploaded.
+ * Draw tab: annotate the map for a briefing with the official NWCG PMS 936
+ * symbology. Pick a symbol and tap the map to place it; pick a line style and
+ * drag to draw it; erase taps features away. Undo/redo/clear cover the
+ * session; annotations persist per fire on this device (localStorage) —
+ * nothing is uploaded.
  */
 import { useStore, type DrawTool } from '../../state/store';
-import { DRAW_LINES, DRAW_SYMBOLS } from '../../map/layers/drawSymbols';
+import {
+  DRAW_LINE_EXTRAS,
+  DRAW_LINE_GROUPS,
+  DRAW_SYMBOL_GROUPS,
+  type DrawLineStyle,
+} from '../../map/layers/drawSymbols';
+import { linePreviewUrl } from '../../map/layers/drawImages';
 
 function ToolButton({
   active,
@@ -34,6 +41,34 @@ function ToolButton({
   );
 }
 
+function LineButton({
+  style,
+  tool,
+  current,
+  onToggle,
+  title,
+}: {
+  style: DrawLineStyle;
+  tool: DrawTool;
+  current: DrawTool;
+  onToggle: (tool: DrawTool) => void;
+  title?: string;
+}) {
+  const active = current === tool;
+  return (
+    <button
+      type="button"
+      className={`rd-draw-line-btn${active ? ' rd-draw-line-btn--active' : ''}`}
+      onClick={() => onToggle(tool)}
+      aria-pressed={active}
+      title={title}
+    >
+      <img className="rd-draw-line-sample" src={linePreviewUrl(style)} alt="" />
+      <span className="rd-draw-sym-name">{style.label}</span>
+    </button>
+  );
+}
+
 export function DrawTab() {
   const draw = useStore((s) => s.draw);
   const actions = useStore((s) => s.actions);
@@ -48,35 +83,33 @@ export function DrawTab() {
           Symbols
           <span className="rd-title-meta">pick one, then tap the map</span>
         </h3>
-        <div className="rd-draw-palette">
-          {DRAW_SYMBOLS.map((sym) => {
-            const tool: DrawTool = `marker:${sym.id}`;
-            const shapeCls =
-              sym.shape === 'none' ? 'rd-draw-shape--bare' : `rd-draw-shape--${sym.shape}`;
-            return (
-              <button
-                key={sym.id}
-                type="button"
-                className={`rd-draw-sym${draw.tool === tool ? ' rd-draw-sym--active' : ''}`}
-                onClick={() => toggle(tool)}
-                aria-pressed={draw.tool === tool}
-                title={sym.label}
-              >
-                <span
-                  className={`rd-draw-sym-disc ${shapeCls}`}
-                  style={
-                    sym.shape === 'none'
-                      ? { color: sym.color }
-                      : { background: sym.color, color: '#151015' }
-                  }
-                >
-                  <span className="rd-draw-sym-glyph">{sym.glyph}</span>
-                </span>
-                <span className="rd-draw-sym-name">{sym.label}</span>
-              </button>
-            );
-          })}
-        </div>
+        {DRAW_SYMBOL_GROUPS.map(({ category, items }) => (
+          <div key={category} className="rd-draw-group">
+            <h4 className="rd-draw-group-title">{category}</h4>
+            <div className="rd-draw-palette">
+              {items.map((sym) => {
+                const tool: DrawTool = `marker:${sym.id}`;
+                return (
+                  <button
+                    key={sym.id}
+                    type="button"
+                    className={`rd-draw-sym${draw.tool === tool ? ' rd-draw-sym--active' : ''}`}
+                    onClick={() => toggle(tool)}
+                    aria-pressed={draw.tool === tool}
+                    title={sym.label}
+                  >
+                    <img
+                      className={`rd-draw-sym-icon${sym.halo ? ' rd-draw-sym-icon--halo' : ''}`}
+                      src={sym.url}
+                      alt=""
+                    />
+                    <span className="rd-draw-sym-name">{sym.label}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        ))}
       </section>
 
       <section className="rd-section">
@@ -85,47 +118,33 @@ export function DrawTab() {
           <span className="rd-title-meta">pick one, then drag on the map</span>
         </h3>
         <div className="rd-draw-lines">
-          {DRAW_LINES.map((ls) => {
-            const tool: DrawTool = ls.id === 'sketch' ? 'freehand' : `line:${ls.id}`;
-            return (
-              <button
-                key={ls.id}
-                type="button"
-                className={`rd-draw-line-btn${draw.tool === tool ? ' rd-draw-line-btn--active' : ''}`}
-                onClick={() => toggle(tool)}
-                aria-pressed={draw.tool === tool}
-              >
-                <span className="rd-draw-line-sample">
-                  {ls.letter ? (
-                    <span className="rd-draw-line-letters" style={{ color: ls.color }}>
-                      {ls.letter}
-                      <span className="rd-draw-line-rule" style={{ background: ls.color }} />
-                      {ls.letter}
-                    </span>
-                  ) : (
-                    <span
-                      className="rd-draw-line-rule"
-                      style={{
-                        background:
-                          ls.dash === 'solid'
-                            ? ls.color
-                            : ls.dash === 'hatch'
-                              ? `repeating-linear-gradient(70deg, ${ls.color} 0 1.5px, transparent 1.5px 5px), repeating-linear-gradient(-70deg, ${ls.color} 0 1.5px, transparent 1.5px 5px)`
-                              : `repeating-linear-gradient(90deg, ${ls.color} 0 ${
-                                  ls.dash === 'dots' ? '3px' : '7px'
-                                }, transparent ${ls.dash === 'dots' ? '3px' : '7px'} ${
-                                  ls.dash === 'dots' ? '8px' : '12px'
-                                })`,
-                        height: ls.dash === 'hatch' ? 9 : (ls.width ?? 3) - 0.5,
-                      }}
-                    />
-                  )}
-                </span>
-                <span className="rd-draw-sym-name">{ls.label}</span>
-              </button>
-            );
-          })}
+          {DRAW_LINE_EXTRAS.map((ls) => (
+            <LineButton
+              key={ls.id}
+              style={ls}
+              tool={ls.id === 'sketch' ? 'freehand' : `line:${ls.id}`}
+              current={draw.tool}
+              onToggle={toggle}
+              title="Not an NWCG PMS 936 symbol"
+            />
+          ))}
         </div>
+        {DRAW_LINE_GROUPS.map(({ category, items }) => (
+          <div key={category} className="rd-draw-group">
+            <h4 className="rd-draw-group-title">{category}</h4>
+            <div className="rd-draw-lines">
+              {items.map((ls) => (
+                <LineButton
+                  key={ls.id}
+                  style={ls}
+                  tool={`line:${ls.id}`}
+                  current={draw.tool}
+                  onToggle={toggle}
+                />
+              ))}
+            </div>
+          </div>
+        ))}
       </section>
 
       <section className="rd-section">
@@ -157,8 +176,8 @@ export function DrawTab() {
       </section>
 
       <div className="rd-field-note">
-        Annotations stay on this device, saved per fire. {draw.features.length} mark
-        {draw.features.length === 1 ? '' : 's'} on the map.
+        Symbols follow NWCG PMS 936. Annotations stay on this device, saved per fire.{' '}
+        {draw.features.length} mark{draw.features.length === 1 ? '' : 's'} on the map.
       </div>
     </div>
   );

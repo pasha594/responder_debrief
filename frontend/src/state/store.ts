@@ -35,23 +35,15 @@ export interface DrawFeature {
   geometry:
     | { type: 'Point'; coordinates: [number, number] }
     | { type: 'LineString'; coordinates: [number, number][] };
+  /** Marks saved before the NWCG palette also carry paint hints (glyph,
+   * color, dash, …); rendering reads only the ids, so those are ignored. */
   properties: {
     fid: string;
     kind: 'marker' | 'line';
-    /** Symbol id from the palette (markers only). */
+    /** NWCG point symbol id (markers only). */
     sym?: string;
-    /** Glyph drawn on the map (markers only). */
-    glyph?: string;
-    /** Marker shape image key ('circle' | 'square' | 'diamond' | 'none'). */
-    shape?: string;
-    /** Glyph text size (breaks render bigger, disc-less). */
-    tsize?: number;
-    /** Line style id + derived paint hints (lines only). */
+    /** Line style id (lines only). */
     style?: string;
-    dash?: string;
-    letter?: string;
-    width?: number;
-    color: string;
   };
 }
 

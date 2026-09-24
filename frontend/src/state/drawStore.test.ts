@@ -18,7 +18,7 @@ function marker(fid: string): DrawFeature {
   return {
     type: 'Feature',
     geometry: { type: 'Point', coordinates: [-117, 42] },
-    properties: { fid, kind: 'marker', sym: 'camp', glyph: 'C', color: '#fb5' },
+    properties: { fid, kind: 'marker', sym: 'camp' },
   };
 }
 

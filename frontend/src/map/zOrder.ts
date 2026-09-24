@@ -44,14 +44,16 @@ export const RD_LAYER_ORDER = [
   'rd-hotspots',
   'rd-hotspot-flames', // custom 3D layer: flames stand on the freshest dots
   'rd-fire-pins',
-  // user annotations (Draw tab) ride above every data layer
+  // user annotations (Draw tab) ride above every data layer: the NWCG line
+  // parts stack bottom → top (layers/drawPlan.ts), then the point symbols
   'rd-draw-line',
   'rd-draw-line-dash',
-  'rd-draw-line-dots',
-  'rd-draw-line-hatch',
+  'rd-draw-line-pattern',
+  'rd-draw-line-marks',
+  'rd-draw-line-top',
+  'rd-draw-line-dash-top',
   'rd-draw-line-letter',
   'rd-draw-pt',
-  'rd-draw-label',
   // directions ride on the very top
   'rd-route-casing',
   'rd-route-line',

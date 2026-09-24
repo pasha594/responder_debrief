@@ -1,36 +1,42 @@
 /**
- * User annotations (Draw tab): placed ICS-style symbol markers and freehand
- * lines, rendered on top of everything. Unlike the data layers this manager
- * is INTERACTIVE and self-driven: it subscribes to the store's draw slice
- * directly (tool changes and feature edits re-render without a LayerContext
- * pass), owns the map pointer handlers for placing / drawing / erasing, and
- * persists per-fire to localStorage.
+ * User annotations (Draw tab): official NWCG PMS 936 point symbols and line
+ * styles (see drawPlan / drawImages), rendered on top of everything. Unlike
+ * the data layers this manager is INTERACTIVE and self-driven: it subscribes
+ * to the store's draw slice directly (tool changes and feature edits
+ * re-render without a LayerContext pass), owns the map pointer handlers for
+ * placing / drawing / erasing, and persists per-fire to localStorage.
  */
-import type { GeoJSONSource, Map as MlMap, MapMouseEvent, MapTouchEvent } from 'maplibre-gl';
-import { rdLabelFont } from '../glyphFonts';
+import type {
+  FilterSpecification,
+  GeoJSONSource,
+  LayerSpecification,
+  LineLayerSpecification,
+  Map as MlMap,
+  MapMouseEvent,
+  MapStyleImageMissingEvent,
+  MapTouchEvent,
+  SymbolLayerSpecification,
+} from 'maplibre-gl';
 import { useStore, type DrawFeature } from '../../state/store';
-import { beforeIdFor } from '../zOrder';
+import { beforeIdFor, type RdLayerId } from '../zOrder';
 import type { LayerManager } from '../layerTypes';
-import {
-  DRAW_LINE_BY_ID,
-  DRAW_LINE_COLOR,
-  DRAW_SYMBOL_BY_ID,
-} from './drawSymbols';
-import {
-  DRAW_CIRCLE_IMAGE,
-  DRAW_DIAMOND_IMAGE,
-  DRAW_HATCH_IMAGE,
-  DRAW_SQUARE_IMAGE,
-} from './markerImages';
+import { drawLineById, drawSymbolById } from './drawSymbols';
+import { drawSourceFeatures, type DrawSlot } from './drawPlan';
+import { preloadPointIcons, provideDrawImage } from './drawImages';
 
 const SRC = 'rd-draw';
-const LINE_LYR = 'rd-draw-line';
-const LINE_DASH_LYR = 'rd-draw-line-dash';
-const LINE_DOTS_LYR = 'rd-draw-line-dots';
-const LINE_HATCH_LYR = 'rd-draw-line-hatch';
-const LINE_LETTER_LYR = 'rd-draw-line-letter';
-const PT_LYR = 'rd-draw-pt';
-const LABEL_LYR = 'rd-draw-label';
+/** One map layer per slot, bottom → top (drawPlan explains the stack). */
+const SLOT_LAYER: Record<DrawSlot, RdLayerId> = {
+  stroke: 'rd-draw-line',
+  dash: 'rd-draw-line-dash',
+  pattern: 'rd-draw-line-pattern',
+  marks: 'rd-draw-line-marks',
+  'stroke-top': 'rd-draw-line-top',
+  'dash-top': 'rd-draw-line-dash-top',
+  upright: 'rd-draw-line-letter',
+  pt: 'rd-draw-pt',
+};
+const DRAW_LAYERS = Object.values(SLOT_LAYER);
 /** Erase click tolerance, px. */
 const ERASE_PAD = 8;
 
@@ -73,160 +79,66 @@ let hydratedFor: string | null = null;
 let stroke: [number, number][] | null = null;
 let lastRenderedFeatures: unknown = null;
 
-const LINE_PAINT = {
-  'line-color': ['coalesce', ['get', 'color'], DRAW_LINE_COLOR],
-  'line-width': ['coalesce', ['get', 'width'], 3],
-  'line-opacity': 0.95,
-} as const;
+const ICON_LAYOUT: SymbolLayerSpecification['layout'] = {
+  'icon-image': ['get', 'icon'],
+  'icon-allow-overlap': true,
+  'icon-ignore-placement': true,
+  'symbol-sort-key': ['get', 'sort'],
+};
+
+function layerSpec(slot: DrawSlot): LayerSpecification {
+  const base = {
+    id: SLOT_LAYER[slot],
+    source: SRC,
+    filter: ['==', ['get', 'slot'], slot] as FilterSpecification,
+  };
+  if (slot === 'stroke' || slot === 'stroke-top' || slot === 'dash' || slot === 'dash-top') {
+    const spec: LineLayerSpecification = {
+      ...base,
+      type: 'line',
+      layout: {
+        'line-cap': ['get', 'cap'],
+        'line-join': ['get', 'join'],
+        'line-sort-key': ['get', 'sort'],
+      },
+      paint: {
+        'line-color': ['get', 'color'],
+        'line-width': ['get', 'width'],
+        'line-offset': ['get', 'offset'],
+      },
+    };
+    if (slot === 'dash' || slot === 'dash-top') {
+      spec.paint!['line-dasharray'] = ['array', 'number', ['get', 'dash']];
+    }
+    return spec;
+  }
+  if (slot === 'pattern') {
+    const spec: LineLayerSpecification = {
+      ...base,
+      type: 'line',
+      layout: { 'line-join': 'round', 'line-sort-key': ['get', 'sort'] },
+      paint: { 'line-pattern': ['get', 'pattern'], 'line-width': ['get', 'width'] },
+    };
+    return spec;
+  }
+  const layout: SymbolLayerSpecification['layout'] = { ...ICON_LAYOUT };
+  if (slot === 'marks') {
+    // placed one by one at the NWCG spacing (drawPlan), turned along the line
+    layout['icon-rotate'] = ['get', 'rot'];
+    layout['icon-rotation-alignment'] = 'map';
+  } else if (slot === 'upright') {
+    layout['icon-rotation-alignment'] = 'viewport';
+  }
+  const spec: SymbolLayerSpecification = { ...base, type: 'symbol', layout };
+  return spec;
+}
 
 function ensureLayers(map: MlMap): void {
   if (!map.getSource(SRC)) map.addSource(SRC, { type: 'geojson', data: EMPTY });
-  // line-dasharray is not data-driven — one layer per dash class.
-  const lineLayers: [string, string, number[] | null][] = [
-    [LINE_LYR, 'solid', null],
-    [LINE_DASH_LYR, 'dash', [1.6, 1.2]],
-    [LINE_DOTS_LYR, 'dots', [0.05, 2.2]],
-  ];
-  if (!map.getLayer(LINE_HATCH_LYR)) {
-    // dozer line: cross-hatch pattern tiled along the stroke
-    map.addLayer(
-      {
-        id: LINE_HATCH_LYR,
-        type: 'line',
-        source: SRC,
-        filter: [
-          'all',
-          ['==', ['geometry-type'], 'LineString'],
-          ['==', ['coalesce', ['get', 'dash'], 'solid'], 'hatch'],
-        ],
-        layout: { 'line-join': 'round' },
-        paint: {
-          'line-pattern': DRAW_HATCH_IMAGE,
-          'line-width': 12,
-        },
-      },
-      beforeIdFor(map, LINE_HATCH_LYR),
-    );
-  }
-  for (const [id, dash, dasharray] of lineLayers) {
-    if (map.getLayer(id)) continue;
-    map.addLayer(
-      {
-        id,
-        type: 'line',
-        source: SRC,
-        filter: [
-          'all',
-          ['==', ['geometry-type'], 'LineString'],
-          ['==', ['coalesce', ['get', 'dash'], 'solid'], dash],
-        ],
-        layout: { 'line-cap': 'round', 'line-join': 'round' },
-        paint: dasharray
-          ? ({ ...LINE_PAINT, 'line-dasharray': dasharray } as never)
-          : (LINE_PAINT as never),
-      },
-      beforeIdFor(map, id as never),
-    );
-  }
-  if (!map.getLayer(LINE_LETTER_LYR)) {
-    // "H—H" style construction-line letters repeating along the line.
-    map.addLayer(
-      {
-        id: LINE_LETTER_LYR,
-        type: 'symbol',
-        source: SRC,
-        filter: [
-          'all',
-          ['==', ['geometry-type'], 'LineString'],
-          ['has', 'letter'],
-        ],
-        layout: {
-          'symbol-placement': 'line',
-          'symbol-spacing': 90,
-          'text-field': ['get', 'letter'],
-          'text-size': 11,
-          'text-font': rdLabelFont(map),
-          'text-allow-overlap': true,
-        },
-        paint: {
-          'text-color': ['coalesce', ['get', 'color'], DRAW_LINE_COLOR],
-          'text-halo-color': 'rgba(20, 16, 20, 0.9)',
-          'text-halo-width': 1.5,
-        },
-      },
-      beforeIdFor(map, LINE_LETTER_LYR),
-    );
-  }
-  if (!map.getLayer(PT_LYR)) {
-    // NWCG marker shapes: purple circles (aviation), blue squares (ground),
-    // diamonds (comms) — SDF icons tinted per feature. Breaks are text-only.
-    map.addLayer(
-      {
-        id: PT_LYR,
-        type: 'symbol',
-        source: SRC,
-        filter: [
-          'all',
-          ['==', ['geometry-type'], 'Point'],
-          ['!=', ['coalesce', ['get', 'shape'], 'circle'], 'none'],
-        ],
-        layout: {
-          'icon-image': [
-            'match',
-            ['coalesce', ['get', 'shape'], 'circle'],
-            'square', DRAW_SQUARE_IMAGE,
-            'diamond', DRAW_DIAMOND_IMAGE,
-            DRAW_CIRCLE_IMAGE,
-          ],
-          'icon-size': 1.9,
-          'icon-allow-overlap': true,
-        },
-        paint: {
-          'icon-color': ['coalesce', ['get', 'color'], DRAW_LINE_COLOR],
-          'icon-halo-color': 'rgba(20, 16, 20, 0.9)',
-          'icon-halo-width': 1,
-        },
-      },
-      beforeIdFor(map, PT_LYR),
-    );
-  }
-  if (!map.getLayer(LABEL_LYR)) {
-    map.addLayer(
-      {
-        id: LABEL_LYR,
-        type: 'symbol',
-        source: SRC,
-        filter: ['==', ['geometry-type'], 'Point'],
-        layout: {
-          'text-field': ['get', 'glyph'],
-          'text-size': ['coalesce', ['get', 'tsize'], 11],
-          'text-font': rdLabelFont(map),
-          'text-allow-overlap': true,
-        },
-        paint: {
-          // glyphs INSIDE a tinted disc knock out dark; break marks carry color
-          'text-color': [
-            'case',
-            ['==', ['coalesce', ['get', 'shape'], 'circle'], 'none'],
-            ['coalesce', ['get', 'color'], DRAW_LINE_COLOR],
-            'rgba(16, 12, 16, 0.95)',
-          ],
-          'text-halo-color': [
-            'case',
-            ['==', ['coalesce', ['get', 'shape'], 'circle'], 'none'],
-            'rgba(20, 16, 20, 0.9)',
-            'rgba(0, 0, 0, 0)',
-          ],
-          'text-halo-width': [
-            'case',
-            ['==', ['coalesce', ['get', 'shape'], 'circle'], 'none'],
-            1.5,
-            0,
-          ],
-        },
-      },
-      beforeIdFor(map, LABEL_LYR),
-    );
+  for (const slot of Object.keys(SLOT_LAYER) as DrawSlot[]) {
+    if (!map.getLayer(SLOT_LAYER[slot])) {
+      map.addLayer(layerSpec(slot), beforeIdFor(map, SLOT_LAYER[slot]));
+    }
   }
 }
 
@@ -234,24 +146,16 @@ function render(map: MlMap): void {
   const src = map.getSource(SRC) as GeoJSONSource | undefined;
   if (!src) return;
   const { features } = useStore.getState().draw;
-  const fc: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features: features as never };
   // The live stroke previews as one more line while the finger is down.
-  if (stroke && stroke.length > 1) {
-    const style = DRAW_LINE_BY_ID[activeLineStyle() ?? 'sketch'];
-    fc.features = [
-      ...fc.features,
-      {
-        type: 'Feature',
-        geometry: { type: 'LineString', coordinates: stroke },
-        properties: {
-          color: style?.color ?? DRAW_LINE_COLOR,
-          dash: style?.dash ?? 'solid',
-          width: style?.width,
-        },
-      },
-    ];
-  }
-  src.setData(fc);
+  const styleId = activeLineStyle();
+  const live = stroke && styleId ? { coords: stroke, styleId } : null;
+  // Marks are laid out in screen distance for this zoom, only where visible.
+  const b = map.getBounds();
+  const view = {
+    zoom: map.getZoom(),
+    bounds: [b.getWest(), b.getSouth(), b.getEast(), b.getNorth()] as [number, number, number, number],
+  };
+  src.setData({ type: 'FeatureCollection', features: drawSourceFeatures(features, view, live) });
 }
 
 function setCursor(map: MlMap): void {
@@ -265,20 +169,12 @@ function onClick(map: MlMap, e: MapMouseEvent): void {
   const { draw, actions } = useStore.getState();
   const tool = draw.tool;
   if (tool.startsWith('marker:')) {
-    const sym = DRAW_SYMBOL_BY_ID[tool.slice('marker:'.length)];
+    const sym = drawSymbolById(tool.slice('marker:'.length));
     if (!sym) return;
     const f: DrawFeature = {
       type: 'Feature',
       geometry: { type: 'Point', coordinates: [e.lngLat.lng, e.lngLat.lat] },
-      properties: {
-        fid: nextFid(),
-        kind: 'marker',
-        sym: sym.id,
-        glyph: sym.glyph,
-        shape: sym.shape,
-        tsize: sym.shape === 'none' ? 16 : sym.glyph.length > 1 ? 9.5 : 11,
-        color: sym.color,
-      },
+      properties: { fid: nextFid(), kind: 'marker', sym: sym.id },
     };
     actions.drawCommit([...draw.features, f]);
     return;
@@ -290,12 +186,9 @@ function onClick(map: MlMap, e: MapMouseEvent): void {
         [e.point.x - pad, e.point.y - pad],
         [e.point.x + pad, e.point.y + pad],
       ],
-      {
-        layers: [PT_LYR, LABEL_LYR, LINE_LYR, LINE_DASH_LYR, LINE_DOTS_LYR,
-                 LINE_HATCH_LYR, LINE_LETTER_LYR].filter((l) => !!map.getLayer(l)),
-      },
+      { layers: DRAW_LAYERS.filter((l) => !!map.getLayer(l)) },
     );
-    const hitFid = hits[0]?.properties?.fid as string | undefined;
+    const hitFid = hits.map((h) => h.properties?.fid as string | undefined).find(Boolean);
     if (hitFid) {
       actions.drawCommit(draw.features.filter((f) => f.properties.fid !== hitFid));
     }
@@ -326,22 +219,13 @@ function strokeEnd(map: MlMap): void {
   if (!stroke) return;
   const pts = stroke;
   stroke = null;
-  const styleId = activeLineStyle();
-  const style = styleId ? DRAW_LINE_BY_ID[styleId] : null;
+  const style = drawLineById(activeLineStyle() ?? undefined);
   if (pts.length > 1 && style) {
     const { draw, actions } = useStore.getState();
     const f: DrawFeature = {
       type: 'Feature',
       geometry: { type: 'LineString', coordinates: pts },
-      properties: {
-        fid: nextFid(),
-        kind: 'line',
-        style: style.id,
-        dash: style.dash,
-        letter: style.letter,
-        width: style.width,
-        color: style.color,
-      },
+      properties: { fid: nextFid(), kind: 'line', style: style.id },
     };
     actions.drawCommit([...draw.features, f]);
   } else {
@@ -353,6 +237,7 @@ export const drawLayer: LayerManager = {
   mount(map) {
     ensureLayers(map);
     stroke = null;
+    preloadPointIcons();
 
     const click = (e: MapMouseEvent) => onClick(map, e);
     const mdown = (e: MapMouseEvent) => strokeStart(map, e);
@@ -360,6 +245,15 @@ export const drawLayer: LayerManager = {
     const mup = () => strokeEnd(map);
     const tdown = (e: MapTouchEvent) => strokeStart(map, e);
     const tmove = (e: MapTouchEvent) => strokeMove(map, e);
+    // Symbol images are drawn on demand (and again after a style swap drops them).
+    const missing = (e: MapStyleImageMissingEvent) => provideDrawImage(map, e.id);
+    // Line marks sit at on-screen spacing: lay them out again once the view
+    // settles (zooming changes the spacing, panning reveals more line).
+    const settled = () => {
+      if (stroke || useStore.getState().draw.features.some((f) => f.properties.kind === 'line')) {
+        render(map);
+      }
+    };
     map.on('click', click);
     map.on('mousedown', mdown);
     map.on('mousemove', mmove);
@@ -367,6 +261,8 @@ export const drawLayer: LayerManager = {
     map.on('touchstart', tdown);
     map.on('touchmove', tmove);
     map.on('touchend', mup);
+    map.on('styleimagemissing', missing);
+    map.on('moveend', settled);
 
     // Self-driven: draw-slice changes re-render without a LayerContext pass.
     unsubscribe = useStore.subscribe((state, prev) => {
@@ -383,7 +279,7 @@ export const drawLayer: LayerManager = {
       }
     });
 
-    const handlers = { click, mdown, mmove, mup, tdown, tmove };
+    const handlers = { click, mdown, mmove, mup, tdown, tmove, missing, settled };
     (map as unknown as { __rdDrawHandlers?: typeof handlers }).__rdDrawHandlers = handlers;
   },
 
@@ -419,9 +315,10 @@ export const drawLayer: LayerManager = {
       map.off('touchstart', h.tdown);
       map.off('touchmove', h.tmove);
       map.off('touchend', h.mup);
+      map.off('styleimagemissing', h.missing);
+      map.off('moveend', h.settled);
     }
-    for (const l of [LABEL_LYR, PT_LYR, LINE_LETTER_LYR, LINE_HATCH_LYR,
-                     LINE_DOTS_LYR, LINE_DASH_LYR, LINE_LYR]) {
+    for (const l of [...DRAW_LAYERS].reverse()) {
       if (map.getLayer(l)) map.removeLayer(l);
     }
     if (map.getSource(SRC)) map.removeSource(SRC);
