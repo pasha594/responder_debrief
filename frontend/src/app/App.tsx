@@ -1,8 +1,10 @@
 /**
- * App shell. Three path routes (see router.ts):
- *   {base}          → the fire directory (no map is mounted)
- *   {base}fire/{id} → the full-screen map shell, scoped to that one fire
- *   {base}health    → ingestion observability
+ * App shell. Path routes (see router.ts):
+ *   {base}               → the fire directory (no map is mounted)
+ *   {base}fire/{id}      → the full-screen map shell, scoped to that one fire
+ *   {base}health         → ingestion observability
+ *   {base}sources        → upstream data sources
+ *   {base}release_notes  → what shipped each day
  */
 import { useEffect, useRef } from 'react';
 import { MapRoot } from '../map/MapRoot';
@@ -18,6 +20,7 @@ import { DroppedPin } from '../panels/DroppedPin';
 import { DrawMapToolbar } from '../panels/DrawMapToolbar';
 import { HealthView } from '../panels/HealthView';
 import { SourcesView } from '../panels/SourcesView';
+import { ReleaseNotesView } from '../panels/ReleaseNotesView';
 import { Timeline } from '../timeline/Timeline';
 import { LegendBar } from '../panels/LegendBar';
 import { ScaleBar } from '../panels/ScaleBar';
@@ -89,7 +92,9 @@ function PathSync() {
   // first and zustand updates synchronously, so getState() is truthful.
   useEffect(() => {
     const cur = parseLocation();
-    if (cur.name === 'health' || cur.name === 'sources') return; // static pages own the URL
+    if (cur.name === 'health' || cur.name === 'sources' || cur.name === 'release_notes') {
+      return; // static pages own the URL
+    }
     const curCornea = cur.name === 'fire' ? corneaIdForUrlId(cur.id) : null;
     // A fire URL that can't be resolved yet belongs to the URL → store
     // effect (still loading, or about to bounce to the directory) — writing
@@ -294,6 +299,13 @@ export function App() {
     return (
       <div className="rd-app">
         <SourcesView />
+      </div>
+    );
+  }
+  if (route.name === 'release_notes') {
+    return (
+      <div className="rd-app">
+        <ReleaseNotesView />
       </div>
     );
   }

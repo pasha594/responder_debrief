@@ -30,6 +30,8 @@ describe('router.parseLocation', () => {
     expect(parseLocation('/', '')).toEqual({ name: 'directory' });
     expect(parseLocation('/health', '')).toEqual({ name: 'health' });
     expect(parseLocation('/sources', '')).toEqual({ name: 'sources' });
+    expect(parseLocation('/release_notes', '')).toEqual({ name: 'release_notes' });
+    expect(parseLocation('/release-notes/', '')).toEqual({ name: 'release_notes' });
     expect(parseLocation('/fire/abc-123', '')).toEqual({ name: 'fire', id: 'abc-123' });
     expect(parseLocation('/fire/%7Bguid%7D/', '')).toEqual({ name: 'fire', id: '{guid}' });
   });
@@ -44,6 +46,7 @@ describe('router.parseLocation', () => {
       { name: 'directory' } as const,
       { name: 'health' } as const,
       { name: 'sources' } as const,
+      { name: 'release_notes' } as const,
       { name: 'fire', id: '{a-b}' } as const,
     ]) {
       expect(parseLocation(routePath(r), '')).toEqual(r);

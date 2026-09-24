@@ -23,7 +23,8 @@
     "places": {
       "directory": "/",
       "health": "/health",
-      "sources": "/sources"
+      "sources": "/sources",
+      "release_notes": "/release_notes"
     },
     "routes": {
       "/": {
@@ -34,6 +35,9 @@
       },
       "/sources": {
         "expectText": ["Sources"]
+      },
+      "/release_notes": {
+        "expectText": ["Release notes"]
       }
     },
     "stateCommand": "node ../scripts/diffalo-state.mjs"

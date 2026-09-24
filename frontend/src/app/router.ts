@@ -3,6 +3,8 @@
  *   {base}              → fire directory
  *   {base}fire/{id}     → single-fire map shell
  *   {base}health        → ingestion observability
+ *   {base}sources       → upstream data sources
+ *   {base}release_notes → what shipped each day ('release-notes' also works)
  *
  * GitHub Pages has no server-side rewrites, so deep links are served by the
  * 404.html-copy-of-index.html trick (see deploy-pages.yml). Legacy '#/fire/…'
@@ -17,6 +19,7 @@ export type Route =
   | { name: 'directory' }
   | { name: 'health' }
   | { name: 'sources' }
+  | { name: 'release_notes' }
   | { name: 'fire'; id: string };
 
 /** decodeURIComponent that survives malformed %-encoding (truncated links
@@ -42,6 +45,7 @@ export function parseLocation(
   p = p.replace(/\/+$/, '');
   if (p === 'health') return { name: 'health' };
   if (p === 'sources') return { name: 'sources' };
+  if (p === 'release_notes' || p === 'release-notes') return { name: 'release_notes' };
   const m = /^fire\/(.+)$/.exec(p);
   if (m) return { name: 'fire', id: safeDecode(m[1]) };
   return { name: 'directory' };
@@ -50,6 +54,7 @@ export function parseLocation(
 export function routePath(route: Route): string {
   if (route.name === 'health') return `${BASE}health`;
   if (route.name === 'sources') return `${BASE}sources`;
+  if (route.name === 'release_notes') return `${BASE}release_notes`;
   if (route.name === 'fire') return `${BASE}fire/${encodeURIComponent(route.id)}`;
   return BASE;
 }
@@ -88,3 +93,4 @@ export function useRoute(): Route {
 export const HREF_DIRECTORY = BASE;
 export const HREF_HEALTH = `${BASE}health`;
 export const HREF_SOURCES = `${BASE}sources`;
+export const HREF_RELEASE_NOTES = `${BASE}release_notes`;

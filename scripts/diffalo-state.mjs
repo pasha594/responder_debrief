@@ -273,6 +273,13 @@ export const FAMILIES = {
     args: {},
     build: async () => '/sources',
   },
+  release_notes: {
+    description: 'Release notes: what shipped each day, in plain language for responders.',
+    tags: ['release_notes'],
+    platforms: ['web'],
+    args: {},
+    build: async () => '/release_notes',
+  },
 };
 
 export function assembleResult(name, route, args) {
