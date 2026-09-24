@@ -1038,6 +1038,13 @@
   outline: 2px solid var(--color-accent);
   outline-offset: 2px;
 }
+/* phones: just the arrow until tapped (BackControl) */
+.rd-back-control--compact {
+  width: 32px;
+  padding: 0;
+  justify-content: center;
+  font-size: 16px;
+}
 
 /* ---------- Legend bar ---------- */
 
@@ -1646,14 +1653,23 @@
   font-weight: 600;
 }
 
-@media (max-width: 767px) {
-  /* no side panel on phones: under the zoom buttons and the settings gear */
-  .rd-draw-mapbar {
-    top: 124px;
-    right: 10px;
-    width: 150px;
-  }
+.rd-draw-mapbtn--armed {
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+}
 
+/* phones: in the top-left stack under the search bar, folded behind the
+   Drawing Tools button until it's tapped */
+.rd-draw-mapbar--stack {
+  position: static;
+  width: 150px;
+}
+
+.rd-draw-mapbar--stack .rd-draw-mapbtn--toggle {
+  align-self: flex-start;
+}
+
+@media (max-width: 767px) {
   .rd-app:has(.rd-draw-mapbar) .rd-map-toolbar {
     right: auto;
   }
@@ -2035,6 +2051,14 @@
     align-items: flex-start;
     gap: 6px;
   }
+  /* back arrow, basemap pill and 3D share the top line; pinch zooms, so the
+     +/- buttons would only crowd the corner the settings gear moves into */
+  .rd-map-toolbar-row {
+    gap: 6px;
+  }
+  .maplibregl-map .maplibregl-ctrl-top-right {
+    display: none;
+  }
 }
 .rd-sd-buttons { display: flex; gap: 6px; }
 .rd-mini-btn--on { background: var(--color-accent); color: #1a1218; }
@@ -2204,6 +2228,16 @@
   border-radius: var(--radius);
   background: var(--color-bg);
   border-color: var(--color-border);
+}
+/* phones: an idle search is a compact "Search" pill; it widens back to the
+   full bar while focused, holding a place, or expanded into directions */
+@media (max-width: 767px) {
+  .rd-sd-bar {
+    transition: width 150ms ease;
+  }
+  .rd-sd-bar:not(:focus-within):not(:has(.rd-sd-row + .rd-sd-row)):not(:has(.rd-sd-result)):has(input:placeholder-shown) {
+    width: 104px;
+  }
 }
 
 .rd-sd-badge { flex: 0 0 auto; width: 18px; height: 18px; font-size: 10px; cursor: default; }
@@ -2553,11 +2587,12 @@
   }
 }
 @media (max-width: 767px) {
-  /* no sidebar here (bottom sheet) — float below the maplibre zoom control */
+  /* no sidebar here (bottom sheet): the map's top-right corner, level with
+     the back / basemap / 3D line (the zoom buttons are hidden on phones) */
   .rd-app > .rd-settings,
   .rd-app .rd-map-toolbar ~ .rd-settings {
-    top: 80px;
-    right: 10px;
+    top: 12px;
+    right: 12px;
   }
 }
 .rd-directory .rd-settings { position: relative; top: auto; right: auto; }

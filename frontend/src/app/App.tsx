@@ -230,18 +230,23 @@ function FireMapView() {
       <MapLayerBridge />
       <UrlStateSync />
       <div className="rd-map-toolbar">
-        <BackControl />
         <div className="rd-map-toolbar-row">
+          <BackControl />
           <BasemapControl />
           <PitchControl />
         </div>
         <ErrorBoundary label="Search">
           <SearchDirectionsControl />
         </ErrorBoundary>
+        {/* phones: under the search bar */}
+        <ErrorBoundary label="Drawing tools">
+          <DrawMapToolbar placement="stack" />
+        </ErrorBoundary>
       </div>
       <SettingsControl />
+      {/* desktop: the map's top-right corner */}
       <ErrorBoundary label="Drawing tools">
-        <DrawMapToolbar />
+        <DrawMapToolbar placement="corner" />
       </ErrorBoundary>
       <ErrorBoundary label="Fire panel">
         <Sidebar />

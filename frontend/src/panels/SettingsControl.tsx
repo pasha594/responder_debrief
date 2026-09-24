@@ -3,9 +3,10 @@
  * (dark/light — the machinery lived in the store all along, this is its first
  * UI) and the basemap style, three keyless variants per theme (see MAP_STYLES).
  */
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { MAP_STYLES } from '../app/config';
 import { useStore } from '../state/store';
+import { useDismiss } from '../utils/useDismiss';
 
 function GearIcon() {
   return (
@@ -21,35 +22,8 @@ export function SettingsControl() {
   const actions = useStore((s) => s.actions);
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    const onDown = (e: PointerEvent) => {
-      if (rootRef.current?.contains(e.target as Node)) return;
-      setOpen(false);
-      // Swallow the click this pointerdown produces: on the fire map it
-      // would otherwise fall through to the canvas and drop a directions
-      // point. Standard popover behavior — the dismissing click only dismisses.
-      const swallow = (ev: MouseEvent) => {
-        ev.stopPropagation();
-        ev.preventDefault();
-      };
-      document.addEventListener('click', swallow, { capture: true, once: true });
-      setTimeout(
-        () => document.removeEventListener('click', swallow, { capture: true }),
-        400,
-      );
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setOpen(false);
-    };
-    document.addEventListener('pointerdown', onDown);
-    document.addEventListener('keydown', onKey);
-    return () => {
-      document.removeEventListener('pointerdown', onDown);
-      document.removeEventListener('keydown', onKey);
-    };
-  }, [open]);
+  const close = useCallback(() => setOpen(false), []);
+  useDismiss(rootRef, open, close);
 
   return (
     <div className="rd-settings" ref={rootRef}>
