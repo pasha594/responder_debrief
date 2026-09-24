@@ -44,6 +44,11 @@ export const RELEASE_NOTES: ReleaseDay[] = [
           'The Draw tab now has the full National Wildfire Coordinating Group (NWCG) set: 50 point symbols and 32 line styles.',
       },
       {
+        title: 'Draw tools on the map',
+        summary:
+          'Erase, undo, redo and clear now sit on the map while you draw, and directional lines can be flipped.',
+      },
+      {
         title: 'Terrain labels',
         summary:
           'The Map background now labels peaks with elevations, ridges, passes, creeks, lakes, and forest and wilderness names.',
@@ -54,7 +59,11 @@ export const RELEASE_NOTES: ReleaseDay[] = [
       },
       {
         title: 'Topo by default',
-        summary: 'Fire maps now open on the USGS topographic map. Map and Satellite are one tap away.',
+        summary: 'Fire maps now open on the USGS topographic map. You can still switch to Map or Satellite.',
+      },
+      {
+        title: 'Compact controls on phones',
+        summary: 'On phones, the map buttons fold into smaller ones, leaving more of the screen for the map.',
       },
       {
         title: 'Map labels stay visible',
