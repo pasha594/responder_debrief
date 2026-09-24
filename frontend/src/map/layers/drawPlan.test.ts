@@ -6,6 +6,7 @@ import {
   LINE_SLOTS,
   PX_PER_PT,
   drawSourceFeatures,
+  flipLatestLine,
   lineImageId,
   patternTileMetrics,
   planStyle,
@@ -18,6 +19,7 @@ import {
   DRAW_SYMBOL_GROUPS,
   drawLineById,
   drawSymbolById,
+  isDirectionalLine,
 } from './drawSymbols';
 
 const slotIndex = (slot: string) => LINE_SLOTS.findIndex((s) => s.slot === slot);
@@ -54,6 +56,23 @@ describe('NWCG palette data', () => {
     expect(DRAW_LINE_GROUPS.flatMap((g) => g.items)).toHaveLength(32);
     expect(DRAW_LINES).toHaveLength(34);
     expect(new Set(DRAW_LINES.map((l) => l.id)).size).toBe(34);
+  });
+
+  it('treats only styles with a one-sided look as directional', () => {
+    expect(DRAW_LINES.filter(isDirectionalLine).map((s) => s.id).sort()).toEqual([
+      'completed-burnout',
+      'fire-edge-field-collection',
+      'planned-burnout',
+      'uncontained',
+    ]);
+  });
+
+  it('turns only the assignment breaks with the map', () => {
+    expect(DRAW_SYMBOLS.filter((s) => s.rotatesWithMap).map((s) => s.id)).toEqual([
+      'division-break',
+      'branch-break',
+      'zone-break',
+    ]);
   });
 
   it('resolves ids saved by the old palette', () => {
@@ -105,6 +124,22 @@ describe('drawSourceFeatures', () => {
     };
     const [f] = drawSourceFeatures([marker], VIEW);
     expect(f.properties).toMatchObject({ fid: 'm1', slot: 'pt', icon: 'rd-dp-drop-point' });
+    expect(f.properties).not.toHaveProperty('rot');
+  });
+
+  it('keeps a break at the heading it was placed with', () => {
+    const brk = (rot?: number): DrawFeature => ({
+      type: 'Feature',
+      geometry: { type: 'Point', coordinates: [-120, 40] },
+      properties: { fid: 'b1', kind: 'marker', sym: 'division', ...(rot === undefined ? {} : { rot }) },
+    });
+    expect(drawSourceFeatures([brk(35)], VIEW)[0].properties).toMatchObject({
+      slot: 'pt-map',
+      icon: 'rd-dp-division-break',
+      rot: 35,
+    });
+    // saved before headings existed: north-up, as it was drawn
+    expect(drawSourceFeatures([brk()], VIEW)[0].properties).toMatchObject({ rot: 0 });
   });
 
   it('puts the halo casing under a black stroke', () => {
@@ -168,6 +203,18 @@ describe('drawSourceFeatures', () => {
     const seen = props(drawSourceFeatures([line('escape-route', EAST)], { zoom: ZOOM, bounds }), 'marks');
     expect(seen.length).toBeGreaterThan(0);
     expect(seen.length).toBeLessThan(all.length);
+  });
+
+  it('flips only the most recent line of the style', () => {
+    const older = line('uncontained', EAST);
+    const other = line('completed-burnout', EAST);
+    const latest = { ...line('uncontained', NORTH), properties: { fid: 'l2', kind: 'line' as const, style: 'uncontained' } };
+    const flipped = flipLatestLine([older, latest, other], 'uncontained')!;
+    expect(flipped[0]).toBe(older);
+    expect(flipped[2]).toBe(other);
+    expect(flipped[1].properties.fid).toBe('l2');
+    expect(flipped[1].geometry.coordinates).toEqual([...NORTH].reverse());
+    expect(flipLatestLine([other], 'uncontained')).toBeNull();
   });
 
   it('previews the stroke being drawn without a feature id', () => {

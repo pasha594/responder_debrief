@@ -105,6 +105,7 @@ function markIcon(part: MarksPart | EndsPart): { data: ImageData; pixelRatio: nu
 
 const decoded = new Map<string, HTMLImageElement>();
 const waiting = new Map<string, Set<MlMap>>();
+const readyCallbacks = new Map<string, Set<() => void>>();
 
 function loadIcon(sym: DrawSymbol): void {
   if (decoded.has(sym.id) || waiting.has(sym.id)) return;
@@ -114,6 +115,8 @@ function loadIcon(sym: DrawSymbol): void {
     decoded.set(sym.id, img);
     for (const map of waiting.get(sym.id) ?? []) addPointIcon(map, sym);
     waiting.delete(sym.id);
+    for (const cb of readyCallbacks.get(sym.id) ?? []) cb();
+    readyCallbacks.delete(sym.id);
   };
   img.onerror = () => waiting.delete(sym.id);
   img.src = sym.url;
@@ -161,6 +164,54 @@ function addPointIcon(map: MlMap, sym: DrawSymbol): void {
 /** Start decoding every icon so the first tap on the map finds it ready. */
 export function preloadPointIcons(): void {
   for (const sym of DRAW_SYMBOLS) loadIcon(sym);
+}
+
+const cursors = new Map<string, string[]>();
+
+/**
+ * CSS cursor values that show the symbol as it will land on the map (its
+ * layer-file size, halo included), hotspot centred — most specific last, so
+ * assigning them in order leaves the best one the browser understands. Empty
+ * until the icon has decoded; `onReady` fires once it has.
+ */
+export function symbolCursor(sym: DrawSymbol, onReady: () => void): string[] {
+  const hit = cursors.get(sym.id);
+  if (hit) return hit;
+  const img = decoded.get(sym.id);
+  if (!img) {
+    loadIcon(sym);
+    if (!readyCallbacks.has(sym.id)) readyCallbacks.set(sym.id, new Set());
+    readyCallbacks.get(sym.id)!.add(onReady);
+    return [];
+  }
+  const art = pointIconImage(sym, img);
+  if (!art) return [];
+  let src: CanvasImageSource = img;
+  if (art instanceof ImageData) {
+    const made = canvas2d(art.width, art.height);
+    if (!made) return [];
+    made[1].putImageData(art, 0, 0);
+    src = made[0];
+  }
+  const w = Math.ceil(art.width / sym.pixelRatio);
+  const h = Math.ceil(art.height / sym.pixelRatio);
+  const urlAt = (scale: number): string => {
+    const made = canvas2d(w * scale, h * scale);
+    if (!made) return '';
+    made[1].drawImage(src, 0, 0, w * scale, h * scale);
+    return made[0].toDataURL();
+  };
+  const one = urlAt(1);
+  const two = urlAt(2);
+  const hot = `${Math.round(w / 2)} ${Math.round(h / 2)}`;
+  const set = `url("${one}") 1x, url("${two}") 2x`;
+  const css = [
+    `url("${one}") ${hot}, crosshair`,
+    `-webkit-image-set(${set}) ${hot}, crosshair`,
+    `image-set(${set}) ${hot}, crosshair`,
+  ];
+  cursors.set(sym.id, css);
+  return css;
 }
 
 // ---------- image provider ----------

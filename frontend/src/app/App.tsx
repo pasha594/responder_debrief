@@ -15,6 +15,7 @@ import { PitchControl } from '../panels/PitchControl';
 import { SettingsControl } from '../panels/SettingsControl';
 import { SearchDirectionsControl } from '../panels/SearchDirectionsControl';
 import { DroppedPin } from '../panels/DroppedPin';
+import { DrawMapToolbar } from '../panels/DrawMapToolbar';
 import { HealthView } from '../panels/HealthView';
 import { SourcesView } from '../panels/SourcesView';
 import { Timeline } from '../timeline/Timeline';
@@ -239,6 +240,9 @@ function FireMapView() {
         </ErrorBoundary>
       </div>
       <SettingsControl />
+      <ErrorBoundary label="Drawing tools">
+        <DrawMapToolbar />
+      </ErrorBoundary>
       <ErrorBoundary label="Fire panel">
         <Sidebar />
       </ErrorBoundary>

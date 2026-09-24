@@ -1,9 +1,9 @@
 /**
  * Draw tab: annotate the map for a briefing with the official NWCG PMS 936
  * symbology. Pick a symbol and tap the map to place it; pick a line style and
- * drag to draw it; erase taps features away. Undo/redo/clear cover the
- * session; annotations persist per fire on this device (localStorage) —
- * nothing is uploaded.
+ * drag to draw it. Erase / undo / redo / clear / stop live on the map
+ * (DrawMapToolbar) so they stay in reach; annotations persist per fire on
+ * this device (localStorage) — nothing is uploaded.
  */
 import { useStore, type DrawTool } from '../../state/store';
 import {
@@ -13,33 +13,6 @@ import {
   type DrawLineStyle,
 } from '../../map/layers/drawSymbols';
 import { linePreviewUrl } from '../../map/layers/drawImages';
-
-function ToolButton({
-  active,
-  onClick,
-  children,
-  title,
-  disabled,
-}: {
-  active?: boolean;
-  onClick: () => void;
-  children: React.ReactNode;
-  title?: string;
-  disabled?: boolean;
-}) {
-  return (
-    <button
-      type="button"
-      className={`rd-draw-tool${active ? ' rd-draw-tool--active' : ''}`}
-      onClick={onClick}
-      title={title}
-      disabled={disabled}
-      aria-pressed={active}
-    >
-      {children}
-    </button>
-  );
-}
 
 function LineButton({
   style,
@@ -145,34 +118,6 @@ export function DrawTab() {
             </div>
           </div>
         ))}
-      </section>
-
-      <section className="rd-section">
-        <h3 className="rd-section-title">Tools</h3>
-        <div className="rd-draw-tools">
-          <ToolButton
-            active={draw.tool === 'erase'}
-            onClick={() => toggle('erase')}
-            title="Tap a mark to remove it"
-          >
-            ⌫ Erase
-          </ToolButton>
-        </div>
-        <div className="rd-draw-tools">
-          <ToolButton onClick={actions.drawUndo} disabled={!draw.past.length} title="Undo">
-            ↩ Undo
-          </ToolButton>
-          <ToolButton onClick={actions.drawRedo} disabled={!draw.future.length} title="Redo">
-            ↪ Redo
-          </ToolButton>
-          <ToolButton
-            onClick={actions.drawClear}
-            disabled={!draw.features.length}
-            title="Remove every annotation"
-          >
-            Clear all
-          </ToolButton>
-        </div>
       </section>
 
       <div className="rd-field-note">

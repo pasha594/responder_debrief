@@ -20,7 +20,8 @@
  *   stroke-top  solid strokes drawn over marks (escape route, aerial hazard, …)
  *   dash-top    dashed strokes drawn over marks (fire edge field collection)
  *   upright     marks that stay upright (hand / mixed / plow / road letters, hoselay)
- *   pt          point symbols (the official NWCG icons)
+ *   pt-map      point symbols that keep their heading on the map (assignment breaks)
+ *   pt          point symbols (the official NWCG icons), upright on screen
  */
 import type { DrawFeature } from '../../state/store';
 import type { NwcgLinePart } from '../nwcg/symbology.gen';
@@ -45,6 +46,7 @@ export type DrawSlot =
   | 'stroke-top'
   | 'dash-top'
   | 'upright'
+  | 'pt-map'
   | 'pt';
 
 type SlotKind = 'solid' | 'dashed' | 'pattern' | 'marks' | 'upright';
@@ -300,6 +302,23 @@ function lineFeatures(
   return out;
 }
 
+/**
+ * The marks with the most recent line of this style reversed — the side its
+ * ticks or burn offset fall on swaps — or null when there is none to flip.
+ */
+export function flipLatestLine(features: DrawFeature[], styleId: string): DrawFeature[] | null {
+  for (let i = features.length - 1; i >= 0; i--) {
+    const f = features[i];
+    if (f.geometry.type !== 'LineString' || drawLineById(f.properties.style)?.id !== styleId) continue;
+    const flipped: DrawFeature = {
+      ...f,
+      geometry: { type: 'LineString', coordinates: [...f.geometry.coordinates].reverse() },
+    };
+    return features.map((g, j) => (j === i ? flipped : g));
+  }
+  return null;
+}
+
 /** Everything the draw source shows: saved marks plus the stroke being drawn. */
 export function drawSourceFeatures(
   features: DrawFeature[],
@@ -312,10 +331,13 @@ export function drawSourceFeatures(
     if (f.geometry.type === 'Point') {
       const sym = drawSymbolById(f.properties.sym);
       if (!sym) return;
+      const props = { fid: f.properties.fid, icon: pointImageId(sym.id), sort: base };
       out.push({
         type: 'Feature',
         geometry: f.geometry,
-        properties: { fid: f.properties.fid, slot: 'pt', icon: pointImageId(sym.id), sort: base },
+        properties: sym.rotatesWithMap
+          ? { ...props, slot: 'pt-map', rot: f.properties.rot ?? 0 }
+          : { ...props, slot: 'pt' },
       });
     } else {
       const style = drawLineById(f.properties.style) ?? drawLineById('sketch')!;

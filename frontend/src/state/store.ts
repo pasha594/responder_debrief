@@ -42,6 +42,9 @@ export interface DrawFeature {
     kind: 'marker' | 'line';
     /** NWCG point symbol id (markers only). */
     sym?: string;
+    /** Map-relative heading, degrees clockwise from north, for symbols that
+     * turn with the map (the map's bearing when placed, so they land upright). */
+    rot?: number;
     /** Line style id (lines only). */
     style?: string;
   };

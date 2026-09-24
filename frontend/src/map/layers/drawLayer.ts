@@ -22,7 +22,7 @@ import { beforeIdFor, type RdLayerId } from '../zOrder';
 import type { LayerManager } from '../layerTypes';
 import { drawLineById, drawSymbolById } from './drawSymbols';
 import { drawSourceFeatures, type DrawSlot } from './drawPlan';
-import { preloadPointIcons, provideDrawImage } from './drawImages';
+import { preloadPointIcons, provideDrawImage, symbolCursor } from './drawImages';
 
 const SRC = 'rd-draw';
 /** One map layer per slot, bottom → top (drawPlan explains the stack). */
@@ -34,6 +34,7 @@ const SLOT_LAYER: Record<DrawSlot, RdLayerId> = {
   'stroke-top': 'rd-draw-line-top',
   'dash-top': 'rd-draw-line-dash-top',
   upright: 'rd-draw-line-letter',
+  'pt-map': 'rd-draw-pt-map',
   pt: 'rd-draw-pt',
 };
 const DRAW_LAYERS = Object.values(SLOT_LAYER);
@@ -128,6 +129,11 @@ function layerSpec(slot: DrawSlot): LayerSpecification {
     layout['icon-rotation-alignment'] = 'map';
   } else if (slot === 'upright') {
     layout['icon-rotation-alignment'] = 'viewport';
+  } else if (slot === 'pt-map') {
+    // turns with the map's bearing, but still stands up to face a tilted camera
+    layout['icon-rotate'] = ['get', 'rot'];
+    layout['icon-rotation-alignment'] = 'map';
+    layout['icon-pitch-alignment'] = 'viewport';
   }
   const spec: SymbolLayerSpecification = { ...base, type: 'symbol', layout };
   return spec;
@@ -160,7 +166,13 @@ function render(map: MlMap): void {
 
 function setCursor(map: MlMap): void {
   const tool = useStore.getState().draw.tool;
-  map.getCanvas().style.cursor = tool === 'none' ? '' : 'crosshair';
+  const style = map.getCanvas().style;
+  style.cursor = tool === 'none' ? '' : 'crosshair';
+  // A picked symbol rides the pointer on desktop, centred where it will land.
+  const sym = tool.startsWith('marker:') ? drawSymbolById(tool.slice('marker:'.length)) : undefined;
+  // Each assignment is a fallback for the next: a browser that can't parse
+  // the image-set form keeps the plain image cursor (or the crosshair).
+  if (sym) for (const css of symbolCursor(sym, () => setCursor(map))) style.cursor = css;
 }
 
 // ---------- interactions ----------
@@ -174,7 +186,13 @@ function onClick(map: MlMap, e: MapMouseEvent): void {
     const f: DrawFeature = {
       type: 'Feature',
       geometry: { type: 'Point', coordinates: [e.lngLat.lng, e.lngLat.lat] },
-      properties: { fid: nextFid(), kind: 'marker', sym: sym.id },
+      properties: {
+        fid: nextFid(),
+        kind: 'marker',
+        sym: sym.id,
+        // upright on screen now; keeps this heading as the map turns
+        ...(sym.rotatesWithMap ? { rot: map.getBearing() } : {}),
+      },
     };
     actions.drawCommit([...draw.features, f]);
     return;
@@ -202,8 +220,27 @@ function activeLineStyle(): string | null {
   return null;
 }
 
+/**
+ * Only a plain left-button drag or a one-finger drag draws. MapLibre rotates
+ * and pitches on right-drag or ctrl + left-drag, and a second finger turns the
+ * touch into a pinch — those stay map navigation (a stroke already under way
+ * is dropped when the second finger lands).
+ */
+function isDrawGesture(map: MlMap, e: MapMouseEvent | MapTouchEvent): boolean {
+  const ev = e.originalEvent;
+  if ('touches' in ev) {
+    if (ev.touches.length === 1) return true;
+    if (stroke) {
+      stroke = null;
+      render(map);
+    }
+    return false;
+  }
+  return ev.button === 0 && !ev.ctrlKey;
+}
+
 function strokeStart(map: MlMap, e: MapMouseEvent | MapTouchEvent): void {
-  if (!activeLineStyle()) return;
+  if (!activeLineStyle() || !isDrawGesture(map, e)) return;
   e.preventDefault(); // keep dragPan out of the gesture
   stroke = [[e.lngLat.lng, e.lngLat.lat]];
   render(map);

@@ -53,6 +53,7 @@ export const RD_LAYER_ORDER = [
   'rd-draw-line-top',
   'rd-draw-line-dash-top',
   'rd-draw-line-letter',
+  'rd-draw-pt-map',
   'rd-draw-pt',
   // directions ride on the very top
   'rd-route-casing',

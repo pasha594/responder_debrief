@@ -1575,6 +1575,90 @@
   object-fit: contain;
 }
 
+/* Drawing tools in the map's top-right corner while the Draw tab is open. */
+.rd-draw-mapbar {
+  position: absolute;
+  top: 12px;
+  right: calc(var(--sidebar-w) + 12px);
+  z-index: 28;
+  width: 158px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.rd-app:has(.rd-sidebar--collapsed) .rd-draw-mapbar {
+  right: 60px;
+}
+
+/* the back / basemap / search row wraps before it reaches the tools */
+.rd-app:has(.rd-draw-mapbar) .rd-map-toolbar {
+  right: calc(var(--sidebar-w) + 12px + 158px + 8px);
+}
+
+.rd-app:has(.rd-sidebar--collapsed):has(.rd-draw-mapbar) .rd-map-toolbar {
+  right: calc(60px + 158px + 8px);
+}
+
+.rd-draw-mapbar-pair {
+  display: flex;
+  gap: 6px;
+}
+
+.rd-draw-mapbar-pair > .rd-draw-mapbtn {
+  flex: 1;
+}
+
+.rd-draw-mapbtn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 6px 8px;
+  font-size: 12.5px;
+  white-space: nowrap;
+  color: var(--color-text);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
+}
+
+.rd-draw-mapbtn:hover:not(:disabled) {
+  background: var(--color-hover-bg);
+}
+
+.rd-draw-mapbtn[aria-pressed='true'] {
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+}
+
+.rd-draw-mapbtn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.rd-draw-mapbtn--stop,
+.rd-draw-mapbtn--stop:hover:not(:disabled) {
+  background: var(--color-accent);
+  border-color: transparent;
+  color: #1a1218;
+  font-weight: 600;
+}
+
+@media (max-width: 767px) {
+  /* no side panel on phones: under the zoom buttons and the settings gear */
+  .rd-draw-mapbar {
+    top: 124px;
+    right: 10px;
+    width: 150px;
+  }
+
+  .rd-app:has(.rd-draw-mapbar) .rd-map-toolbar {
+    right: auto;
+  }
+}
+
 /* ---------- basemap switcher (floating, under the back control) ---------- */
 
 .rd-basemap-control {

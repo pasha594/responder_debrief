@@ -21,6 +21,9 @@ const ICON_URLS = import.meta.glob<string>('../nwcg/points/*.png', {
 
 export interface DrawSymbol extends NwcgPointSymbol {
   url: string;
+  /** Placed upright on screen, then keeps that heading on the map as it
+   * rotates (the assignment breaks, whose orientation carries meaning). */
+  rotatesWithMap: boolean;
 }
 
 export type DrawLineStyle = NwcgLineStyle;
@@ -28,6 +31,7 @@ export type DrawLineStyle = NwcgLineStyle;
 export const DRAW_SYMBOLS: DrawSymbol[] = NWCG_POINTS.map((p) => ({
   ...p,
   url: ICON_URLS[`../nwcg/points/${p.id}.png`],
+  rotatesWithMap: p.category === 'Assignment Break',
 }));
 
 /** Not part of PMS 936 — kept beside the official lines. */
@@ -91,4 +95,17 @@ export function drawSymbolById(id: string | undefined): DrawSymbol | undefined {
 
 export function drawLineById(id: string | undefined): DrawLineStyle | undefined {
   return id ? LINE_BY_ID.get(LEGACY_LINE_IDS[id] ?? id) : undefined;
+}
+
+/**
+ * True when the style draws differently on its two sides — ticks or a burn
+ * offset on one side of travel — so the drawing direction matters (fire
+ * edges, burnouts). Upright letters don't count.
+ */
+export function isDirectionalLine(style: DrawLineStyle): boolean {
+  return style.parts.some((p) => {
+    if (p.kind === 'stroke') return !!p.offset;
+    if (p.kind === 'marks' && p.upright) return false;
+    return Math.abs(p.box[1] + p.box[3]) > 1; // ink off-centre by more than 1 pt
+  });
 }
