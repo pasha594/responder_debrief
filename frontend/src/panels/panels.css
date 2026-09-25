@@ -2014,6 +2014,24 @@
   display: inline-block;
 }
 
+/* Land-status legend: the agencies present around the fire, then private */
+.rd-land-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  font-size: 11px;
+  color: var(--color-text-muted);
+  padding: 2px 0 4px 26px;
+}
+.rd-land-key {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.rd-land-chip--private {
+  box-shadow: inset 0 0 0 1px var(--color-text-muted);
+}
+
 
 /* ---------- MapLibre popups: match the app's dark surface ---------- */
 .maplibregl-popup-content {
@@ -2485,6 +2503,15 @@
   line-height: 1.4;
   color: var(--color-text-muted);
 }
+/* Whose land the pin is on (land layer on): chip in the map's color */
+.rd-pin-card-land {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+.rd-pin-card-land .rd-hist-chip { flex: 0 0 auto; }
+/* "WA-OWF" never breaks at its dash */
+.rd-pin-card-land-tag { white-space: nowrap; }
 .rd-pin-card-foot {
   display: flex;
   align-items: center;

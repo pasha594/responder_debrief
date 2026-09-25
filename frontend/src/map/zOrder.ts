@@ -11,8 +11,11 @@ export const RD_LAYER_ORDER = [
   // then the fire forecast, then weather. An ops map at full opacity must
   // never hide the forecast or smoke — those are the transient signal; the
   // sheet is the reference underneath. The vegetation classes (the Walk
-  // router's terrain model) are pure reference, so they sit under all of it.
+  // router's terrain model) are pure reference, so they sit under all of it,
+  // with land status tinting the ground just above them.
   'rd-vegetation',
+  'rd-land-fill',
+  'rd-land-line',
   'rd-traffic',
   'rd-incident-map',
   'rd-spread-forecast',

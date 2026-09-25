@@ -14,7 +14,8 @@ const SOURCES: Source[] = [
     name: 'National Interagency Fire Center (NIFC)',
     what:
       'National wildland-fire coordination center. Provides the daily Incident Management ' +
-      'Situation Report behind Resources & Operations, and the WFIGS perimeter service behind fire perimeters.',
+      'Situation Report behind Resources & Operations, the WFIGS perimeter service behind fire perimeters, ' +
+      'and the Jurisdictional Units behind the land ownership layer.',
     url: 'https://www.nifc.gov',
     label: 'nifc.gov',
   },

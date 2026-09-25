@@ -57,6 +57,14 @@ export function parseFireCoordinates(s: string | null | undefined): [number, num
   return [lon, lat];
 }
 
+/** The box the per-fire context layers (road incidents, historic
+ * perimeters, land status) query: ±0.6° lon, ±0.5° lat of the fire's origin. */
+export function fireAreaBox(
+  c: [number, number] | null | undefined,
+): [number, number, number, number] | null {
+  return c ? [c[0] - 0.6, c[1] - 0.5, c[0] + 0.6, c[1] + 0.5] : null;
+}
+
 const EARTH_RADIUS_MI = 3958.8;
 
 /** Great-circle distance in miles between two [lon, lat] points. */

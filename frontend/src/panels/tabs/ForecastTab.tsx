@@ -15,9 +15,11 @@ import { TrailsRow, VegetationRow } from '../layers/TrailsRow';
 import {
   latestRun,
   useFire,
+  useFireLandStatus,
   useMasterCatalog,
   usePyrecastRuns,
 } from '../../api/queries';
+import { LAND_CLASSES, landChipStyle } from '../../api/nifcLandStatus';
 import {
   nearestPercentile,
   productPercentiles,
@@ -324,10 +326,38 @@ function FireForecastSection({ corneaId }: { corneaId: string }) {
   );
 }
 
+/** The agencies actually in view around this fire, in NIFC's colors, then
+ * private land (unshaded) — or where the download stands. */
+function LandLegend({ corneaId }: { corneaId: string }) {
+  const { data, isLoading, isError, bbox } = useFireLandStatus(corneaId, true);
+  const present = useMemo(() => {
+    const cats = new Set(data?.features.map((f) => f.properties.JurisdictionalCategory));
+    return LAND_CLASSES.filter((c) => c.codes.some((code) => cats.has(code)));
+  }, [data]);
+  if (!bbox) return null; // no known origin to look around
+  if (isError) return <div className="rd-land-legend">Couldn't reach NIFC — needs a connection</div>;
+  if (isLoading || !data) return <div className="rd-land-legend">Loading land status…</div>;
+  return (
+    <div className="rd-land-legend" aria-hidden="true">
+      {present.map((c) => (
+        <span key={c.label} className="rd-land-key">
+          <span className="rd-hist-chip" style={landChipStyle(c)} />
+          {c.label}
+        </span>
+      ))}
+      <span className="rd-land-key">
+        <span className="rd-hist-chip rd-land-chip--private" />
+        Private
+      </span>
+    </div>
+  );
+}
+
 function MapLayerToggles({ corneaId }: { corneaId: string }) {
   const hotspots = useStore((s) => s.layers.hotspots.visible);
   const perimeters = useStore((s) => s.layers.perimeters.visible);
   const historic = useStore((s) => s.layers.historicPerimeters.visible);
+  const land = useStore((s) => s.layers.land.visible);
   const actions = useStore((s) => s.actions);
   return (
     <section className="rd-section">
@@ -356,6 +386,12 @@ function MapLayerToggles({ corneaId }: { corneaId: string }) {
       )}
       <TrailsRow />
       <VegetationRow corneaId={corneaId} />
+      <label className="rd-field--row">
+        <input type="checkbox" checked={land} onChange={() => actions.toggleLand()} />
+        <span>Land ownership</span>
+        <span className="rd-title-meta">NIFC · online</span>
+      </label>
+      {land && <LandLegend corneaId={corneaId} />}
     </section>
   );
 }
