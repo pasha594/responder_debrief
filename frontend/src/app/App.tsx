@@ -272,7 +272,8 @@ function NowSampler() {
  * manager, so a repeat entry starts from a clean map.
  */
 function FireMapView() {
-  // phones and touch tablets stack the folded controls down the left edge
+  // phones, touch tablets and narrow windows stack the folded controls down
+  // the left edge
   const compact = useCompactControls();
   return (
     <MapRoot>

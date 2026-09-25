@@ -1,9 +1,9 @@
 /**
  * Ground switcher: vector map / USGS satellite (hybrid) / USGS topo.
  * A floating segmented pill under the back control at the map's top-left;
- * on phones and touch tablets it folds to one pill naming the current ground,
- * which opens to all three when tapped and closes again on a pick (or a tap
- * elsewhere).
+ * on phones, touch tablets and narrow windows it folds to one pill naming
+ * the current ground, which opens to all three when tapped and closes again
+ * on a pick (or a tap elsewhere).
  */
 import { useCallback, useRef, useState } from 'react';
 import { useStore, type AppState } from '../state/store';

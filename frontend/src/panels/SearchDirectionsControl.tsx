@@ -238,8 +238,8 @@ function endpointEl(which: 'a' | 'b'): HTMLElement {
 
 export function SearchDirectionsControl() {
   const map = useMap();
-  // phones and touch tablets get a compact "Search" pill that widens while
-  // it's in use (CSS)
+  // phones, touch tablets and narrow windows get a compact "Search" pill
+  // that widens while it's in use (CSS)
   const fullControls = !useCompactControls();
   const directions = useStore((s) => s.directions);
   const range = useStore((s) => s.range);

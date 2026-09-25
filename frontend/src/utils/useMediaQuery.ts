@@ -18,8 +18,9 @@ export const useIsDesktop = () => useMediaQuery('(min-width: 768px)');
 
 /**
  * Folded map controls (back arrow, basemap pill, compact search, Drawing
- * Tools menu): phones, and touch-first devices like iPads at any width —
- * a tablet keeps the side panel but gets the phone's controls. Mouse-driven
- * desktops keep the full ones however narrow the window.
+ * Tools menu): phones, touch-first devices like iPads at any width, and
+ * windows under 870px, where the full row would run under the drawing tools
+ * in the map's top-right corner. Tablets and narrow windows keep the side
+ * panel; only the controls fold.
  */
-export const useCompactControls = () => useMediaQuery('(max-width: 767px), (pointer: coarse)');
+export const useCompactControls = () => useMediaQuery('(max-width: 869px), (pointer: coarse)');

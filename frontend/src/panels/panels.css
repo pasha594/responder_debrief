@@ -1658,8 +1658,8 @@
   color: var(--color-accent);
 }
 
-/* phones and tablets: in the top-left stack under the search bar, folded
-   behind the Drawing Tools button until it's tapped */
+/* phones, tablets and narrow windows: in the top-left stack under the search
+   bar, folded behind the Drawing Tools button until it's tapped */
 .rd-draw-mapbar--stack {
   position: static;
   width: 150px;
@@ -2084,9 +2084,10 @@
   gap: 6px;
   align-items: flex-start;
 }
-/* Phones and touch tablets (App sets --compact, see useCompactControls): the
-   folded controls stack down the left edge — back arrow, basemap pill and 3D
-   on the top line, then search, then the drawing tools. */
+/* Phones, touch tablets and windows under 870px (App sets --compact, see
+   useCompactControls): the folded controls stack down the left edge — back
+   arrow, basemap pill and 3D on the top line, then search, then the drawing
+   tools. */
 .rd-map-toolbar--compact {
   flex-direction: column;
   align-items: flex-start;
@@ -2274,9 +2275,9 @@
   background: var(--color-bg);
   border-color: var(--color-border);
 }
-/* phones and touch tablets: an idle search is a compact "Search" pill; it
-   widens back to the full bar while focused, holding a place, or expanded
-   into directions */
+/* phones, touch tablets and narrow windows: an idle search is a compact
+   "Search" pill; it widens back to the full bar while focused, holding a
+   place, or expanded into directions */
 .rd-map-toolbar--compact .rd-sd-bar {
   transition: width 150ms ease;
 }
