@@ -14,7 +14,7 @@ import type { RouteLeg, RouteStep } from '../api/routing';
 import { SAC_FACTOR, gradeDeg, sullivanRate } from './costModel';
 import type { RoutingGrid } from './gridDecode';
 import { cellOf, demAt, type HybridGraph } from './hybridGraph';
-import { FLAG, KIND, SRC, str, type Rdg1 } from './rdg1';
+import { FLAG, KIND, NONE, SRC, str, type Rdg1 } from './rdg1';
 import { tallyPolyline } from './sampler';
 import { STREAM_BIT, vegClass } from './vegClasses';
 
@@ -148,10 +148,16 @@ function xcLeg(ctx: LegContext, pts: [number, number][]): RouteLeg {
   };
 }
 
+/** Graph runs split into legs where the step LABEL changes (wayLabel: the
+ * name, else the ref) or the restriction note does. A ref alone must not
+ * split a named way: conflation donates an agency number to only some of an
+ * OSM way's edges, and on SISI that turned one walk up Agnes Gorge Trail
+ * into two identical "Follow Agnes Gorge Trail" steps. */
 function wayKey(rdg: Rdg1, e: number): string {
   const k = rdg.kind[e];
   const road = k === KIND.paved || k === KIND.unpaved || k === KIND.track;
-  return `${rdg.name[e]}|${rdg.ref[e]}|${road ? 'r' : 't'}`;
+  const label = rdg.name[e] !== NONE ? `n${rdg.name[e]}` : `r${rdg.ref[e]}`;
+  return `${label}|${rdg.note[e]}|${road ? 'r' : 't'}`;
 }
 
 export function buildLegs(ctx: LegContext, pieces: Piece[]): RouteLeg[] {

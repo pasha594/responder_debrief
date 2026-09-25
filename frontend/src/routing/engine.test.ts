@@ -14,7 +14,7 @@ import { HybridSearch, searchWindow } from './astar';
 import { OffroadEngine, routeSync } from './engine';
 import type { RoutingGrid } from './gridDecode';
 import { buildHybridGraph } from './hybridGraph';
-import { climbOf, fmtDur } from './legs';
+import { buildLegs, climbOf, fmtDur } from './legs';
 import type { Rdg1 } from './rdg1';
 import type { RoutingBundle } from './types';
 
@@ -206,6 +206,32 @@ describe('legs helpers', () => {
   it('climb hysteresis ignores sub-3 m noise', () => {
     expect(climbOf([100, 101, 100, 102, 101, 100])).toEqual({ climb: 0, descent: 0 });
     expect(climbOf([100, 104, 103, 110, 100])).toEqual({ climb: 10, descent: 10 });
+  });
+
+  it('keeps one leg along a named way whose ref comes and goes, splits on a note', () => {
+    // SISI: conflation donated "1281" to only some Agnes Gorge Trail edges,
+    // which read as two identical "Follow Agnes Gorge Trail" steps.
+    const w = 10;
+    const grid: RoutingGrid = { width: w, height: 3, cell: 30, pace: new Uint8Array(w * 3).fill(40),
+      veg: new Uint8Array(w * 3), dem: new Int16Array(w * 3).fill(500) };
+    const y = 450;
+    const mk = (notes: number[]) => ({
+      epsg: 32610, x0: 0, y0: 0,
+      nodes: Int32Array.from([150, y, 450, y, 750, y, 1050, y]),
+      from: Uint32Array.from([0, 1, 2]), to: Uint32Array.from([1, 2, 3]),
+      dstart: Uint32Array.from([0, 1, 2, 3]), deltas: Int16Array.from([300, 0, 300, 0, 300, 0]),
+      name: Uint32Array.from([0, 0, 0]), ref: Uint32Array.from([0xffffffff, 1, 0xffffffff]),
+      note: Uint32Array.from(notes), kind: Uint8Array.from([4, 4, 4]), src: Uint8Array.from([1, 1, 1]),
+      sac: Uint8Array.from([0, 0, 0]), flags: Uint8Array.from([64, 64, 0]),
+      strings: ['Agnes Gorge Trail', '1281', 'Closed for repairs'],
+    }) as Rdg1;
+    const legsOf = (rdg: Rdg1) => buildLegs({ grid, mask: null, graph: buildHybridGraph(rdg, grid), rdg,
+      toLonLat: (x, yy) => [x, yy] }, [{ kind: 'graph', nodes: [0, 1, 2, 3], edges: [0, 1, 2] }]);
+    const one = legsOf(mk([0xffffffff, 0xffffffff, 0xffffffff]));
+    expect(one.map((l) => l.name)).toEqual(['Agnes Gorge Trail']);
+    expect(one[0].distanceM).toBeCloseTo(90, 5);
+    const split = legsOf(mk([0xffffffff, 2, 0xffffffff]));
+    expect(split.map((l) => l.restricted ?? null)).toEqual([null, 'Closed for repairs', null]);
   });
 
   it('formats durations', () => {
