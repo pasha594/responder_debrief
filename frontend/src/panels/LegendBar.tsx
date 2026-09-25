@@ -1,7 +1,7 @@
 /**
  * Small legend card, bottom-right above the timeline. Mirrors the active
- * spread product (ui.legendKey = "spread:{product}") and every visible
- * weather layer.
+ * spread product (ui.legendKey = "spread:{product}"), every visible
+ * weather layer, and the IR flight shown on the map.
  */
 import { LegendImg } from '../utils/LegendImg';
 import { useMemo } from 'react';
@@ -23,6 +23,9 @@ import { SPREAD_PRODUCT_LABELS } from './tabs/ForecastTab';
 import { LegendSwatch, ToaBandLegend, ToaTimelineLegend } from './ToaLegends';
 import { clampWithinHours } from '../spread/toaBands';
 import { GradientLegend } from '../utils/GradientLegend';
+import { irFlightWhen } from '../utils/incidentMaps';
+import { IrHeatLegend } from './IrHeatLegend';
+import { useManifestForFire } from './tabs/IncidentMapsTab';
 
 interface WeatherLegendRow {
   product: WeatherProduct;
@@ -39,6 +42,7 @@ export function LegendBar() {
   const toaMode = useStore((s) => s.layers.spread.toaMode);
   const toaWithinHours = useStore((s) => s.layers.spread.toaWithinHours);
   const sidebarCollapsed = useStore((s) => s.ui.sidebarCollapsed);
+  const irFlightId = useStore((s) => s.layers.irFlight.flightId);
   const view = useStore((s) => s.view);
   const corneaId = view.mode === 'fire' ? view.corneaId : null;
 
@@ -46,6 +50,10 @@ export function LegendBar() {
   const { data: fire } = useFire(corneaId);
   const { data: pyrecastRuns } = usePyrecastRuns();
   const { data: weatherRuns } = useWeatherRuns();
+  const { data: manifest } = useManifestForFire(corneaId);
+  const irFlight =
+    (irFlightId && manifest?.ir_flights.find((f) => f.flight_id === irFlightId && f.geojson_url)) ||
+    null;
 
   const run = useMemo(() => {
     const slug =
@@ -99,7 +107,7 @@ export function LegendBar() {
     return rows;
   }, [weatherState, weatherRuns]);
 
-  if (!showSpread && weatherRows.length === 0) return null;
+  if (!showSpread && weatherRows.length === 0 && !irFlight) return null;
 
   return (
     <div className={`rd-legendbar${sidebarCollapsed ? ' rd-legendbar--rail' : ''}`}>
@@ -127,6 +135,14 @@ export function LegendBar() {
           ) : spreadLegendSrc ? (
             <LegendImg src={spreadLegendSrc} alt="Forecast legend" />
           ) : null}
+        </div>
+      )}
+      {irFlight && (
+        <div>
+          <div className="rd-legendbar-caption">
+            IR heat · {irFlightWhen(irFlight, fire?.timezone ?? null).label}
+          </div>
+          <IrHeatLegend heatTypes={irFlight.heat_types} />
         </div>
       )}
       {weatherRows.map((row) => (

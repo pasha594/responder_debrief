@@ -1,7 +1,9 @@
 /**
  * IR flight heat polygons, fetched lazily per flight (module-cached by URL).
  * Heat classes tint the fill; the flight's mapped perimeter renders as an
- * outline only.
+ * outline only. Imagery-obscured areas (clouds, smoke, coverage gaps — heat
+ * may be there unmapped) are a grey dashed area under the heat, and possible
+ * heat is a hollow ring beside the solid isolated-heat dots.
  */
 import type { ExpressionSpecification, GeoJSONSource, Map as MlMap } from 'maplibre-gl';
 import { dataUrl } from '../../api/catalogs';
@@ -15,13 +17,23 @@ const PT = 'rd-ir-heat-pt';
 
 const EMPTY_FC: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features: [] };
 
+/** Heat-class colors, shared by the layer paint and the map legend. */
+export const IR_HEAT_COLOR = {
+  Perimeter: '#ff6467',
+  Intense: '#ff3b1f',
+  Scattered: '#ff8c00',
+  Isolated: '#ffd166',
+  Possible: '#ff8c00',
+  Obscured: '#9aa0a6',
+} as const;
+
 const FILL_COLOR: ExpressionSpecification = [
   'match',
   ['get', 'heat_type'],
-  'Intense', '#ff3b1f',
-  'Scattered', '#ff8c00',
-  'Isolated', '#ffd166',
-  'Perimeter', 'rgba(0,0,0,0)',
+  'Intense', IR_HEAT_COLOR.Intense,
+  'Scattered', IR_HEAT_COLOR.Scattered,
+  'Isolated', IR_HEAT_COLOR.Isolated,
+  'Obscured', IR_HEAT_COLOR.Obscured,
   'rgba(0,0,0,0)',
 ];
 
@@ -31,6 +43,7 @@ const FILL_OPACITY: ExpressionSpecification = [
   'Intense', 0.5,
   'Scattered', 0.4,
   'Isolated', 0.4,
+  'Obscured', 0.3,
   0,
 ];
 
@@ -82,6 +95,8 @@ export const irHeatLayer: LayerManager = {
           id: FILL,
           type: 'fill',
           source: SRC,
+          // obscured areas sit under the heat they may overlap
+          layout: { 'fill-sort-key': ['match', ['get', 'heat_type'], 'Obscured', 0, 1] },
           paint: { 'fill-color': FILL_COLOR, 'fill-opacity': FILL_OPACITY },
         },
         beforeIdFor(map, 'rd-ir-heat-fill'),
@@ -93,15 +108,31 @@ export const irHeatLayer: LayerManager = {
           id: LINE,
           type: 'line',
           source: SRC,
-          filter: ['==', ['get', 'heat_type'], 'Perimeter'],
-          paint: { 'line-color': '#ff6467', 'line-width': 2 },
+          filter: ['match', ['get', 'heat_type'], ['Perimeter', 'Obscured'], true, false],
+          paint: {
+            'line-color': [
+              'match',
+              ['get', 'heat_type'],
+              'Obscured', IR_HEAT_COLOR.Obscured,
+              IR_HEAT_COLOR.Perimeter,
+            ],
+            'line-width': ['match', ['get', 'heat_type'], 'Obscured', 1.25, 2],
+            'line-dasharray': [
+              'match',
+              ['get', 'heat_type'],
+              'Obscured', ['literal', [3, 2]],
+              ['literal', [1, 0]],
+            ],
+          },
         },
         beforeIdFor(map, 'rd-ir-heat-line'),
       );
     }
     if (!map.getLayer(PT)) {
-      // some IR products publish Isolated/Scattered heat as point
-      // placemarks (KMZ) rather than polygons — draw those as dots
+      // KMZ products publish isolated (and possible) heat as point
+      // placemarks rather than polygons — draw those as dots; possible heat
+      // as a hollow ring, since it is unconfirmed
+      const possible = ['==', ['get', 'heat_type'], 'Possible'] as ExpressionSpecification;
       map.addLayer(
         {
           id: PT,
@@ -109,11 +140,11 @@ export const irHeatLayer: LayerManager = {
           source: SRC,
           filter: ['==', ['geometry-type'], 'Point'],
           paint: {
-            'circle-radius': 3.5,
+            'circle-radius': ['case', possible, 4, 3.5],
             'circle-color': FILL_COLOR,
-            'circle-opacity': 0.9,
-            'circle-stroke-width': 0.5,
-            'circle-stroke-color': 'rgba(0,0,0,0.4)',
+            'circle-opacity': ['case', possible, 0, 0.9],
+            'circle-stroke-width': ['case', possible, 1.75, 0.5],
+            'circle-stroke-color': ['case', possible, IR_HEAT_COLOR.Possible, 'rgba(0,0,0,0.4)'],
           },
         },
         beforeIdFor(map, 'rd-ir-heat-pt' as never),

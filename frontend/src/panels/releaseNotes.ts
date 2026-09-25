@@ -30,6 +30,11 @@ export const RELEASE_NOTES: ReleaseDay[] = [
     date: '2026-09-25',
     notes: [
       {
+        title: 'Infrared (IR) flights on the map for more fires',
+        summary:
+          'Nightly IR heat now shows on the map for fires whose teams publish only a KMZ, like Sisi. Each flight lists when the plane flew, and the map marks possible heat and areas clouds or smoke hid from the sensor.',
+      },
+      {
         title: 'Share by QR code',
         summary:
           'The QR button beside 3D shows your map view, layers, incident map and drawings as a code. Another phone scans it with Scan code, no signal needed if both phones downloaded the fire.',

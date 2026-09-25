@@ -8,7 +8,8 @@
  *
  * Pure module — no React, no DOM. The tab component and the tests both use it.
  */
-import type { IncidentMapEntry } from '../api/types';
+import type { IncidentMapEntry, IrFlight } from '../api/types';
+import { formatDateTime } from './format';
 
 /**
  * Operational priority for the product bases the worker emits
@@ -168,6 +169,32 @@ export function friendlyOpDate(opDate: string | null, todayLocal: string): DateH
   if (opDate === todayLocal) primary = 'Today';
   else if (opDate === shiftIsoDate(todayLocal, -1)) primary = 'Yesterday';
   return { primary, secondary };
+}
+
+/**
+ * When an IR flight flew, for its row: the KMZ's flight time in the fire's
+ * zone ("Sep 23, 7:25 PM PDT"), else the KMZ's bare date, else the FTP
+ * folder's date. Folders are named for the day the imagery serves, so they
+ * often read a day later than an evening flight.
+ */
+export function irFlightWhen(
+  flight: Pick<IrFlight, 'flown_at' | 'flown_date' | 'flight_date'>,
+  timezone: string | null | undefined,
+): { label: string; source: 'kmz' | 'kmz-date' | 'folder' | null } {
+  if (flight.flown_at && Number.isFinite(Date.parse(flight.flown_at))) {
+    return { label: formatDateTime(flight.flown_at, timezone), source: 'kmz' };
+  }
+  const calendarDay = (date: string) => {
+    const t = Date.parse(`${date}T00:00:00Z`);
+    return Number.isFinite(t)
+      ? new Intl.DateTimeFormat('en-US', { timeZone: 'UTC', month: 'short', day: 'numeric' }).format(t)
+      : null;
+  };
+  const kmzDay = flight.flown_date ? calendarDay(flight.flown_date) : null;
+  if (kmzDay) return { label: kmzDay, source: 'kmz-date' };
+  const folderDay = flight.flight_date ? calendarDay(flight.flight_date) : null;
+  if (folderDay) return { label: folderDay, source: 'folder' };
+  return { label: 'Undated', source: null };
 }
 
 // ---------------------------------------------------------------------------

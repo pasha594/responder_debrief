@@ -16,10 +16,12 @@ import { formatBytes, formatTime, zoneAbbr } from '../../utils/format';
 import {
   friendlyOpDate,
   groupMapsByDate,
+  irFlightWhen,
   localToday,
   rowAction,
   seriesKey,
 } from '../../utils/incidentMaps';
+import { IrHeatLegend } from '../IrHeatLegend';
 import { MapLightbox } from '../MapLightbox';
 
 function entryTitle(m: IncidentMapEntry): string {
@@ -30,7 +32,7 @@ function entryTitle(m: IncidentMapEntry): string {
 }
 
 /** Shared resolution: catalog fire → incident manifest. */
-function useManifestForFire(corneaId: string | null) {
+export function useManifestForFire(corneaId: string | null) {
   const { data: catalog } = useMasterCatalog();
   const catalogFire = useMemo(
     () => catalog?.fires.find((f) => f.cornea_id === corneaId) ?? null,
@@ -258,7 +260,13 @@ function MapRow({
   );
 }
 
-function IrFlightRow({ flight }: { flight: IrFlight }) {
+const IR_WHEN_TITLE = {
+  kmz: 'When the plane flew, per the KMZ',
+  'kmz-date': 'Flight date from the KMZ (it gives no time)',
+  folder: 'FTP folder date (the KMZ gives no flight time)',
+} as const;
+
+function IrFlightRow({ flight, timezone }: { flight: IrFlight; timezone: string | null }) {
   const activeId = useStore((s) => s.layers.irFlight.flightId);
   const actions = useStore((s) => s.actions);
   // A PDF-only flight has flight_id null — which must not match the store's
@@ -266,10 +274,13 @@ function IrFlightRow({ flight }: { flight: IrFlight }) {
   // "Shown" pill on fires whose IR came without shapefiles).
   const active = flight.flight_id != null && activeId === flight.flight_id;
   const canShow = !!flight.geojson_url && flight.flight_id != null;
+  const when = irFlightWhen(flight, timezone);
   return (
     <div className={`rd-ir-row${active ? ' rd-ir-row--active' : ''}`}>
       <div className="rd-ir-row-main">
-        <span className="rd-ir-date">{flight.flight_date}</span>
+        <span className="rd-ir-date" title={when.source ? IR_WHEN_TITLE[when.source] : undefined}>
+          {when.label}
+        </span>
         <span className="rd-ir-acres">
           {flight.estimated_acres != null
             ? `${Math.round(flight.estimated_acres).toLocaleString('en-US')} ac est.`
@@ -309,6 +320,7 @@ function IrFlightRow({ flight }: { flight: IrFlight }) {
           </a>
         )}
       </div>
+      {active && <IrHeatLegend heatTypes={flight.heat_types} />}
     </div>
   );
 }
@@ -369,7 +381,7 @@ export function IncidentMapsTab({ corneaId }: { corneaId: string }) {
         <section className="rd-map-group">
           <h3 className="rd-section-title">IR flights</h3>
           {manifest.ir_flights.map((f) => (
-            <IrFlightRow key={f.flight_id} flight={f} />
+            <IrFlightRow key={f.flight_id} flight={f} timezone={fire?.timezone ?? null} />
           ))}
         </section>
       )}
