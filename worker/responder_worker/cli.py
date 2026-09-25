@@ -808,54 +808,73 @@ def _ir_flights(args, storage, state, fire, ir_by_flight: dict[str, dict]) -> li
             est_acres = ir_vectors.parse_estimated_acres(
                 readmes[0].local_path.read_text(errors="replace"))
 
-        geojson_url = None
-        heat_types: list[str] = []
+        conv: dict = {}  # state["ir"] entry: heat_types | failed, flown_*, v
+        key = f"vectors/ir/{fire_slug}/{flight_id}.geojson"
         if flight_id and (zips or kmzs):
-            key = f"vectors/ir/{fire_slug}/{flight_id}.geojson"
-            cache = state.setdefault("ir", {}).get(key)
-            if cache and cache.get("heat_types"):
-                # converted on a previous rebuild — reuse, no re-download
-                geojson_url = f"/{key}"
-                heat_types = cache["heat_types"]
-            elif (cache and cache.get("failed")
-                  and cache.get("v") == ir_vectors.KMZ_CONVERTER_VERSION):
-                pass  # attempted before under THIS converter — don't loop
-            elif frames.deadline_passed():
-                pass  # out of wall-clock; unrecorded, so the next run retries
+            cache = state.setdefault("ir", {}).get(key) or {}
+            if (cache.get("v") == ir_vectors.IR_CONVERTER_VERSION
+                    or frames.deadline_passed()
+                    or shutil.which("ogr2ogr") is None):
+                # done (or tried) under THIS converter: reuse, no re-download.
+                # Out of wall-clock, or on a run whose GDAL install failed,
+                # an older result keeps serving until a later run redoes it
+                # (recording a failure here would stick for good).
+                conv = cache
             else:
+                conv = {"v": ir_vectors.IR_CONVERTER_VERSION}
                 try:
                     with tempfile.TemporaryDirectory() as td:
                         tdp = Path(td)
+
+                        def _fetch(mf) -> Path:
+                            # replayed files have no local copy, but the
+                            # bytes are in OUR bucket
+                            if mf.local_path is not None:
+                                return mf.local_path
+                            local = tdp / Path(mf.filename).name
+                            if not storage.get_file(mf.key, local):
+                                raise RuntimeError(f"missing raw object {mf.key}")
+                            return local
+
+                        # The flight time lives in the KMZ, even when the
+                        # shapefiles are what gets converted.
+                        kmz_local = None
+                        if kmzs:
+                            try:
+                                kmz_local = _fetch(kmzs[0])
+                                conv.update(ir_vectors.kmz_flight_time(kmz_local))
+                            except RuntimeError:
+                                if not zips:
+                                    raise
                         # source: shapefiles preferred, KMZ fallback (some
-                        # teams publish KMZ only); replayed files have no
-                        # local copy but the bytes are in OUR bucket
-                        src_mf = zips[0] if zips else kmzs[0]
-                        local = src_mf.local_path
-                        if local is None:
-                            local = tdp / Path(src_mf.filename).name
-                            if not storage.get_file(src_mf.key, local):
-                                raise RuntimeError(f"missing raw object {src_mf.key}")
+                        # teams publish KMZ only)
                         gj = tdp / f"{flight_id}.geojson"
                         if zips:
-                            info = ir_vectors.process_ir_zip(local, gj, flight_id=flight_id)
+                            info = ir_vectors.process_ir_zip(
+                                _fetch(zips[0]), gj, flight_id=flight_id)
                         else:
-                            info = ir_vectors.process_ir_kmz(local, gj, flight_id=flight_id)
+                            info = ir_vectors.process_ir_kmz(
+                                kmz_local, gj, flight_id=flight_id)
                         storage.put_file(key, gj)
-                        geojson_url = f"/{key}"
-                        heat_types = info["heat_types"]
-                        state["ir"][key] = {"heat_types": heat_types}
+                        conv["heat_types"] = info["heat_types"]
                         log(f"[ir] {flight_id}: {info['feature_count']} features "
-                            f"({', '.join(heat_types)})")
+                            f"({', '.join(info['heat_types'])})")
                 except Exception as exc:
-                    state["ir"][key] = {
-                        "failed": True, "v": ir_vectors.KMZ_CONVERTER_VERSION}
+                    conv["failed"] = True
                     log(f"[ir] vectorization failed for {rel_dir}: {exc}")
+                state["ir"][key] = conv
+        heat_types: list[str] = conv.get("heat_types") or []
 
         out.append({
             "flight_date": flight_date_iso,
+            # when the plane flew, per the KMZ: an instant, or a bare date
+            # when the KMZ gives no clock time (the UI falls back to
+            # flight_date, the FTP folder's date, when both are None)
+            "flown_at": conv.get("flown_at"),
+            "flown_date": conv.get("flown_date"),
             "flight_id": flight_id,
             "no_flight_reason": None,
-            "geojson_url": geojson_url,
+            "geojson_url": f"/{key}" if heat_types else None,
             "heat_types": heat_types,
             "estimated_acres": est_acres,
             "pdf_url": f"/{pdfs[0].key}" if pdfs else None,
@@ -1113,11 +1132,14 @@ def _ir_backlog(state: dict, log) -> set[str]:
     """Incidents holding IR flights that were mirrored before conversion
     existed for their format (e.g. KMZ-only flights, pre-KMZ-fallback code).
     State-only scan, zero network: any flight dir with a convertible source
-    but no attempt recorded in state["ir"] marks the incident for a manifest
-    rebuild, which runs the conversion (results cached either way)."""
+    but no attempt recorded in state["ir"] under the current converter marks
+    the incident for a manifest rebuild, which runs the conversion (results
+    cached either way) — so a converter bump reconverts every flight."""
     touched: set[str] = set()
     attempted_by_fire: dict[str, int] = {}
-    for key in state.get("ir", {}):
+    for key, rec in state.get("ir", {}).items():
+        if (rec or {}).get("v") != ir_vectors.IR_CONVERTER_VERSION:
+            continue
         slug = key.split("/")[2] if key.count("/") >= 3 else ""
         attempted_by_fire[slug] = attempted_by_fire.get(slug, 0) + 1
     for inc_key, rec in state.get("incidents", {}).items():

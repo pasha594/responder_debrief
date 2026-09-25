@@ -3,17 +3,17 @@
  * top-left (the sidebar owns the right edge, so the two never overlap). The
  * sidebar header keeps its own "← All fires" link for reading order.
  *
- * On phones it shrinks to an arrow: the first tap spells out "← All fires"
- * (so a stray tap can't drop you out of the fire), a second tap goes back,
- * and it folds away again after 2 seconds.
+ * On phones, touch tablets and narrow windows it shrinks to an arrow: the
+ * first tap spells out "← All fires" (so a stray tap can't drop you out of
+ * the fire), a second tap goes back, and it folds away again after 2 seconds.
  */
 import { useEffect, useState } from 'react';
 import { useStore } from '../state/store';
-import { useIsDesktop } from '../utils/useMediaQuery';
+import { useCompactControls } from '../utils/useMediaQuery';
 
 export function BackControl() {
   const backToDirectory = useStore((s) => s.actions.backToDirectory);
-  const isDesktop = useIsDesktop();
+  const fullControls = !useCompactControls();
   const [expanded, setExpanded] = useState(false);
 
   useEffect(() => {
@@ -22,7 +22,7 @@ export function BackControl() {
     return () => clearTimeout(t);
   }, [expanded]);
 
-  const compact = !isDesktop && !expanded;
+  const compact = !fullControls && !expanded;
   return (
     <button
       type="button"

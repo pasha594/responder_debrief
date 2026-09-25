@@ -85,7 +85,7 @@ export interface HotspotProperties {
   source: string; // MODIS | SNPP | NOAA-20 | NOAA-21
   acq_date: string; // YYYY-MM-DD
   acq_time: string; // HHMM as float-ish string, e.g. "421.0"
-  confidence: string; // numeric for MODIS, l/n/h for VIIRS
+  confidence: string; // numeric for MODIS, l/n/h for VIIRS, L/M/H for Landsat
   frp: number | null;
   brightness: number | null;
   /** added at ingest: */
@@ -361,7 +361,12 @@ export interface IncidentMapEntry {
 }
 
 export interface IrFlight {
+  /** The FTP folder's date (the operational day the flight serves). */
   flight_date: string;
+  /** When the plane flew, per the KMZ (UTC instant). Absent on older manifests. */
+  flown_at?: string | null;
+  /** The KMZ's flight date when it gives no clock time (YYYY-MM-DD). */
+  flown_date?: string | null;
   flight_id: string;
   no_flight_reason: string | null;
   geojson_url: string | null;

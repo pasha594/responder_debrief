@@ -136,6 +136,30 @@ export function formatTime(t: number, timezone: string | null | undefined): stri
   }
 }
 
+/**
+ * "02:45 09/19 PDT" — 24-hour clock, then month/day and zone, fire-local
+ * (falls back to viewer-local). Assembled from parts because en-US puts the
+ * date first. hourCycle h23, not hour12:false, which can render "24:05".
+ */
+export function formatClockDate(t: number, timezone: string | null | undefined): string {
+  const opts: Intl.DateTimeFormatOptions = {
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+    month: '2-digit',
+    day: '2-digit',
+    timeZoneName: 'short',
+  };
+  let parts: Intl.DateTimeFormatPart[];
+  try {
+    parts = new Intl.DateTimeFormat('en-US', { ...opts, timeZone: timezone ?? undefined }).formatToParts(t);
+  } catch {
+    parts = new Intl.DateTimeFormat('en-US', opts).formatToParts(t);
+  }
+  const part = (type: Intl.DateTimeFormatPartTypes) => parts.find((p) => p.type === type)?.value ?? '';
+  return `${part('hour')}:${part('minute')} ${part('month')}/${part('day')} ${part('timeZoneName')}`;
+}
+
 /** Short zone label ("MDT") for an IANA zone at a given instant. */
 export function zoneAbbr(timezone: string | null | undefined, at: number): string | null {
   if (!timezone) return null;

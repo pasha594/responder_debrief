@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { ageColorExpr, timeRadiusExpr, timeStrokeExpr, HOTSPOT_MAX_AGE_MS } from './hotspotLayer';
+import {
+  ageColorExpr,
+  popupHtml,
+  timeRadiusExpr,
+  timeStrokeExpr,
+  HOTSPOT_MAX_AGE_MS,
+} from './hotspotLayer';
 
 const T = Date.parse('2026-08-18T00:00:00Z');
 const DAY = 86_400_000;
@@ -87,11 +93,36 @@ describe('coarse prefilter', () => {
 });
 
 describe('historic perimeter date format', () => {
-  it('renders DATE_CUR strings as MM/YY with year fallback', async () => {
+  it('shows the fire year, never the record-edit date', async () => {
     const { fmtWhen } = await import('./historicPerimetersLayer');
-    expect(fmtWhen({ DATE_CUR: '20191001000000' })).toBe('10/19');
-    expect(fmtWhen({ DATE_CUR: '20260805123000' })).toBe('08/26');
+    expect(fmtWhen({ DATE_CUR: '20190102000000', FIRE_YEAR_INT: 2017 })).toBe('2017');
     expect(fmtWhen({ DATE_CUR: null, FIRE_YEAR_INT: 2018 })).toBe('2018');
-    expect(fmtWhen({})).toBe('—');
+    expect(fmtWhen({ DATE_CUR: '20260805123000' })).toBe('—');
+  });
+});
+
+describe('hotspot popup', () => {
+  const base = {
+    source: 'NOAA-20',
+    acq_ts: Date.parse('2026-09-19T09:45:00Z'),
+    frp: 1.5,
+    confidence: 'n',
+    conf_norm: 'nominal',
+  };
+  const text = (html: string) => html.replace(/<[^>]+>/g, '');
+
+  it('shows the fire-local time and leaves nominal confidence out', () => {
+    expect(text(popupHtml(base, 'America/Los_Angeles'))).toBe(
+      'NOAA-20 • 02:45 09/19 PDT • FRP 1.5 MW',
+    );
+  });
+
+  it('names low and high confidence in words', () => {
+    expect(popupHtml({ ...base, confidence: 'l', conf_norm: 'low' }, 'UTC')).toMatch(
+      /low confidence$/,
+    );
+    expect(popupHtml({ ...base, confidence: 'H', conf_norm: 'high' }, 'UTC')).toMatch(
+      /high confidence$/,
+    );
   });
 });

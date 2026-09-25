@@ -12,6 +12,7 @@ import {
   type WeatherProductMeta,
 } from '../../api/types';
 import { useStore } from '../../state/store';
+import { weatherCoverage, weatherJumpTarget } from '../../timeline/framePlan';
 import { formatDateTime, formatRelative } from '../../utils/format';
 import { GradientLegend } from '../../utils/GradientLegend';
 
@@ -21,11 +22,14 @@ function WeatherRow({
   product,
   meta,
   legendTemplate,
+  coverage,
   arrowNote,
 }: {
   product: WeatherProduct;
   meta: WeatherProductMeta;
   legendTemplate: string | undefined;
+  /** The run's rendered-hour span; turning a layer on may jump the playhead (weatherJumpTarget). */
+  coverage: [number, number] | null;
   /** True on wind rows when the run carries U/V grids (arrows will render). */
   arrowNote?: boolean;
 }) {
@@ -43,7 +47,13 @@ function WeatherRow({
           <input
             type="checkbox"
             checked={visible}
-            onChange={(e) => actions.setWeatherLayer(product, { visible: e.target.checked })}
+            onChange={(e) => {
+              const on = e.target.checked;
+              const { currentTime, now } = useStore.getState().time;
+              const target = on ? weatherJumpTarget(coverage, currentTime, now) : null;
+              if (target !== null) actions.setTime(target);
+              actions.setWeatherLayer(product, { visible: on });
+            }}
           />
           <span>{label}</span>
         </label>
@@ -111,6 +121,7 @@ export function WeatherSection() {
           return meta ? ([[p, meta]] as [WeatherProduct, WeatherProductMeta][]) : [];
         });
         const hasArrows = !!run.frames?.wind_uv_template;
+        const coverage = weatherCoverage(run);
         return (
           <div key={modelId}>
             <h3 className="rd-section-title">
@@ -127,6 +138,7 @@ export function WeatherSection() {
                 product={p}
                 meta={meta}
                 legendTemplate={model.legend_template}
+                coverage={coverage}
                 arrowNote={hasArrows && (p === 'ws' || p === 'wg')}
               />
             ))}

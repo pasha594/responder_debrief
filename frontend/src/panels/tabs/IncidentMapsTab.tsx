@@ -13,24 +13,20 @@ import type React from 'react';
 import { useMap } from '../../map/MapRoot';
 import { useStore } from '../../state/store';
 import { formatBytes, formatTime, zoneAbbr } from '../../utils/format';
+import { useIsDesktop } from '../../utils/useMediaQuery';
 import {
   friendlyOpDate,
   groupMapsByDate,
+  irFlightWhen,
   localToday,
   rowAction,
   seriesKey,
 } from '../../utils/incidentMaps';
+import { IrHeatLegend } from '../IrHeatLegend';
 import { MapLightbox } from '../MapLightbox';
 
-function entryTitle(m: IncidentMapEntry): string {
-  let t = m.product_label;
-  if (m.op_date) t += ` — ${m.op_date}`;
-  if (m.period) t += ` (${m.period})`;
-  return t;
-}
-
 /** Shared resolution: catalog fire → incident manifest. */
-function useManifestForFire(corneaId: string | null) {
+export function useManifestForFire(corneaId: string | null) {
   const { data: catalog } = useMasterCatalog();
   const catalogFire = useMemo(
     () => catalog?.fires.find((f) => f.cornea_id === corneaId) ?? null,
@@ -235,30 +231,44 @@ function MapRow({
       </div>
 
       {/* The PDF is always reachable — the sheet of record, corner-anchored. */}
-      <a
-        className="rd-map-open"
-        href={pdfHref}
-        target="_blank"
-        rel="noopener noreferrer"
-        title="Open PDF in a new tab"
-        aria-label="Open PDF in a new tab"
-      >
-        <svg width="13" height="13" viewBox="0 0 13 13" aria-hidden="true">
-          <path
-            d="M5 2H2.5A1.5 1.5 0 0 0 1 3.5v7A1.5 1.5 0 0 0 2.5 12h7A1.5 1.5 0 0 0 11 10.5V8M7.5 1H12v4.5M12 1 6 7"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.4"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-        </svg>
-      </a>
+      <OpenPdfLink href={pdfHref} />
     </div>
   );
 }
 
-function IrFlightRow({ flight }: { flight: IrFlight }) {
+/** Corner "open PDF in a new tab" icon, shared by map and IR flight cards. */
+function OpenPdfLink({ href }: { href: string }) {
+  return (
+    <a
+      className="rd-map-open"
+      href={href}
+      target="_blank"
+      rel="noopener noreferrer"
+      title="Open PDF in a new tab"
+      aria-label="Open PDF in a new tab"
+    >
+      <svg width="13" height="13" viewBox="0 0 13 13" aria-hidden="true">
+        <path
+          d="M5 2H2.5A1.5 1.5 0 0 0 1 3.5v7A1.5 1.5 0 0 0 2.5 12h7A1.5 1.5 0 0 0 11 10.5V8M7.5 1H12v4.5M12 1 6 7"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.4"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      </svg>
+    </a>
+  );
+}
+
+const IR_WHEN_TITLE = {
+  kmz: 'When the plane flew, per the KMZ',
+  'kmz-date': 'Flight date from the KMZ (it gives no time)',
+  folder: 'FTP folder date (the KMZ gives no flight time)',
+} as const;
+
+function IrFlightRow({ flight, timezone }: { flight: IrFlight; timezone: string | null }) {
+  const isDesktop = useIsDesktop();
   const activeId = useStore((s) => s.layers.irFlight.flightId);
   const actions = useStore((s) => s.actions);
   // A PDF-only flight has flight_id null — which must not match the store's
@@ -266,15 +276,27 @@ function IrFlightRow({ flight }: { flight: IrFlight }) {
   // "Shown" pill on fires whose IR came without shapefiles).
   const active = flight.flight_id != null && activeId === flight.flight_id;
   const canShow = !!flight.geojson_url && flight.flight_id != null;
+  const when = irFlightWhen(flight, timezone);
+  // Like the map cards: a click anywhere that isn't a control shows it.
+  const clickable = canShow && !active;
+  const onRowClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!clickable) return;
+    if ((e.target as HTMLElement).closest('button, a, input, label')) return;
+    actions.setIrFlight(flight.flight_id);
+  };
   return (
-    <div className={`rd-ir-row${active ? ' rd-ir-row--active' : ''}`}>
-      <div className="rd-ir-row-main">
-        <span className="rd-ir-date">{flight.flight_date}</span>
-        <span className="rd-ir-acres">
-          {flight.estimated_acres != null
-            ? `${Math.round(flight.estimated_acres).toLocaleString('en-US')} ac est.`
-            : flight.no_flight_reason ?? '—'}
-        </span>
+    <div
+      className={`rd-ir-row${active ? ' rd-ir-row--active' : ''}${
+        clickable ? ' rd-ir-row--clickable' : ''
+      }`}
+      onClick={onRowClick}
+      title={clickable ? 'Show this IR flight on the map' : undefined}
+    >
+      <div className="rd-ir-date">IR flight</div>
+      <div className="rd-ir-when" title={when.source ? IR_WHEN_TITLE[when.source] : undefined}>
+        {when.source === 'folder' ? `${when.label} (folder date)` : `Flown ${when.label}`}
+        {flight.estimated_acres != null &&
+          ` · ${Math.round(flight.estimated_acres).toLocaleString('en-US')} ac est.`}
       </div>
       <div className="rd-ir-row-actions">
         <button
@@ -288,16 +310,6 @@ function IrFlightRow({ flight }: { flight: IrFlight }) {
           <span className="rd-radio-dot" aria-hidden="true" />
           {active ? 'Shown on map' : 'Show on map'}
         </button>
-        {flight.pdf_url && (
-          <a
-            className="rd-pdf-pill"
-            href={dataUrl(flight.pdf_url)}
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            PDF
-          </a>
-        )}
         {flight.kmz_url && (
           <a
             className="rd-pdf-pill"
@@ -309,6 +321,9 @@ function IrFlightRow({ flight }: { flight: IrFlight }) {
           </a>
         )}
       </div>
+      {/* desktop has the map's legend box; phones have no map legend */}
+      {active && !isDesktop && <IrHeatLegend heatTypes={flight.heat_types} />}
+      {flight.pdf_url && <OpenPdfLink href={dataUrl(flight.pdf_url)} />}
     </div>
   );
 }
@@ -318,7 +333,10 @@ export function IncidentMapsTab({ corneaId }: { corneaId: string }) {
   const { data: fire } = useFire(corneaId);
   const [viewing, setViewing] = useState<string | null>(null);
 
-  const groups = useMemo(() => groupMapsByDate(manifest?.maps ?? []), [manifest]);
+  const groups = useMemo(
+    () => groupMapsByDate(manifest?.maps ?? [], manifest?.ir_flights ?? []),
+    [manifest],
+  );
   // Tiled-version count per series — shown in the Timeline pill.
   const seriesCounts = useMemo(() => {
     const counts = new Map<string, number>();
@@ -361,58 +379,16 @@ export function IncidentMapsTab({ corneaId }: { corneaId: string }) {
                 onView={() => setViewing(m.id)}
               />
             ))}
+            {group.irFlights.map((f) => (
+              <IrFlightRow key={f.flight_id} flight={f} timezone={fire?.timezone ?? null} />
+            ))}
           </section>
         );
       })}
 
-      {manifest.ir_flights.length > 0 && (
-        <section className="rd-map-group">
-          <h3 className="rd-section-title">IR flights</h3>
-          {manifest.ir_flights.map((f) => (
-            <IrFlightRow key={f.flight_id} flight={f} />
-          ))}
-        </section>
-      )}
-
       {viewingEntry && (
         <MapLightbox entry={viewingEntry} onClose={() => setViewing(null)} />
       )}
-    </div>
-  );
-}
-
-/**
- * Floating dismiss chip for the active incident-map overlay. Rendered by the
- * Sidebar (position: fixed over the map, bottom-left above the legend).
- */
-export function IncidentMapChip() {
-  const { mapId, series } = useStore((s) => s.layers.incidentMap);
-  const view = useStore((s) => s.view);
-  const actions = useStore((s) => s.actions);
-  const corneaId = view.mode === 'fire' ? view.corneaId : null;
-  const { data: manifest } = useManifestForFire(corneaId);
-
-  if (!mapId && !series) return null;
-  const entry = mapId
-    ? manifest?.maps.find((m) => m.id === mapId)
-    : manifest?.maps.find((m) => seriesKey(m) === series);
-  const title = entry
-    ? series
-      ? `${entry.product_label} — scrub the timeline`
-      : entryTitle(entry)
-    : 'Incident map';
-
-  return (
-    <div className="rd-map-chip">
-      <span className="rd-map-chip-title">{title}</span>
-      <button
-        type="button"
-        className="rd-map-chip-x"
-        aria-label="Remove incident map overlay"
-        onClick={() => actions.setIncidentMap(null)}
-      >
-        ✕
-      </button>
     </div>
   );
 }

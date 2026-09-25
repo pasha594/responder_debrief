@@ -6,6 +6,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { DisclaimerFooter } from '../panels/DisclaimerFooter';
 import { SettingsControl } from '../panels/SettingsControl';
+import { ScanCodeButton } from '../panels/QrShareControl';
 import { OfflineFiresStrip } from './OfflineFiresStrip';
 import { pickBestCity, searchPlaces } from '../api/geocode';
 import { track } from '../app/analytics';
@@ -225,7 +226,10 @@ export function DirectoryView() {
           </p>
           <div className="rd-dir-subtitle">{subtitle}</div>
         </div>
-        <SettingsControl />
+        <div className="rd-dir-actions">
+          <ScanCodeButton />
+          <SettingsControl />
+        </div>
       </header>
 
       {!online && (

@@ -5,6 +5,7 @@
  *   {base}health        → ingestion observability
  *   {base}sources       → upstream data sources
  *   {base}release_notes → what shipped each day ('release-notes' also works)
+ *   {base}s#<digits>    → a QR share code opened as a link (share/transport.ts)
  *
  * GitHub Pages has no server-side rewrites, so deep links are served by the
  * 404.html-copy-of-index.html trick (see deploy-pages.yml). Legacy '#/fire/…'
@@ -20,6 +21,7 @@ export type Route =
   | { name: 'health' }
   | { name: 'sources' }
   | { name: 'release_notes' }
+  | { name: 'share' }
   | { name: 'fire'; id: string };
 
 /** decodeURIComponent that survives malformed %-encoding (truncated links
@@ -46,6 +48,7 @@ export function parseLocation(
   if (p === 'health') return { name: 'health' };
   if (p === 'sources') return { name: 'sources' };
   if (p === 'release_notes' || p === 'release-notes') return { name: 'release_notes' };
+  if (p === 's') return { name: 'share' };
   const m = /^fire\/(.+)$/.exec(p);
   if (m) return { name: 'fire', id: safeDecode(m[1]) };
   return { name: 'directory' };
@@ -55,6 +58,7 @@ export function routePath(route: Route): string {
   if (route.name === 'health') return `${BASE}health`;
   if (route.name === 'sources') return `${BASE}sources`;
   if (route.name === 'release_notes') return `${BASE}release_notes`;
+  if (route.name === 'share') return `${BASE}s`;
   if (route.name === 'fire') return `${BASE}fire/${encodeURIComponent(route.id)}`;
   return BASE;
 }
@@ -81,6 +85,12 @@ export function useRoute(): Route {
     };
     window.addEventListener('popstate', onChange);
     window.addEventListener(NAV_EVENT, onChange);
+    // A child's mount effect runs before this one and may already have
+    // navigated (the /s share landing does) — catch up on it once.
+    setRoute((prev) => {
+      const next = parseLocation();
+      return sameRoute(prev, next) ? prev : next;
+    });
     return () => {
       window.removeEventListener('popstate', onChange);
       window.removeEventListener(NAV_EVENT, onChange);

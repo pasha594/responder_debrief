@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import type { IncidentMapEntry } from '../api/types';
+import type { IncidentMapEntry, IrFlight } from '../api/types';
 import {
   compareEntries,
   friendlyOpDate,
   groupMapsByDate,
+  irFlightWhen,
   localToday,
   productBase,
   rowAction,
@@ -149,6 +150,30 @@ describe('groupMapsByDate', () => {
     expect(groupMapsByDate([])).toEqual([]);
   });
 
+  it('files IR flights under their folder date, making a day for IR alone', () => {
+    const ir = (flight_date: string | null, flown_at: string | null = null) =>
+      ({ flight_date, flown_at, flight_id: `${flight_date}-${flown_at}` }) as IrFlight;
+    const groups = groupMapsByDate(
+      [entry({ op_date: '2026-09-23', product: 'ops' })],
+      [
+        ir('2026-09-25', '2026-09-25T02:09:00Z'),
+        ir('2026-09-23', '2026-09-23T03:00:00Z'),
+        ir('2026-09-23', '2026-09-23T05:00:00Z'),
+        ir(null),
+      ],
+    );
+    expect(groups.map((g) => [g.date, g.entries.length, g.irFlights.length])).toEqual([
+      ['2026-09-25', 0, 1],
+      ['2026-09-23', 1, 2],
+      [null, 0, 1],
+    ]);
+    // newest flight first within a day
+    expect(groups[1].irFlights.map((f) => f.flown_at)).toEqual([
+      '2026-09-23T05:00:00Z',
+      '2026-09-23T03:00:00Z',
+    ]);
+  });
+
   it('keeps a single undated group when nothing is dated', () => {
     const groups = groupMapsByDate([entry({ op_date: null }), entry({ op_date: null })]);
     expect(groups).toHaveLength(1);
@@ -235,5 +260,28 @@ describe('rowAction', () => {
       'view',
     );
     expect(rowAction(entry({ kind: 'qr', georeferenced: false }))).toBe('view');
+  });
+});
+
+describe('irFlightWhen', () => {
+  const tz = 'America/Los_Angeles';
+  it('shows the KMZ flight time in the fire zone', () => {
+    // folder 09-24, flown the evening before
+    expect(
+      irFlightWhen({ flight_date: '2026-09-24', flown_at: '2026-09-24T02:25:00Z' }, tz),
+    ).toEqual({ label: 'Sep 23, 7:25 PM PDT', source: 'kmz' });
+  });
+  it('falls back to the KMZ date, then the folder date, without shifting zones', () => {
+    expect(
+      irFlightWhen({ flight_date: '2026-08-24', flown_at: null, flown_date: '2026-08-23' }, tz),
+    ).toEqual({ label: 'Aug 23', source: 'kmz-date' });
+    // older manifests have no flown_* keys at all
+    expect(irFlightWhen({ flight_date: '2026-08-24' }, tz)).toEqual({
+      label: 'Aug 24',
+      source: 'folder',
+    });
+    expect(
+      irFlightWhen({ flight_date: null as unknown as string, flown_at: 'garbage' }, tz),
+    ).toEqual({ label: 'Undated', source: null });
   });
 });

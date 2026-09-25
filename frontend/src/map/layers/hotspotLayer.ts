@@ -22,6 +22,7 @@ import {
 } from 'maplibre-gl';
 import type { HotspotFeatureCollection } from '../../api/types';
 import { routeClickClaims, useStore } from '../../state/store';
+import { formatClockDate } from '../../utils/format';
 import { beforeIdFor } from '../zOrder';
 import type { LayerManager } from '../layerTypes';
 
@@ -129,22 +130,25 @@ function escapeHtml(s: string): string {
     .replace(/"/g, '&quot;');
 }
 
-function fmtAcq(acqTs: unknown): string {
+function fmtAcq(acqTs: unknown, timezone: string | null): string {
   const t = Number(acqTs);
   if (!Number.isFinite(t) || t <= 0) return 'unknown time';
-  const iso = new Date(t).toISOString();
-  return `${iso.slice(0, 10)} ${iso.slice(11, 16)} UTC`;
+  return formatClockDate(t, timezone);
 }
 
-function popupHtml(props: Record<string, unknown>): string {
+/**
+ * Confidence is named only when it is low or high: ~95% of detections are
+ * nominal (VIIRS "n", Landsat "M"), and there the raw code was just noise.
+ */
+export function popupHtml(props: Record<string, unknown>, timezone: string | null): string {
   const parts: string[] = [
     `<strong>${escapeHtml(String(props.source ?? 'Hotspot'))}</strong>`,
-    escapeHtml(fmtAcq(props.acq_ts)),
+    escapeHtml(fmtAcq(props.acq_ts, timezone)),
   ];
   const frp = props.frp == null ? NaN : Number(props.frp);
   if (Number.isFinite(frp)) parts.push(`FRP ${frp.toFixed(1)} MW`);
-  if (props.confidence != null && props.confidence !== '') {
-    parts.push(`confidence ${escapeHtml(String(props.confidence))}`);
+  if (props.conf_norm === 'low' || props.conf_norm === 'high') {
+    parts.push(`${props.conf_norm} confidence`);
   }
   return parts.join(' <span style="opacity:.55">•</span> ');
 }
@@ -154,6 +158,8 @@ function popupHtml(props: Record<string, unknown>): string {
 let lastData: HotspotFeatureCollection | undefined;
 let lastTEff: number | null = null;
 let lastVisible: boolean | null = null;
+/** The fire's IANA zone, read by the click popup (null → viewer-local). */
+let fireTz: string | null = null;
 
 // ---- throttled time application (one map at a time, like the peers) ----
 const THROTTLE_MS = 100;
@@ -204,7 +210,7 @@ function onClick(this: MlMap, e: MapLayerMouseEvent): void {
   const f = e.features?.[0];
   if (!f) return;
   popup ??= new Popup({ closeButton: false, offset: 10 });
-  popup.setLngLat(e.lngLat).setHTML(popupHtml(f.properties ?? {})).addTo(this);
+  popup.setLngLat(e.lngLat).setHTML(popupHtml(f.properties ?? {}, fireTz)).addTo(this);
 }
 
 function onEnter(this: MlMap): void {
@@ -256,6 +262,7 @@ export const hotspotLayer: LayerManager = {
 
   update(map, ctx) {
     if (!map.getLayer(LYR)) return;
+    fireTz = ctx.selectedFire?.timezone ?? null;
 
     const visible = ctx.layers.hotspots.visible;
     if (visible !== lastVisible) {
@@ -292,6 +299,7 @@ export const hotspotLayer: LayerManager = {
     lastData = undefined;
     lastTEff = null;
     lastVisible = null;
+    fireTz = null;
     if (map.getLayer(LYR)) map.removeLayer(LYR);
     if (map.getSource(SRC)) map.removeSource(SRC);
   },

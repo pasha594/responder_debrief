@@ -349,6 +349,14 @@ function MapLayerToggles({ corneaId }: { corneaId: string }) {
         />
         <span>Historic perimeters</span>
       </label>
+      {historic && (
+        <div className="rd-hist-legend" aria-hidden="true">
+          <span className="rd-hist-chip" style={{ background: '#e0a24a' }} /> recent
+          <span className="rd-hist-chip" style={{ background: '#a5875a' }} /> ~5 yr
+          <span className="rd-hist-chip" style={{ background: '#6f675f' }} /> 10 yr
+        </div>
+      )}
+      <TrailsRow />
       {trafficAvailable && (
         <label className="rd-field--row">
           <input type="checkbox" checked={traffic} onChange={() => actions.toggleTraffic()} />
@@ -362,14 +370,6 @@ function MapLayerToggles({ corneaId }: { corneaId: string }) {
           <span className="rd-title-meta">closures, delays</span>
         </label>
       )}
-      {historic && (
-        <div className="rd-hist-legend" aria-hidden="true">
-          <span className="rd-hist-chip" style={{ background: '#e0a24a' }} /> recent
-          <span className="rd-hist-chip" style={{ background: '#a5875a' }} /> ~5 yr
-          <span className="rd-hist-chip" style={{ background: '#6f675f' }} /> 10 yr
-        </div>
-      )}
-      <TrailsRow />
       <VegetationRow corneaId={corneaId} />
     </section>
   );

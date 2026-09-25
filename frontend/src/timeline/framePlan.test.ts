@@ -6,6 +6,8 @@ import {
   resolveWeatherFrame,
   spreadCoverage,
   spreadHourTicks,
+  weatherCoverage,
+  weatherJumpTarget,
 } from './framePlan';
 import type { PyrecastRun, WeatherRun } from '../api/types';
 
@@ -151,6 +153,41 @@ describe('weatherHours with an empty frames block', () => {
     expect(weatherHours(run)).toEqual([]);
     // legacy manifests (no frames block) still fall back to the hour list
     expect(weatherHours({ ...run, frames: undefined })).toHaveLength(2);
+  });
+});
+
+describe('weatherCoverage', () => {
+  it('spans the first to last rendered hour', () => {
+    expect(weatherCoverage(weatherRun)).toEqual([
+      T('2026-08-17T12:00:00Z'),
+      T('2026-08-17T14:00:00Z'),
+    ]);
+  });
+  it('null when nothing is rendered', () => {
+    expect(weatherCoverage(null)).toBeNull();
+    expect(
+      weatherCoverage({ ...weatherRun, frames: { hours: [] } } as unknown as WeatherRun),
+    ).toBeNull();
+  });
+});
+
+describe('weatherJumpTarget', () => {
+  const cov: [number, number] = [T('2026-08-17T12:00:00Z'), T('2026-08-19T06:00:00Z')];
+  const now = T('2026-08-17T15:30:00Z');
+  it('stays put when the playhead is already inside the run', () => {
+    expect(weatherJumpTarget(cov, T('2026-08-18T09:00:00Z'), now)).toBeNull();
+  });
+  it('jumps to now when the run covers now', () => {
+    expect(weatherJumpTarget(cov, T('2026-08-14T00:00:00Z'), now)).toBe(now);
+    expect(weatherJumpTarget(cov, T('2026-08-21T00:00:00Z'), now)).toBe(now);
+  });
+  it('jumps to the first hour when the run does not cover now', () => {
+    expect(weatherJumpTarget(cov, T('2026-08-14T00:00:00Z'), T('2026-08-17T10:00:00Z'))).toBe(
+      cov[0],
+    );
+  });
+  it('null without a rendered run', () => {
+    expect(weatherJumpTarget(null, 0, now)).toBeNull();
   });
 });
 

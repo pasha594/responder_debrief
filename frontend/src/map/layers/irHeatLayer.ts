@@ -1,12 +1,15 @@
 /**
- * IR flight heat polygons, fetched lazily per flight (module-cached by URL).
- * Heat classes tint the fill; the flight's mapped perimeter renders as an
- * outline only.
+ * IR flight heat, fetched lazily per flight (module-cached by URL), drawn in
+ * the NIROPS IR PDF's own symbology (irHeatImages.ts) so the overlay and the
+ * PDF read the same: red heat perimeter, red-hatched intense heat, red-dotted
+ * scattered heat, grey crosshatched cloud cover / no data (under the heat),
+ * ringed red isolated heat sources and red possible-heat diamonds.
  */
 import type { ExpressionSpecification, GeoJSONSource, Map as MlMap } from 'maplibre-gl';
 import { dataUrl } from '../../api/catalogs';
 import { beforeIdFor } from '../zOrder';
 import type { LayerManager } from '../layerTypes';
+import { IR_GREY, IR_IMAGES, IR_RED, installIrHeatImages } from './irHeatImages';
 
 const SRC = 'rd-ir-heat';
 const FILL = 'rd-ir-heat-fill';
@@ -15,24 +18,8 @@ const PT = 'rd-ir-heat-pt';
 
 const EMPTY_FC: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features: [] };
 
-const FILL_COLOR: ExpressionSpecification = [
-  'match',
-  ['get', 'heat_type'],
-  'Intense', '#ff3b1f',
-  'Scattered', '#ff8c00',
-  'Isolated', '#ffd166',
-  'Perimeter', 'rgba(0,0,0,0)',
-  'rgba(0,0,0,0)',
-];
-
-const FILL_OPACITY: ExpressionSpecification = [
-  'match',
-  ['get', 'heat_type'],
-  'Intense', 0.5,
-  'Scattered', 0.4,
-  'Isolated', 0.4,
-  0,
-];
+const HEAT = ['get', 'heat_type'] as ExpressionSpecification;
+const IS_POLYGON = ['==', ['geometry-type'], 'Polygon'] as ExpressionSpecification;
 
 // In-module cache: IR flight geojsons are immutable snapshots.
 const geojsonCache = new Map<string, GeoJSON.FeatureCollection | GeoJSON.Feature>();
@@ -73,6 +60,7 @@ export const irHeatLayer: LayerManager = {
   mount(map) {
     appliedUrl = null;
     wantedUrl = null;
+    installIrHeatImages(map);
     if (!map.getSource(SRC)) {
       map.addSource(SRC, { type: 'geojson', data: EMPTY_FC });
     }
@@ -82,7 +70,25 @@ export const irHeatLayer: LayerManager = {
           id: FILL,
           type: 'fill',
           source: SRC,
-          paint: { 'fill-color': FILL_COLOR, 'fill-opacity': FILL_OPACITY },
+          // polygons only: MapLibre fills a point feature as one ring through
+          // all its points, and NIROPS isolated heat is a single 400+ point
+          // MultiPoint — unfiltered, it paints wedges between the dots
+          filter: [
+            'all',
+            IS_POLYGON,
+            ['match', HEAT, ['Intense', 'Scattered', 'Obscured'], true, false],
+          ],
+          // cloud cover / no data sits under the heat it may overlap
+          layout: { 'fill-sort-key': ['match', HEAT, 'Obscured', 0, 1] },
+          paint: {
+            'fill-pattern': [
+              'match',
+              HEAT,
+              'Intense', IR_IMAGES.intense,
+              'Scattered', IR_IMAGES.scattered,
+              IR_IMAGES.obscured,
+            ],
+          },
         },
         beforeIdFor(map, 'rd-ir-heat-fill'),
       );
@@ -93,27 +99,36 @@ export const irHeatLayer: LayerManager = {
           id: LINE,
           type: 'line',
           source: SRC,
-          filter: ['==', ['get', 'heat_type'], 'Perimeter'],
-          paint: { 'line-color': '#ff6467', 'line-width': 2 },
+          filter: [
+            'all',
+            IS_POLYGON,
+            ['match', HEAT, ['Perimeter', 'Intense', 'Scattered', 'Obscured'], true, false],
+          ],
+          paint: {
+            'line-color': ['match', HEAT, 'Obscured', IR_GREY, IR_RED],
+            // the PDF's weights: heavy perimeter + no-data box, thin heat edges
+            'line-width': ['match', HEAT, 'Perimeter', 2.5, 'Obscured', 2, 1],
+          },
         },
         beforeIdFor(map, 'rd-ir-heat-line'),
       );
     }
     if (!map.getLayer(PT)) {
-      // some IR products publish Isolated/Scattered heat as point
-      // placemarks (KMZ) rather than polygons — draw those as dots
+      // KMZ products publish isolated (and possible) heat as point
+      // placemarks; every point draws, overlapping or not
       map.addLayer(
         {
           id: PT,
-          type: 'circle',
+          type: 'symbol',
           source: SRC,
           filter: ['==', ['geometry-type'], 'Point'],
-          paint: {
-            'circle-radius': 3.5,
-            'circle-color': FILL_COLOR,
-            'circle-opacity': 0.9,
-            'circle-stroke-width': 0.5,
-            'circle-stroke-color': 'rgba(0,0,0,0.4)',
+          layout: {
+            'icon-image': ['match', HEAT, 'Possible', IR_IMAGES.possible, IR_IMAGES.isolated],
+            // full PDF size close in; smaller at fire-wide zooms, where 400+
+            // full-size sources would bury the heat areas under them
+            'icon-size': ['interpolate', ['linear'], ['zoom'], 11, 0.5, 13, 0.75, 14.5, 1],
+            'icon-allow-overlap': true,
+            'icon-ignore-placement': true,
           },
         },
         beforeIdFor(map, 'rd-ir-heat-pt' as never),

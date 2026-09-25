@@ -8,7 +8,8 @@
  *
  * Pure module — no React, no DOM. The tab component and the tests both use it.
  */
-import type { IncidentMapEntry } from '../api/types';
+import type { IncidentMapEntry, IrFlight } from '../api/types';
+import { formatDateTime } from './format';
 
 /**
  * Operational priority for the product bases the worker emits
@@ -77,29 +78,40 @@ export interface MapDateGroup {
   /** YYYY-MM-DD, or null for the trailing "Undated" group. */
   date: string | null;
   entries: IncidentMapEntry[];
+  /**
+   * IR flights filed under this day by their FTP folder's date: the
+   * operational period the imagery serves (it is usually flown the evening
+   * before). Newest flight first.
+   */
+  irFlights: IrFlight[];
 }
 
 /**
  * Group sheets by operational date, most recent first, undated last; each
- * group sorted by `compareEntries`. Input is never mutated.
+ * group sorted by `compareEntries`. IR flights join the day their folder
+ * names. Input is never mutated.
  */
-export function groupMapsByDate(maps: readonly IncidentMapEntry[]): MapDateGroup[] {
-  const byDate = new Map<string, IncidentMapEntry[]>();
-  const undated: IncidentMapEntry[] = [];
-  for (const m of maps) {
-    if (!m.op_date) {
-      undated.push(m);
-      continue;
-    }
-    const list = byDate.get(m.op_date);
-    if (list) list.push(m);
-    else byDate.set(m.op_date, [m]);
+export function groupMapsByDate(
+  maps: readonly IncidentMapEntry[],
+  irFlights: readonly IrFlight[] = [],
+): MapDateGroup[] {
+  const byDate = new Map<string | null, MapDateGroup>();
+  const groupFor = (date: string | null) => {
+    let g = byDate.get(date);
+    if (!g) byDate.set(date, (g = { date, entries: [], irFlights: [] }));
+    return g;
+  };
+  for (const m of maps) groupFor(m.op_date || null).entries.push(m);
+  for (const f of irFlights) groupFor(f.flight_date || null).irFlights.push(f);
+  const groups = [...byDate.values()];
+  for (const g of groups) {
+    g.entries.sort(compareEntries);
+    g.irFlights.sort((a, b) => (b.flown_at ?? '').localeCompare(a.flown_at ?? ''));
   }
-  const groups: MapDateGroup[] = [...byDate.entries()]
-    .sort((a, b) => (a[0] < b[0] ? 1 : a[0] > b[0] ? -1 : 0))
-    .map(([date, entries]) => ({ date, entries: [...entries].sort(compareEntries) }));
-  if (undated.length) groups.push({ date: null, entries: [...undated].sort(compareEntries) });
-  return groups;
+  // newest first; undated last
+  return groups.sort((a, b) =>
+    a.date === b.date ? 0 : a.date === null ? 1 : b.date === null ? -1 : a.date < b.date ? 1 : -1,
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -168,6 +180,32 @@ export function friendlyOpDate(opDate: string | null, todayLocal: string): DateH
   if (opDate === todayLocal) primary = 'Today';
   else if (opDate === shiftIsoDate(todayLocal, -1)) primary = 'Yesterday';
   return { primary, secondary };
+}
+
+/**
+ * When an IR flight flew, for its row: the KMZ's flight time in the fire's
+ * zone ("Sep 23, 7:25 PM PDT"), else the KMZ's bare date, else the FTP
+ * folder's date. Folders are named for the day the imagery serves, so they
+ * often read a day later than an evening flight.
+ */
+export function irFlightWhen(
+  flight: Pick<IrFlight, 'flown_at' | 'flown_date' | 'flight_date'>,
+  timezone: string | null | undefined,
+): { label: string; source: 'kmz' | 'kmz-date' | 'folder' | null } {
+  if (flight.flown_at && Number.isFinite(Date.parse(flight.flown_at))) {
+    return { label: formatDateTime(flight.flown_at, timezone), source: 'kmz' };
+  }
+  const calendarDay = (date: string) => {
+    const t = Date.parse(`${date}T00:00:00Z`);
+    return Number.isFinite(t)
+      ? new Intl.DateTimeFormat('en-US', { timeZone: 'UTC', month: 'short', day: 'numeric' }).format(t)
+      : null;
+  };
+  const kmzDay = flight.flown_date ? calendarDay(flight.flown_date) : null;
+  if (kmzDay) return { label: kmzDay, source: 'kmz-date' };
+  const folderDay = flight.flight_date ? calendarDay(flight.flight_date) : null;
+  if (folderDay) return { label: folderDay, source: 'folder' };
+  return { label: 'Undated', source: null };
 }
 
 // ---------------------------------------------------------------------------

@@ -72,7 +72,7 @@ Per new/changed PDF (skip `mobile_*`/`Mobile_*`):
 7. Non-geo: raw + preview, `georeferenced: false`, no tiles.
 8. Budget: 40 sheets/run, priority ops>brief>iap>airops>evac>trans>pio>other; rest `tiling_pending: true`. State records `tiled: {pdf_sha: tiler_version}`; re-tile only on `TILER_VERSION` bump. Failures degrade (warp-without-cutline → georeferenced:false), recorded in manifest `error`, never fatal.
 
-IR: unzip `*_Shapefiles.zip` ignoring `*.lock`; per shapefile (`*_Perimeter|_Intense|_Scattered|_Isolated`) `ogr2ogr -f GeoJSON -t_srs EPSG:4326`, tag `heat_type` + `flight_id`, merge → `vectors/ir/{fire_slug}/{YYYYMMDD}_{flight}.geojson`; parse `Estimated Acreage:` from Read_Me.txt.
+IR: unzip `*_Shapefiles.zip` ignoring `*.lock`; per shapefile (`*_Perimeter|_Intense|_Scattered|_Isolated|_Cloud_Cover`) `ogr2ogr -f GeoJSON -t_srs EPSG:4326`, tag `heat_type` + `flight_id`, merge → `vectors/ir/{fire_slug}/{YYYYMMDD}_{flight}.geojson`; parse `Estimated Acreage:` from Read_Me.txt. KMZ-only flights convert from the KMZ: ArcGIS exports carry one KML folder per heat class; NIROPS KMZs have no folders, one named placemark per class ("Heat Perimeter", "Intense Heat", "Scattered Heat", "Isolated Heat", "Possible Heat", "Imagery Obscured" or "Cloud AOI" + "NoData"), empty when a class has nothing, and flat comma-only coordinate lists that only LIBKML reads (the plain-KML fallback regroups them). Classes: Perimeter, Intense, Scattered, Isolated, Possible (unconfirmed heat), Obscured (imagery the sensor couldn't see through). Flight time comes from the KMZ even when shapefiles are converted: NIROPS `Image Acquisition Date/Time` (local clock + zone) or ArcGIS `Production` + `Time_UTC` attributes → `flown_at` (UTC), or `flown_date` when only a date is given; the UI falls back to `flight_date` (the FTP folder). Results and failures cache in state under `IR_CONVERTER_VERSION`; a bump reconverts every flight from the raw files in the bucket.
 
 ## Job D — pyrecast catalogs
 
@@ -166,7 +166,8 @@ Authoritative shapes in plan.md §Data contracts. Full examples:
     "tiles": { "url_template": "/tiles/incidents/elk/a1b2c3d4e5f6a7b8/{z}/{x}/{y}.png",
       "minzoom": 9, "maxzoom": 15, "bounds": [-107.4018, 37.9984, -107.2424, 38.1621] },
     "tiling_pending": false, "rev": 1 }],
-  "ir_flights": [{ "flight_date": "2026-08-17", "flight_id": "20260817_c0730_Aircraft3",
+  "ir_flights": [{ "flight_date": "2026-08-17", "flown_at": "2026-08-17T07:30:00Z", "flown_date": null,
+    "flight_id": "20260817_c0730_Aircraft3",
     "no_flight_reason": null, "geojson_url": "/vectors/ir/elk/20260817_c0730_Aircraft3.geojson",
     "heat_types": ["Perimeter","Intense","Scattered","Isolated"], "estimated_acres": 7373,
     "pdf_url": "…", "kmz_url": "…", "readme_url": "…" }] }

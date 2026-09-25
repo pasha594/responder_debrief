@@ -27,6 +27,36 @@ export interface ReleaseDay {
 
 export const RELEASE_NOTES: ReleaseDay[] = [
   {
+    date: '2026-09-25',
+    notes: [
+      {
+        title: 'Names on historic perimeters',
+        summary: 'Each old fire scar now shows its name and year in its middle, no tap needed.',
+      },
+      {
+        title: 'Infrared (IR) flights on the map for more fires',
+        summary:
+          'Nightly IR heat now shows on the map for fires whose teams publish only a KMZ, like Sisi, drawn with the same symbols and legend as the IR PDF. Flights sit under their day in the Maps tab with when the plane flew.',
+      },
+      {
+        title: 'Tidier map corners',
+        summary:
+          'The legend moved to the bottom-left. The scale sits beside the info button, with the compass above it, and the map credits fold into that button after five seconds. An IR flight and an incident map now replace each other on the map instead of stacking.',
+      },
+      {
+        title: 'Share by QR code',
+        summary:
+          'The QR button beside 3D shows your map view, layers, incident map and drawings as a code. Another phone scans it with Scan code, no signal needed if both phones downloaded the fire.',
+      },
+      {
+        title: 'Historic perimeter dates',
+        summary:
+          'Tapping an old fire scar showed the date its record was last edited, not when it burned. It now shows the year of the fire.',
+        fix: true,
+      },
+    ],
+  },
+  {
     date: '2026-09-24',
     notes: [
       {
