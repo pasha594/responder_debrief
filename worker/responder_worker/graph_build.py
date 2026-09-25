@@ -14,17 +14,24 @@ Inputs: OSM nodes/ways (osm_extract.parse_opl) and agency trail lines
 3. Clip to the grid rectangle (runs of inside vertices; a boundary-crossing
    segment is dropped — the grid still routes around it).
 4. Conflation keeps OSM topology: an agency trail >= 80 % covered by OSM
-   ways (within 20 m, bearing within 35°) is dropped and donates its
-   name/number/restriction to the OSM edges it runs along. Uncovered agency
+   ways (within 20 m, bearing within 35°) is dropped. Uncovered agency
    runs >= 60 m become new edges whose ends snap to an OSM vertex within
    10 m, else onto an OSM segment within 25 m (splitting it), else to another
    agency end within 10 m. Loose ends are fine: every graph vertex is also a
    portal into the cost grid, so the router bridges gaps cross-country.
    An uncovered run with less than 60 m of it beyond 40 m of a parallel OSM
-   way is the same trail drawn offset, not a trail OSM lacks: agency lines
-   and OSM traces disagree by 10-40 m under canopy (SISI, North Cascades:
-   NPS vs OSM median offsets up to 30 m), and adding those runs braided the
-   network with parallel copies that split route steps.
+   trail (path, steps or track; never a road) is the same trail drawn
+   offset, not a trail OSM lacks: agency lines and OSM traces disagree by
+   10-40 m under canopy (SISI, North Cascades: NPS vs OSM median offsets up
+   to 30 m), and adding those runs braided the network with parallel copies
+   that split route steps.
+5. Whatever an agency trail is not added as, it says about the OSM trail it
+   matches: its name/number/restriction/season/wilderness go to the OSM
+   trail it parallels within 40 m (and to a road within 20 m when the whole
+   trail is that road), per matched stretch of each OSM way rather than per
+   edge, so a restriction covers the whole matched trail and not just the
+   edges that happened to lie close; an edge splits where a match starts or
+   ends inside it (_matched_spans, _donate_spans).
 
 RDG1 (little-endian; gzip, mtime 0; sections 4-byte aligned) — the byte
 contract with frontend/src/routing/rdg1.ts (FINAL_PLAN.md §2.6):
@@ -53,9 +60,12 @@ from . import utm
 # SAME inputs would now give a different graph (classification, conflation,
 # snapping), so existing bundles rebuild instead of staying "unchanged".
 # 2: offset agency copies are no longer braided in (SAME_TRAIL_M).
-BUILD_VERSION = 2
+# 3: agency attributes reach every matched OSM trail stretch; roads are
+#    never the "same trail".
+BUILD_VERSION = 3
 
 KIND_PAVED, KIND_UNPAVED, KIND_TRACK, KIND_PATH, KIND_STEPS, KIND_AGENCY = 1, 2, 3, 4, 5, 6
+TRAIL_KINDS = (KIND_TRACK, KIND_PATH, KIND_STEPS)
 SRC_OSM, SRC_USFS, SRC_BLM, SRC_NPS = 1, 2, 3, 4
 F_RESTRICTED, F_SEASONAL, F_BRIDGE, F_TUNNEL = 1, 2, 4, 8
 F_WILDERNESS, F_NOT_ASSESSED, F_AGENCY_NAMED, F_FORD = 16, 32, 64, 128
@@ -81,6 +91,12 @@ AGENCY_SRC = {"USFS": SRC_USFS, "BLM": SRC_BLM, "NPS": SRC_NPS}
 COVER_M, COVER_BEARING, COVER_FRACTION = 20.0, 35.0, 0.80
 SAME_TRAIL_M = 40.0
 NAME_EDGE_FRACTION = 0.60
+# A match along an OSM way: hits closer than MATCH_GAP_M along it are one
+# match (a brief divergence stays inside), which must be MIN_MATCH_M long
+# and have parallel agency line along MATCH_SUPPORT of it, so a trail that
+# only touches a track now and then is not the track. A match ending within
+# CUT_SNAP_M of an edge end takes the whole edge; otherwise the edge splits.
+MATCH_GAP_M, MIN_MATCH_M, MATCH_SUPPORT, CUT_SNAP_M = 200.0, 30.0, 0.5, 25.0
 MIN_AGENCY_RUN_M = 60.0
 SNAP_VERTEX_M, SNAP_SEGMENT_M, SNAP_AGENCY_M = 10.0, 25.0, 10.0
 SAMPLE_M = 10.0
@@ -99,6 +115,8 @@ class Edge:
     name: str | None = None
     ref: str | None = None
     note: str | None = None
+    way: tuple | None = None  # (OSM way id, clip run): edges of one way stretch
+    seq: int = 0              # order along that way stretch
 
 
 @dataclass
@@ -197,14 +215,16 @@ def osm_graph(nodes_ll: dict, ways: list, *, zone: int, northern: bool, rect) ->
                 run = []
         if len(run) >= 2:
             runs.append(run)
-        for run in runs:
-            start = 0
+        for ri, run in enumerate(runs):
+            start = seq = 0
             for i in range(1, len(run)):
                 if i == len(run) - 1 or count.get(run[i], 0) >= 2:
                     seg = run[start:i + 1]
                     g.edges.append(Edge(nid(seg[0]), nid(seg[-1]), [xy[r] for r in seg],
-                                        kind, SRC_OSM, sac, flags, name, ref))
+                                        kind, SRC_OSM, sac, flags, name, ref,
+                                        way=(w["id"], ri), seq=seq))
                     start = i
+                    seq += 1
     return g
 
 
@@ -371,7 +391,7 @@ def _split_edge_at(g: Graph, ei: int, cuts: list[tuple[float, tuple[float, float
     for a, b, xy in pieces:
         if len(xy) < 2:
             continue
-        ne = Edge(a, b, xy, e.kind, e.src, e.sac, e.flags, e.name, e.ref, e.note)
+        ne = Edge(a, b, xy, e.kind, e.src, e.sac, e.flags, e.name, e.ref, e.note, e.way, e.seq)
         if first:
             g.edges[ei] = ne
             first = False
@@ -403,68 +423,166 @@ def _nearest_on_edges(g: Graph, candidates: list[int], seg_ref: list, x: float, 
     return best_vertex or best
 
 
+def _donate(e: Edge, attrs: dict) -> None:
+    """An agency trail's attributes onto an OSM edge it matches (OSM's own
+    name and ref win; a restriction note is never dropped)."""
+    if not e.name:
+        e.name = attrs["name"]
+    if not e.ref:
+        e.ref = attrs["ref"]
+    e.note = e.note or attrs["note"]
+    e.flags |= F_AGENCY_NAMED | (attrs["flags"] & (F_RESTRICTED | F_SEASONAL | F_WILDERNESS))
+
+
+def _matched_spans(hits: list[tuple[int, int]], stretch: np.ndarray, pos: np.ndarray,
+                   stretches: dict[int, list[int]], edge_off: dict[int, float],
+                   edge_len: dict[int, float]) -> list[tuple[int, float, float]]:
+    """Where an agency trail follows OSM, from its hits (OSM sample j near
+    and parallel to agency sample i): per way stretch, hits split where they
+    lie more than MATCH_GAP_M apart along the way, and a group spanning
+    [lo, hi] is one match, however many edges it crosses (a brief parting
+    of the lines stays inside it), if it is >= MIN_MATCH_M long and the
+    agency samples behind it cover >= MATCH_SUPPORT of it. -> [(edge, u0,
+    u1)]: the matched metres along each edge, snapped out to an edge end
+    within CUT_SNAP_M."""
+    out = []
+    by_stretch: dict[int, list[tuple[float, int]]] = {}
+    for j, i in set(hits):
+        by_stretch.setdefault(int(stretch[j]), []).append((float(pos[j]), i))
+    for sid, hs in by_stretch.items():
+        hs.sort()
+        ps = np.asarray([h[0] for h in hs])
+        for idx in np.split(np.arange(len(hs)), np.flatnonzero(np.diff(ps) > MATCH_GAP_M) + 1):
+            lo, hi = ps[idx[0]], ps[idx[-1]]
+            if hi - lo < MIN_MATCH_M \
+                    or len({hs[k][1] for k in idx}) * SAMPLE_M < MATCH_SUPPORT * (hi - lo):
+                continue
+            for ei in stretches[sid]:
+                a, L = edge_off[ei], edge_len[ei]
+                u0, u1 = max(lo - a, 0.0), min(hi - a, L)
+                if u1 <= u0:
+                    continue
+                u0 = 0.0 if u0 < CUT_SNAP_M else u0
+                u1 = L if L - u1 < CUT_SNAP_M else u1
+                if u1 - u0 >= min(L, CUT_SNAP_M):
+                    out.append((ei, u0, u1))
+    return out
+
+
+def _pos_at(xy: list, u: float) -> tuple[float, tuple[float, float]]:
+    """Metres u along a polyline -> (segment index + t, point)."""
+    acc = 0.0
+    for k in range(len(xy) - 1):
+        (x1, y1), (x2, y2) = xy[k], xy[k + 1]
+        d = math.hypot(x2 - x1, y2 - y1)
+        if d > 0 and acc + d >= u:
+            t = (u - acc) / d
+            return k + t, (x1 + (x2 - x1) * t, y1 + (y2 - y1) * t)
+        acc += d
+    return len(xy) - 1.0, (float(xy[-1][0]), float(xy[-1][1]))
+
+
+def _donate_spans(g: Graph, donations: list[tuple[int, float, float, dict]]) -> set[int]:
+    """Give each (edge, u0, u1, attrs) its attributes, splitting an edge
+    where a match starts or ends inside it, so a restriction covers the
+    matched metres exactly. Earlier donations win (_donate). -> edges named."""
+    by_edge: dict[int, list] = {}
+    for ei, u0, u1, attrs in donations:
+        by_edge.setdefault(ei, []).append((u0, u1, attrs))
+    named: set[int] = set()
+    for ei, spans in by_edge.items():
+        e = g.edges[ei]
+        L = _length(e.xy)
+        cuts: list[float] = []  # one cut for match ends closer than CUT_SNAP_M: no slivers
+        for u in sorted({u for u0, u1, _ in spans for u in (u0, u1) if 0 < u < L}):
+            if not cuts or u - cuts[-1] >= CUT_SNAP_M:
+                cuts.append(u)
+        pieces = [(ei, 0.0, L)]
+        if cuts:
+            n_before = len(g.edges)
+            nodes = _split_edge_at(g, ei, [_pos_at(e.xy, u) for u in cuts])
+            ends = [e.a, *nodes, e.b]
+            us = [0.0, *cuts, L]
+            cand = [ei, *range(n_before, len(g.edges))]
+            pieces = [(pe, us[k], us[k + 1]) for k in range(len(ends) - 1)
+                      for pe in cand if (g.edges[pe].a, g.edges[pe].b) == (ends[k], ends[k + 1])]
+        for u0, u1, attrs in spans:
+            for pe, a, b in pieces:
+                if u0 <= (a + b) / 2 <= u1:
+                    _donate(g.edges[pe], attrs)
+                    named.add(pe)
+    return named
+
+
 def conflate(g: Graph, agency: list[tuple[dict, list]], *, log=print) -> dict:
     """agency: [(normalized props, UTM polyline)] already clipped to the AOI.
     Mutates g. -> stats."""
     osm_idx = [i for i, e in enumerate(g.edges) if e.src == SRC_OSM]
-    pts, brg, owner = [], [], []
-    edge_range: dict[int, tuple[int, int]] = {}
-    n_pts = 0
+    # OSM edges grouped into way stretches (osm_graph's Edge.way; an edge
+    # built elsewhere is a stretch of its own) and offset along them
+    sid_of: dict = {}
+    stretches: dict[int, list[int]] = {}
+    for ei in osm_idx:
+        sid = sid_of.setdefault(g.edges[ei].way or ("edge", ei), len(sid_of))
+        stretches.setdefault(sid, []).append(ei)
+    edge_len = {ei: _length(g.edges[ei].xy) for ei in osm_idx}
+    edge_off: dict[int, float] = {}
+    for eis in stretches.values():
+        eis.sort(key=lambda ei: g.edges[ei].seq)
+        off = 0.0
+        for ei in eis:
+            edge_off[ei] = off
+            off += edge_len[ei]
+    pts, brg, owner, stretch, pos = [], [], [], [], []
     for ei in osm_idx:
         p, b = densify(g.edges[ei].xy, SAMPLE_M / 2)
         pts.append(p)
         brg.append(b)
         owner.append(np.full(len(p), ei, dtype=np.int64))
-        edge_range[ei] = (n_pts, n_pts + len(p))
-        n_pts += len(p)
+        stretch.append(np.full(len(p), sid_of[g.edges[ei].way or ("edge", ei)], dtype=np.int64))
+        along = np.concatenate([[0.0], np.cumsum(np.hypot(*np.diff(p, axis=0).T))])
+        pos.append(edge_off[ei] + along[:len(p)])
     P = np.concatenate(pts) if pts else np.zeros((0, 2))
     B = np.concatenate(brg) if brg else np.zeros(0)
     O = np.concatenate(owner) if owner else np.zeros(0, dtype=np.int64)
+    S = np.concatenate(stretch) if stretch else np.zeros(0, dtype=np.int64)
+    W = np.concatenate(pos) if pos else np.zeros(0)
+    trail = np.isin([g.edges[ei].kind for ei in osm_idx], TRAIL_KINDS)
+    TRAIL = np.repeat(trail, [len(p) for p in pts]) if pts else np.zeros(0, bool)
     h = _Hash(P, SAME_TRAIL_M)
 
     stats = {"agency_features": len(agency), "agency_dropped_covered": 0,
              "agency_runs_added": 0, "agency_runs_parallel": 0, "osm_edges_named": 0,
              "snapped": 0}
+    donations: list[tuple[int, float, float, dict]] = []
     new_runs: list[tuple[dict, list]] = []
     for props, line in agency:
         ap, ab = densify(line, SAMPLE_M)
         if len(ap) < 2:
             continue
-        covered = np.zeros(len(ap), bool)
-        same = np.zeros(len(ap), bool)  # a parallel OSM way within SAME_TRAIL_M
-        hit_edges: set[int] = set()
-        near_samples: set[int] = set()  # OSM samples within COVER_M of this trail
+        covered = np.zeros(len(ap), bool)  # a parallel OSM way within COVER_M
+        same = np.zeros(len(ap), bool)     # a parallel OSM trail within SAME_TRAIL_M
+        trail_hits: list[tuple[int, int]] = []  # (OSM sample, agency sample)
+        road_hits: list[tuple[int, int]] = []
         for i, (x, y) in enumerate(ap.tolist()):
             for j in h.near(x, y, SAME_TRAIL_M):
                 d2 = (P[j, 0] - x) ** 2 + (P[j, 1] - y) ** 2
-                if d2 > SAME_TRAIL_M ** 2:
+                if d2 > SAME_TRAIL_M ** 2 or _bdiff(B[j], ab[i]) >= COVER_BEARING:
                     continue
-                parallel = _bdiff(B[j], ab[i]) < COVER_BEARING
-                same[i] |= parallel
+                if TRAIL[j]:
+                    same[i] = True
+                    trail_hits.append((j, i))
                 if d2 <= COVER_M ** 2:
-                    near_samples.add(j)
-                    if parallel:
-                        covered[i] = True
-                        hit_edges.add(int(O[j]))
+                    covered[i] = True
+                    if not TRAIL[j]:
+                        road_hits.append((j, i))
+        whole = covered.mean() >= COVER_FRACTION
+        # a road is the trail only when the whole trail runs on it
         attrs = agency_edge_attrs(props)
-        if covered.mean() >= COVER_FRACTION:
+        donations += [(ei, u0, u1, attrs) for ei, u0, u1 in _matched_spans(
+            trail_hits + (road_hits if whole else []), S, W, stretches, edge_off, edge_len)]
+        if whole:
             stats["agency_dropped_covered"] += 1
-            for ei in hit_edges:
-                e = g.edges[ei]
-                lo, hi = edge_range[ei]
-                # agency points are 10 m apart, OSM samples 5 m: a sample
-                # between two agency points can sit just beyond COVER_M of
-                # both, which only makes this test a little conservative
-                near = sum(1 for j in near_samples if lo <= j < hi)
-                if hi > lo and near / (hi - lo) >= NAME_EDGE_FRACTION:
-                    if not e.name:
-                        e.name = attrs["name"]
-                    if not e.ref:
-                        e.ref = attrs["ref"]
-                    e.note = e.note or attrs["note"]
-                    e.flags |= F_AGENCY_NAMED | (attrs["flags"] & (F_RESTRICTED | F_SEASONAL
-                                                                   | F_WILDERNESS))
-                    stats["osm_edges_named"] += 1
             continue
         # keep uncovered runs
         start = None
@@ -476,12 +594,15 @@ def conflate(g: Graph, agency: list[tuple[dict, list]], *, log=print) -> dict:
                 run = [tuple(p) for p in ap[max(0, start - 1):min(len(ap), i + 1)].tolist()]
                 if _length(run) >= MIN_AGENCY_RUN_M:
                     # a new trail strays >= 60 m beyond SAME_TRAIL_M somewhere;
-                    # otherwise it is an offset copy of the OSM way beside it
+                    # otherwise it is an offset copy of the OSM trail beside it
                     if (~same[start:i]).sum() * SAMPLE_M < MIN_AGENCY_RUN_M:
                         stats["agency_runs_parallel"] += 1
                     else:
                         new_runs.append((props, run))
                 start = None
+    # split and name only now: the samples above index the unsplit edges
+    stats["osm_edges_named"] = len(_donate_spans(g, donations))
+    osm_idx = [i for i, e in enumerate(g.edges) if e.src == SRC_OSM]
 
     # snap run ends onto OSM, splitting edges; then agency-agency clusters.
     # Every segment is hashed into each 25 m cell it passes through, so a

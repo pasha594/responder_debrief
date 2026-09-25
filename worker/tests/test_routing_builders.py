@@ -453,7 +453,10 @@ class TestGraphBuild:
     def test_offset_agency_copy_is_not_braided_in(self, fixtures, monkeypatch):
         # Real SISI inputs: NPS "Agnes Creek Trail (PCT)" runs 10-50 m off
         # the OSM PCT for long stretches. Only runs that stray well beyond
-        # that (>= 60 m of them past 40 m) are trails OSM lacks.
+        # that (>= 60 m of them past 40 m) are trails OSM lacks. What the
+        # NPS lines say must still reach the OSM trail: with a restriction
+        # injected, the old per-edge transfer put it on 345 m of the OSM
+        # trail beside 2.9 km of NPS line, and dropped copies lost theirs.
         from responder_worker import routing_bundle as rb
         doc = json.loads((fixtures / "routing" / "sisi_agnes_conflation.json").read_text())
         rect = gb.utm.bbox_lonlat_to_utm(tuple(doc["bbox"]), 10, True)
@@ -461,12 +464,21 @@ class TestGraphBuild:
         def run():
             nodes = {int(k): tuple(v) for k, v in doc["nodes"].items()}
             g = gb.osm_graph(nodes, doc["ways"], zone=10, northern=True, rect=rect)
-            ag = rb.project_trails([(f["props"], [tuple(c) for c in f["coords"]])
+            ag = rb.project_trails([(dict(f["props"], restr="Temporarily closed"),
+                                     [tuple(c) for c in f["coords"]])
                                     for f in doc["agency"]], zone=10, northern=True, rect=rect)
             return g, gb.conflate(g, ag, log=lambda *_: None)
 
         g, st = run()
         assert st["agency_runs_added"] == 2 and st["agency_runs_parallel"] == 3
+        m = {}
+        for e in g.edges:
+            if e.src == gb.SRC_OSM:
+                k = (e.name, bool(e.note))
+                m[k] = m.get(k, 0) + gb._length(e.xy)
+        assert m[("Agnes Creek Trail", True)] > 2200
+        assert all(not noted for (name, noted) in m if name != "Agnes Creek Trail")  # no road
+        assert all(e.flags & gb.F_RESTRICTED for e in g.edges if e.note)
         osm = np.concatenate([gb.densify(e.xy, 5.0)[0] for e in g.edges if e.src == gb.SRC_OSM])
         for e in (e for e in g.edges if e.kind == gb.KIND_AGENCY):
             p, _ = gb.densify(e.xy, 10.0)
@@ -475,6 +487,58 @@ class TestGraphBuild:
         # the old single 20 m tolerance braided all five uncovered runs in
         monkeypatch.setattr(gb, "SAME_TRAIL_M", gb.COVER_M)
         assert run()[1]["agency_runs_added"] == 5
+
+    def _way(self, xs, kind, way=7):
+        """One OSM way along y = 0 split into edges at xs (as osm_graph does
+        at junctions)."""
+        g = gb.Graph()
+        ids = [g.add_node(x, 0) for x in xs]
+        for k in range(len(xs) - 1):
+            g.edges.append(gb.Edge(ids[k], ids[k + 1], [(xs[k], 0.0), (xs[k + 1], 0.0)], kind,
+                                   way=(way, 0), seq=k))
+        return g
+
+    PROPS = {"tid": "usfs:9", "agency": "USFS", "name": "Bullion Loop", "num": "1255",
+             "restr": "Closed to stock", "season": None, "mgmt": None, "status": "open"}
+
+    def test_a_road_is_not_the_same_trail(self):
+        # An agency trail 30 m beside an unpaved road is its own trail (NPS
+        # Bullion Loop beside Stehekin Valley Road lost 750 m as a "copy" of
+        # the road); beside an OSM track it is that track, and the track
+        # gets its restriction, split where the match starts and ends.
+        line = [(100.0, 30.0), (600.0, 30.0)]
+        road = self._way([0, 1000], gb.KIND_UNPAVED)
+        st = gb.conflate(road, [(self.PROPS, line)], log=lambda *_: None)
+        assert st["agency_runs_added"] == 1 and st["agency_runs_parallel"] == 0
+        assert not any(e.note for e in road.edges if e.src == gb.SRC_OSM)
+        track = self._way([0, 1000], gb.KIND_TRACK)
+        st = gb.conflate(track, [(self.PROPS, line)], log=lambda *_: None)
+        assert st["agency_runs_added"] == 0 and st["agency_runs_parallel"] == 1
+        noted = [e for e in track.edges if e.note == "Closed to stock"]
+        assert len(track.edges) == 3 and len(noted) == 1
+        assert 500 <= gb._length(noted[0].xy) <= 560 and noted[0].ref == "1255"
+        assert noted[0].name == "Bullion Loop #1255" and noted[0].flags & gb.F_RESTRICTED
+
+    def test_restriction_covers_the_whole_matched_way(self):
+        # One OSM path split into three edges at junctions. The agency line
+        # follows it 10 m off but swings 60 m out along the middle edge:
+        # per-edge transfer skipped that edge, so the restricted trail read
+        # restricted / open / restricted. The match spans the whole way.
+        g = self._way([0, 500, 650, 1300], gb.KIND_PATH)
+        line = [(0.0, 10.0), (500.0, 10.0), (530.0, 70.0), (620.0, 70.0), (650.0, 10.0),
+                (1300.0, 10.0)]
+        st = gb.conflate(g, [(self.PROPS, line)], log=lambda *_: None)
+        assert st["agency_dropped_covered"] == 1 and st["osm_edges_named"] == 3
+        assert [e.note for e in g.edges] == ["Closed to stock"] * 3
+        # a trail that only touches a track for 20 m every 150 m (its
+        # switchback corners) is not the track, though the touches lie
+        # closer together than MATCH_GAP_M
+        track = self._way([0, 1200], gb.KIND_TRACK)
+        weave = []
+        for x0 in range(0, 1050, 150):
+            weave += [(x0, 15.0), (x0 + 20.0, 15.0), (x0 + 75.0, 100.0)]
+        gb.conflate(track, [(self.PROPS, weave)], log=lambda *_: None)
+        assert not any(e.note for e in track.edges if e.src == gb.SRC_OSM)
 
     def test_snap_splits_segment(self):
         g = gb.Graph()
