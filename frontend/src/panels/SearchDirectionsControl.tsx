@@ -20,7 +20,7 @@ import { geolocationAvailable, locateOnce, watchLocation } from '../app/geolocat
 import { track } from '../app/analytics';
 import { useStore } from '../state/store';
 import { useMap } from '../map/MapRoot';
-import { useIsDesktop } from '../utils/useMediaQuery';
+import { useCompactControls } from '../utils/useMediaQuery';
 
 const MY_LOCATION_LABEL = 'My location';
 const DEBOUNCE_MS = 350;
@@ -238,8 +238,9 @@ function endpointEl(which: 'a' | 'b'): HTMLElement {
 
 export function SearchDirectionsControl() {
   const map = useMap();
-  // phones get a compact "Search" pill that widens while it's in use (CSS)
-  const isDesktop = useIsDesktop();
+  // phones and touch tablets get a compact "Search" pill that widens while
+  // it's in use (CSS)
+  const fullControls = !useCompactControls();
   const directions = useStore((s) => s.directions);
   const range = useStore((s) => s.range);
   const actions = useStore((s) => s.actions);
@@ -530,7 +531,7 @@ export function SearchDirectionsControl() {
             )}
             <PlaceInput
               inputRef={startInput}
-              placeholder={isDesktop ? 'Search place or coordinates' : 'Search'}
+              placeholder={fullControls ? 'Search place or coordinates' : 'Search'}
               value={directions.a?.label ?? ''}
               onPick={setPoint('a')}
               onClear={() => actions.setDirectionsPoint('a', null)}

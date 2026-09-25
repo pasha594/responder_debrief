@@ -1599,11 +1599,11 @@
 }
 
 /* the back / basemap / search row wraps before it reaches the tools */
-.rd-app:has(.rd-draw-mapbar) .rd-map-toolbar {
+.rd-app:has(.rd-draw-mapbar--corner) .rd-map-toolbar {
   right: calc(var(--sidebar-w) + 12px + 158px + 8px);
 }
 
-.rd-app:has(.rd-sidebar--collapsed):has(.rd-draw-mapbar) .rd-map-toolbar {
+.rd-app:has(.rd-sidebar--collapsed):has(.rd-draw-mapbar--corner) .rd-map-toolbar {
   right: calc(60px + 158px + 8px);
 }
 
@@ -1658,8 +1658,8 @@
   color: var(--color-accent);
 }
 
-/* phones: in the top-left stack under the search bar, folded behind the
-   Drawing Tools button until it's tapped */
+/* phones and tablets: in the top-left stack under the search bar, folded
+   behind the Drawing Tools button until it's tapped */
 .rd-draw-mapbar--stack {
   position: static;
   width: 150px;
@@ -1667,12 +1667,6 @@
 
 .rd-draw-mapbar--stack .rd-draw-mapbtn--toggle {
   align-self: flex-start;
-}
-
-@media (max-width: 767px) {
-  .rd-app:has(.rd-draw-mapbar) .rd-map-toolbar {
-    right: auto;
-  }
 }
 
 /* ---------- basemap switcher (floating, under the back control) ---------- */
@@ -2090,18 +2084,23 @@
   gap: 6px;
   align-items: flex-start;
 }
+/* Phones and touch tablets (App sets --compact, see useCompactControls): the
+   folded controls stack down the left edge — back arrow, basemap pill and 3D
+   on the top line, then search, then the drawing tools. */
+.rd-map-toolbar--compact {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
+.rd-map-toolbar--compact .rd-map-toolbar-row {
+  gap: 6px;
+}
 @media (max-width: 767px) {
   .rd-map-toolbar {
     right: auto; /* no sidebar here (bottom sheet) */
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 6px;
   }
-  /* back arrow, basemap pill and 3D share the top line; pinch zooms, so the
-     +/- buttons would only crowd the corner the settings gear moves into */
-  .rd-map-toolbar-row {
-    gap: 6px;
-  }
+  /* pinch zooms, so the +/- buttons would only crowd the corner the
+     settings gear moves into */
   .maplibregl-map .maplibregl-ctrl-top-right {
     display: none;
   }
@@ -2275,15 +2274,14 @@
   background: var(--color-bg);
   border-color: var(--color-border);
 }
-/* phones: an idle search is a compact "Search" pill; it widens back to the
-   full bar while focused, holding a place, or expanded into directions */
-@media (max-width: 767px) {
-  .rd-sd-bar {
-    transition: width 150ms ease;
-  }
-  .rd-sd-bar:not(:focus-within):not(:has(.rd-sd-row + .rd-sd-row)):not(:has(.rd-sd-result)):has(input:placeholder-shown) {
-    width: 104px;
-  }
+/* phones and touch tablets: an idle search is a compact "Search" pill; it
+   widens back to the full bar while focused, holding a place, or expanded
+   into directions */
+.rd-map-toolbar--compact .rd-sd-bar {
+  transition: width 150ms ease;
+}
+.rd-map-toolbar--compact .rd-sd-bar:not(:focus-within):not(:has(.rd-sd-row + .rd-sd-row)):not(:has(.rd-sd-result)):has(input:placeholder-shown) {
+  width: 104px;
 }
 
 .rd-sd-badge { flex: 0 0 auto; width: 18px; height: 18px; font-size: 10px; cursor: default; }

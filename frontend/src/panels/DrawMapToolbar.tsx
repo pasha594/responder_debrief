@@ -2,8 +2,8 @@
  * Drawing tools, shown while the Draw tab is open (on phones, whatever height
  * the sheet is at): stop drawing, flip the last directional line, erase,
  * undo / redo, clear. The Draw tab itself keeps only the palette. On desktop
- * they sit in the map's top-right corner; on phones they ride under the search
- * bar, folded behind one "Drawing Tools" button (lit while a tool is armed)
+ * they sit in the map's top-right corner; on phones and touch tablets they
+ * ride under the search bar, folded behind one "Drawing Tools" button (lit while a tool is armed)
  * that opens the list — a tap elsewhere folds it again. App mounts one of each
  * placement; each renders only in its own layout.
  */
@@ -11,19 +11,19 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useStore } from '../state/store';
 import { drawLineById, isDirectionalLine } from '../map/layers/drawSymbols';
 import { flipLatestLine } from '../map/layers/drawPlan';
-import { useIsDesktop } from '../utils/useMediaQuery';
+import { useCompactControls } from '../utils/useMediaQuery';
 import { useDismiss } from '../utils/useDismiss';
 
 export function DrawMapToolbar({ placement }: { placement: 'corner' | 'stack' }) {
   const tabOpen = useStore((s) => s.ui.sidebarTab === 'draw');
   const draw = useStore((s) => s.draw);
   const actions = useStore((s) => s.actions);
-  const isDesktop = useIsDesktop();
+  const fullControls = !useCompactControls();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const close = useCallback(() => setOpen(false), []);
-  const here = (placement === 'corner') === isDesktop;
-  useDismiss(ref, open && tabOpen && here && !isDesktop, close);
+  const here = (placement === 'corner') === fullControls;
+  useDismiss(ref, open && tabOpen && here && !fullControls, close);
   // leaving the Draw tab folds the menu, so it doesn't reopen stale
   useEffect(() => {
     if (!tabOpen) setOpen(false);
@@ -34,7 +34,7 @@ export function DrawMapToolbar({ placement }: { placement: 'corner' | 'stack' })
   const lineStyle = tool.startsWith('line:') ? drawLineById(tool.slice('line:'.length)) : undefined;
   const directional = !!lineStyle && isDirectionalLine(lineStyle);
   const flipped = directional ? flipLatestLine(draw.features, lineStyle.id) : null;
-  const showTools = isDesktop || open;
+  const showTools = fullControls || open;
 
   return (
     <div
@@ -43,7 +43,7 @@ export function DrawMapToolbar({ placement }: { placement: 'corner' | 'stack' })
       aria-label="Drawing tools"
       ref={ref}
     >
-      {!isDesktop && (
+      {!fullControls && (
         <button
           type="button"
           className={`rd-draw-mapbtn rd-draw-mapbtn--toggle${tool !== 'none' ? ' rd-draw-mapbtn--armed' : ''}`}

@@ -1,12 +1,13 @@
 /**
  * Ground switcher: vector map / USGS satellite (hybrid) / USGS topo.
  * A floating segmented pill under the back control at the map's top-left;
- * on phones it folds to one pill naming the current ground, which opens to
- * all three when tapped and closes again on a pick (or a tap elsewhere).
+ * on phones and touch tablets it folds to one pill naming the current ground,
+ * which opens to all three when tapped and closes again on a pick (or a tap
+ * elsewhere).
  */
 import { useCallback, useRef, useState } from 'react';
 import { useStore, type AppState } from '../state/store';
-import { useIsDesktop } from '../utils/useMediaQuery';
+import { useCompactControls } from '../utils/useMediaQuery';
 import { useDismiss } from '../utils/useDismiss';
 
 const CHOICES: { id: AppState['ui']['basemap']; label: string }[] = [
@@ -18,13 +19,13 @@ const CHOICES: { id: AppState['ui']['basemap']; label: string }[] = [
 export function BasemapControl() {
   const basemap = useStore((s) => s.ui.basemap);
   const setBasemap = useStore((s) => s.actions.setBasemap);
-  const isDesktop = useIsDesktop();
+  const fullControls = !useCompactControls();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const close = useCallback(() => setOpen(false), []);
   useDismiss(ref, open, close);
 
-  if (!isDesktop && !open) {
+  if (!fullControls && !open) {
     const current = CHOICES.find((c) => c.id === basemap) ?? CHOICES[0];
     return (
       <div className="rd-basemap-control" ref={ref}>

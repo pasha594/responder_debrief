@@ -41,6 +41,7 @@ import { SharedPlayheadSync } from '../share/SharedPlayheadSync';
 import { ShareFormatError } from '../share/bytes';
 import { decodeShareBody } from '../share/shareCodec';
 import { parseShareText } from '../share/transport';
+import { useCompactControls } from '../utils/useMediaQuery';
 
 function MapLayerBridge() {
   const perimeterReady = useMapLayerSync();
@@ -271,12 +272,14 @@ function NowSampler() {
  * manager, so a repeat entry starts from a clean map.
  */
 function FireMapView() {
+  // phones and touch tablets stack the folded controls down the left edge
+  const compact = useCompactControls();
   return (
     <MapRoot>
       <MapLayerBridge />
       <UrlStateSync />
       <SharedPlayheadSync />
-      <div className="rd-map-toolbar">
+      <div className={`rd-map-toolbar${compact ? ' rd-map-toolbar--compact' : ''}`}>
         <div className="rd-map-toolbar-row">
           <BackControl />
           <BasemapControl />
