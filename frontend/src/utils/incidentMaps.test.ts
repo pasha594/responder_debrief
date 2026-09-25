@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { IncidentMapEntry } from '../api/types';
+import type { IncidentMapEntry, IrFlight } from '../api/types';
 import {
   compareEntries,
   friendlyOpDate,
@@ -148,6 +148,30 @@ describe('groupMapsByDate', () => {
 
   it('handles an empty manifest', () => {
     expect(groupMapsByDate([])).toEqual([]);
+  });
+
+  it('files IR flights under their folder date, making a day for IR alone', () => {
+    const ir = (flight_date: string | null, flown_at: string | null = null) =>
+      ({ flight_date, flown_at, flight_id: `${flight_date}-${flown_at}` }) as IrFlight;
+    const groups = groupMapsByDate(
+      [entry({ op_date: '2026-09-23', product: 'ops' })],
+      [
+        ir('2026-09-25', '2026-09-25T02:09:00Z'),
+        ir('2026-09-23', '2026-09-23T03:00:00Z'),
+        ir('2026-09-23', '2026-09-23T05:00:00Z'),
+        ir(null),
+      ],
+    );
+    expect(groups.map((g) => [g.date, g.entries.length, g.irFlights.length])).toEqual([
+      ['2026-09-25', 0, 1],
+      ['2026-09-23', 1, 2],
+      [null, 0, 1],
+    ]);
+    // newest flight first within a day
+    expect(groups[1].irFlights.map((f) => f.flown_at)).toEqual([
+      '2026-09-23T05:00:00Z',
+      '2026-09-23T03:00:00Z',
+    ]);
   });
 
   it('keeps a single undated group when nothing is dated', () => {

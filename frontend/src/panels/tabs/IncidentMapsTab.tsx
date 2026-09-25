@@ -278,14 +278,15 @@ function IrFlightRow({ flight, timezone }: { flight: IrFlight; timezone: string 
   return (
     <div className={`rd-ir-row${active ? ' rd-ir-row--active' : ''}`}>
       <div className="rd-ir-row-main">
-        <span className="rd-ir-date" title={when.source ? IR_WHEN_TITLE[when.source] : undefined}>
-          {when.label}
-        </span>
+        <span className="rd-ir-date">IR flight</span>
         <span className="rd-ir-acres">
           {flight.estimated_acres != null
             ? `${Math.round(flight.estimated_acres).toLocaleString('en-US')} ac est.`
             : flight.no_flight_reason ?? '—'}
         </span>
+      </div>
+      <div className="rd-ir-when" title={when.source ? IR_WHEN_TITLE[when.source] : undefined}>
+        {when.source === 'folder' ? `${when.label} (folder date)` : `Flown ${when.label}`}
       </div>
       <div className="rd-ir-row-actions">
         <button
@@ -330,7 +331,10 @@ export function IncidentMapsTab({ corneaId }: { corneaId: string }) {
   const { data: fire } = useFire(corneaId);
   const [viewing, setViewing] = useState<string | null>(null);
 
-  const groups = useMemo(() => groupMapsByDate(manifest?.maps ?? []), [manifest]);
+  const groups = useMemo(
+    () => groupMapsByDate(manifest?.maps ?? [], manifest?.ir_flights ?? []),
+    [manifest],
+  );
   // Tiled-version count per series — shown in the Timeline pill.
   const seriesCounts = useMemo(() => {
     const counts = new Map<string, number>();
@@ -373,18 +377,12 @@ export function IncidentMapsTab({ corneaId }: { corneaId: string }) {
                 onView={() => setViewing(m.id)}
               />
             ))}
+            {group.irFlights.map((f) => (
+              <IrFlightRow key={f.flight_id} flight={f} timezone={fire?.timezone ?? null} />
+            ))}
           </section>
         );
       })}
-
-      {manifest.ir_flights.length > 0 && (
-        <section className="rd-map-group">
-          <h3 className="rd-section-title">IR flights</h3>
-          {manifest.ir_flights.map((f) => (
-            <IrFlightRow key={f.flight_id} flight={f} timezone={fire?.timezone ?? null} />
-          ))}
-        </section>
-      )}
 
       {viewingEntry && (
         <MapLightbox entry={viewingEntry} onClose={() => setViewing(null)} />

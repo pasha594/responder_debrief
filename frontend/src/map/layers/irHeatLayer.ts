@@ -95,6 +95,10 @@ export const irHeatLayer: LayerManager = {
           id: FILL,
           type: 'fill',
           source: SRC,
+          // polygons only: MapLibre fills a point feature as one ring through
+          // all its points, and NIROPS isolated heat is a single 400+ point
+          // MultiPoint — unfiltered, it paints wedges between the dots
+          filter: ['==', ['geometry-type'], 'Polygon'],
           // obscured areas sit under the heat they may overlap
           layout: { 'fill-sort-key': ['match', ['get', 'heat_type'], 'Obscured', 0, 1] },
           paint: { 'fill-color': FILL_COLOR, 'fill-opacity': FILL_OPACITY },
