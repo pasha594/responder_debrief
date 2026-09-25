@@ -334,6 +334,63 @@ describe('leaving a trail costs LEAVE_TRAIL_PENALTY_S in the search, never in th
   });
 });
 
+describe('named stream crossings (bundle `streams` + grid band 3)', () => {
+  // 20x20 flat cells, no roads or trails; a creek along row 10 whose west
+  // half (cols 0–9) is named Company Creek in band 3 and east half unnamed
+  const W = 20;
+  function creek(named: boolean) {
+    const grid: RoutingGrid = { width: W, height: W, cell: 30, pace: new Uint8Array(W * W).fill(20),
+      veg: new Uint8Array(W * W).fill(1), dem: new Int16Array(W * W).fill(800) };
+    const stream = new Uint8Array(W * W);
+    for (let c = 0; c < W; c++) {
+      grid.veg[10 * W + c] = 1 | 0x10;
+      grid.pace[10 * W + c] = 60;
+      if (c < 10) stream[10 * W + c] = 1;
+    }
+    if (named) {
+      grid.stream = stream;
+      grid.streamNames = ['Company Creek'];
+    }
+    const rdg = {
+      epsg: 32611, x0: 500_010, y0: 4_900_020, nodes: new Int32Array(0), from: new Uint32Array(0),
+      to: new Uint32Array(0), dstart: Uint32Array.from([0]), deltas: new Int16Array(0), name: new Uint32Array(0),
+      ref: new Uint32Array(0), note: new Uint32Array(0), kind: new Uint8Array(0), src: new Uint8Array(0),
+      sac: new Uint8Array(0), flags: new Uint8Array(0), strings: [],
+    } as Rdg1;
+    const b = { ...bundle, warnings: [], crs: { epsg: 32611, zone: 11, northern: true },
+      grid: { x0: 500_010, y0: 4_900_020, cell_m: 30, width: W, height: W },
+      streams: named ? { band: 3, names: ['Company Creek'] } : undefined } as RoutingBundle;
+    const e = new OffroadEngine(b, grid, rdg, buildHybridGraph(rdg, grid));
+    const route = (col: number) => ok(routeSync(e, e.toLonLat(col * 30 + 15, 135), e.toLonLat(col * 30 + 15, 465),
+      { avoidPerimeter: false }));
+    return route;
+  }
+
+  it('names the creek a cross-country leg fords, in the step and the warning', () => {
+    const r = creek(true)(5);
+    expect(r.steps[0].text).toMatch(/^Head cross-country S 0\.2 mi through grass, crossing Company Creek — about/);
+    expect(r.notes!.find((n) => n.code === 'XC_STREAM')).toEqual({ level: 'warn', code: 'XC_STREAM',
+      text: 'Unbridged crossing of Company Creek, cross-country. Check depth and current before you commit.' });
+  });
+
+  it('an unnamed creek in a bundle that models rivers gets the generic warning', () => {
+    const r = creek(true)(15);
+    expect(r.steps[0].text).toMatch(/crossing 1 stream —/);
+    expect(r.notes!.find((n) => n.code === 'XC_STREAM')!.text)
+      .toBe('Cross-country, the route crosses a mapped perennial stream with no bridge. Check it before you commit.');
+  });
+
+  it('a bundle without stream names keeps the old wording (rivers not modeled)', async () => {
+    const r = creek(false)(5);
+    expect(r.notes!.find((n) => n.code === 'XC_STREAM')!.text).toMatch(/Stream size isn't modeled/);
+    // a descriptor that claims band 3 on a 2-band grid.tif decodes without names
+    const { decodeGrid } = await import('./gridDecode');
+    const g = await decodeGrid(buf('grid.tif'), buf('dem.tif'), { ...bundle, streams: { band: 3, names: ['X'] } });
+    expect(g.stream).toBeUndefined();
+    expect(g.streamNames).toBeUndefined();
+  });
+});
+
 describe('legs helpers', () => {
   it('climb hysteresis ignores sub-3 m noise', () => {
     expect(climbOf([100, 101, 100, 102, 101, 100])).toEqual({ climb: 0, descent: 0 });

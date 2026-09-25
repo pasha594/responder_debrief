@@ -16,6 +16,10 @@ export interface RoutingGrid {
   veg: Uint8Array;
   /** Metres; -32768 = nodata. */
   dem: Int16Array;
+  /** grid.tif band 3, when the bundle has one (types.ts `streams`): the
+   * named perennial stream in each cell, 0 = none, k = streamNames[k - 1]. */
+  stream?: Uint8Array;
+  streamNames?: string[];
 }
 
 async function readTiff(buf: ArrayBuffer, b: RoutingBundle, what: string) {
@@ -46,5 +50,14 @@ export async function decodeGrid(gridBuf: ArrayBuffer, demBuf: ArrayBuffer,
   if (!(pace instanceof Uint8Array) || !(veg instanceof Uint8Array) || !(dem instanceof Int16Array)) {
     throw new Error('unexpected raster band types');
   }
-  return { width: b.grid.width, height: b.grid.height, cell: b.grid.cell_m, pace, veg, dem };
+  const out: RoutingGrid = { width: b.grid.width, height: b.grid.height, cell: b.grid.cell_m, pace, veg, dem };
+  // stream names are optional and additive: a bundle without them (or a
+  // band we don't expect) routes exactly as before, just without names
+  const names = b.streams?.names;
+  const band = b.streams?.band;
+  if (band && Array.isArray(names) && names.length && g.length >= band && g[band - 1] instanceof Uint8Array) {
+    out.stream = g[band - 1] as Uint8Array;
+    out.streamNames = names;
+  }
+  return out;
 }

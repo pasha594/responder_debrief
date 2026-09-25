@@ -77,6 +77,11 @@ export interface RoutingBundle {
     trails?: { build_id?: string | null };
     nhd?: { huc8?: string[] };
   };
+  /** Named perennial streams (worker nhd.burn_lines): grid.tif band `band`
+   * holds a per-cell id, 0 = none, k = names[k - 1]. Absent on older
+   * bundles. Rivers too big to wade are impassable water in the grid, so a
+   * cross-country leg only ever fords a creek. */
+  streams?: { band: number; names: string[]; truncated?: boolean };
   stats?: Record<string, unknown>;
   warnings?: string[];
   attribution?: string[];

@@ -22,12 +22,12 @@
  * window has no path, (2) the whole grid, weight 1.2, 4M; if (1) ran out
  * of budget, (3) the window at weight 1.6 (WEIGHTED: near-optimal).
  */
-import type { RouteLeg, RouteNote, RouteResult } from '../api/routing';
+import type { RouteNote, RouteResult } from '../api/routing';
 import { lonLatToUtm, utmToLonLat } from '../spread/utm';
 import { HybridSearch, searchWindow, type Window } from './astar';
 import { decodeGrid, type RoutingGrid } from './gridDecode';
 import { buildHybridGraph, cellOf, type HybridGraph } from './hybridGraph';
-import { buildLegs, fmtMiles, stepsFor, totals, type Piece } from './legs';
+import { buildLegs, fmtMiles, fordsText, stepsFor, totals, type Piece } from './legs';
 import { PACE_LUT } from './pacecode';
 import { perimeterMask, releaseEndpoint, type GridPolygon } from './rasterize';
 import { gunzip, parseRdg1, type Rdg1 } from './rdg1';
@@ -225,7 +225,7 @@ export class OffroadEngine {
     const raw = this.pieces(s, a, b);
     const pieces: Piece[] = raw.map((p) => (p.kind === 'xc'
       ? { kind: 'xc', pts: smoothRun(this.grid, mask, p.pts) } : p));
-    const legs: RouteLeg[] = buildLegs({ grid: this.grid, mask, graph: this.graph, rdg: this.rdg,
+    const legs = buildLegs({ grid: this.grid, mask, graph: this.graph, rdg: this.rdg,
       toLonLat: this.toLonLat }, pieces);
     const t = totals(legs);
     const coords: [number, number][] = [];
@@ -235,11 +235,17 @@ export class OffroadEngine {
         if (!last || last[0] !== c[0] || last[1] !== c[1]) coords.push(c);
       }
     }
-    let fords = 0;
-    for (const l of legs) if (l.kind === 'xc') fords += l.streamCrossings ?? 0;
-    if (fords) {
+    const fords = fordsText(legs);
+    if (fords.named) {
+      // bundles with stream names also route around rivers (impassable
+      // water), so what's left to ford is a named creek
       notes.push({ level: 'warn', code: 'XC_STREAM',
-        text: `Cross-country, the route crosses ${fords === 1 ? 'a mapped perennial stream' : `${fords} mapped perennial streams`} with no bridge. Stream size isn't modeled — a crossing may be a river. Check it before you commit.` });
+        text: `Unbridged crossing of ${fords.text}, cross-country. Check depth and current before you commit.` });
+    } else if (fords.total) {
+      const what = fords.total === 1 ? 'a mapped perennial stream' : `${fords.total} mapped perennial streams`;
+      const size = this.bundle.streams ? '' : " Stream size isn't modeled — a crossing may be a river.";
+      notes.push({ level: 'warn', code: 'XC_STREAM',
+        text: `Cross-country, the route crosses ${what} with no bridge.${size} Check it before you commit.` });
     }
     if (weighted) notes.push({ level: 'info', code: 'WEIGHTED', text: 'Long search — route is near-optimal, not guaranteed shortest.' });
     if (this.grid.cell > 30) {

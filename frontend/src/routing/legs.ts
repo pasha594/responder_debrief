@@ -25,6 +25,31 @@ export type Piece =
   | { kind: 'graph'; nodes: number[]; edges: number[] }
   | { kind: 'xc'; pts: [number, number][] };
 
+/** A leg as built here: an xc leg also names each stream it fords (null =
+ * unnamed, or a bundle without stream names), one entry per crossing. */
+export type WalkLeg = RouteLeg & { streamNames?: (string | null)[] };
+
+/** "Company Creek", "Company Creek and 1 unnamed stream", "2 streams" —
+ * the fords of some xc legs, names first, each name once. */
+export function fordsText(legs: WalkLeg[]): { text: string; named: number; total: number } {
+  const names: string[] = [];
+  let total = 0;
+  let unnamed = 0;
+  for (const l of legs) {
+    if (l.kind !== 'xc') continue;
+    const n = l.streamCrossings ?? 0;
+    total += n;
+    const ids = l.streamNames ?? [];
+    for (const nm of ids) if (nm && !names.includes(nm)) names.push(nm);
+    unnamed += n - ids.filter(Boolean).length;
+  }
+  const s = (k: number) => (k > 1 ? 's' : '');
+  const list = names.length > 1 ? `${names.slice(0, -1).join(', ')} and ${names.at(-1)}` : names[0] ?? '';
+  const text = !names.length ? `${total} stream${s(total)}`
+    : unnamed ? `${list} and ${unnamed} unnamed stream${s(unnamed)}` : list;
+  return { text, named: names.length, total };
+}
+
 export interface LegContext {
   grid: RoutingGrid;
   mask: Uint8Array | null;
@@ -111,13 +136,15 @@ function graphLeg(ctx: LegContext, nodes: number[], edges: number[]): RouteLeg {
   };
 }
 
-function xcLeg(ctx: LegContext, pts: [number, number][]): RouteLeg {
+function xcLeg(ctx: LegContext, pts: [number, number][]): WalkLeg {
   const { grid, mask } = ctx;
   const t = tallyPolyline(grid, mask, pts);
   const dense = densify(pts, SAMPLE_M);
   const vegM: Record<number, number> = {};
   const runs: { veg: number; from: number; to: number }[] = [];
-  let crossings = 0;
+  // one entry per ford, named from grid band 3 when the bundle has it (the
+  // first named cell of the crossing: a line's cells aren't all named)
+  const fords: (string | null)[] = [];
   let inStream = false;
   let dist = 0;
   for (let j = 0; j + 1 < dense.length; j++) {
@@ -133,7 +160,12 @@ function xcLeg(ctx: LegContext, pts: [number, number][]): RouteLeg {
     if (last && last.veg === cls) last.to = j + 1;
     else runs.push({ veg: cls, from: j, to: j + 1 });
     const s = (vb & STREAM_BIT) !== 0;
-    if (s && !inStream) crossings++;
+    if (s) {
+      const id = grid.stream?.[cell] ?? 0;
+      const name = id ? grid.streamNames?.[id - 1] ?? null : null;
+      if (!inStream) fords.push(name);
+      else if (name && fords[fords.length - 1] == null) fords[fords.length - 1] = name;
+    }
     inStream = s;
   }
   const { climb, descent } = climbOf(dense.map(([x, y]) => demAt(grid, x, y)));
@@ -147,7 +179,8 @@ function xcLeg(ctx: LegContext, pts: [number, number][]): RouteLeg {
     durationRangeS: [t.fast, t.slow],
     vegM,
     vegRuns: runs,
-    streamCrossings: crossings,
+    streamCrossings: fords.length,
+    streamNames: fords,
   };
 }
 
@@ -165,8 +198,8 @@ function wayKey(rdg: Rdg1, e: number): string {
   return `${label}|${rdg.note[e]}|${rdg.flags[e] & FLAG.restricted}|${road ? 'r' : 't'}`;
 }
 
-export function buildLegs(ctx: LegContext, pieces: Piece[]): RouteLeg[] {
-  const legs: RouteLeg[] = [];
+export function buildLegs(ctx: LegContext, pieces: Piece[]): WalkLeg[] {
+  const legs: WalkLeg[] = [];
   for (const p of pieces) {
     if (p.kind === 'xc') {
       if (p.pts.length >= 2) legs.push(xcLeg(ctx, p.pts));
@@ -295,7 +328,7 @@ function sumLegs(legs: RouteLeg[]): RouteLeg {
   return out;
 }
 
-export function stepsFor(legs: RouteLeg[]): RouteStep[] {
+export function stepsFor(legs: WalkLeg[]): RouteStep[] {
   const steps: RouteStep[] = [];
   let first = true;
   for (let i = 0; i < legs.length; i++) {
@@ -304,8 +337,7 @@ export function stepsFor(legs: RouteLeg[]): RouteStep[] {
     const c = l.coordinates;
     if (l.kind === 'xc') {
       const veg = dominantVeg(l);
-      const cross = l.streamCrossings
-        ? `, crossing ${l.streamCrossings} stream${l.streamCrossings > 1 ? 's' : ''}` : '';
+      const cross = l.streamCrossings ? `, crossing ${fordsText([l]).text}` : '';
       const lead = first ? 'Head cross-country' : `Leave the ${legs[i - 1]?.kind === 'road' ? 'road' : 'trail'} at ${ll(c[0])}; go cross-country`;
       const climb = climbText(l);
       steps.push({
