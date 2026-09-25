@@ -1,9 +1,10 @@
 # Trails overlay + offline off-road routing — working notes
 
-Status (2026-09-24): research and three competing designs are done and judged;
-the merged final plan and the build have NOT started. These are working notes
-for the build, not user-facing docs — condense or remove them before merging
-to `main` (the repo is public).
+Status (2026-09-25): the merged plan is `FINAL_PLAN.md`; the first full build
+(worker + frontend) is on this branch — see `STATUS.md` for what is done,
+tested and unverified. These are working notes for the build, not
+user-facing docs — condense or remove them before merging to `main` (the
+repo is public).
 
 ## What we're building
 
