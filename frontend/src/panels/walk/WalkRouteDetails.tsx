@@ -71,7 +71,7 @@ export function WalkRouteDetails({ route, defaultOpen }: { route: RouteResult; d
     : raw;
   const warnings = notes.filter((n) => n.level === 'warn').length;
   return (
-    <div className="rd-walk">
+    <div className={open ? 'rd-walk rd-walk--open' : 'rd-walk'}>
       <button
         type="button"
         className="rd-walk-head"
@@ -79,11 +79,13 @@ export function WalkRouteDetails({ route, defaultOpen }: { route: RouteResult; d
         onClick={() => setOpen(!open)}
         title={open ? 'Hide route details' : 'Show route details'}
       >
-        <strong>{fmtTime(route.durationS)}</strong>
-        <span className="rd-walk-muted">{fmtMiles(t.distanceM)}</span>
-        {(t.climbM >= 3 || t.descentM >= 3) && (
-          <span className="rd-walk-muted">↑ {fmtFeet(t.climbM)} ↓ {fmtFeet(t.descentM)}</span>
-        )}
+        <span className="rd-walk-stats">
+          <strong>{fmtTime(route.durationS)}</strong>
+          <span className="rd-walk-muted">{fmtMiles(t.distanceM)}</span>
+          {(t.climbM >= 3 || t.descentM >= 3) && (
+            <span className="rd-walk-muted">↑ {fmtFeet(t.climbM)} ↓ {fmtFeet(t.descentM)}</span>
+          )}
+        </span>
         {!open && warnings > 0 && (
           <span className="rd-walk-warncount" aria-label={`${warnings} warning${warnings > 1 ? 's' : ''}`}>
             ⚠ {warnings}
