@@ -63,6 +63,7 @@
   flex: 1;
   min-height: 0;
   overflow-y: auto;
+  overflow-x: hidden; /* the panel only scrolls up and down */
   overscroll-behavior: contain;
 }
 
@@ -256,12 +257,13 @@
   text-overflow: ellipsis;
 }
 
+/* Wraps between words, so a long label ("Pers. −46 today") takes a second
+   line on a narrow phone instead of pushing the strip past the panel. */
 .rd-stat-label {
   font-size: 10.5px;
   letter-spacing: 0.05em;
   text-transform: uppercase;
   color: var(--color-text-muted);
-  white-space: nowrap;
 }
 
 /* tab bar */

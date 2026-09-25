@@ -27,6 +27,17 @@ export interface ReleaseDay {
 
 export const RELEASE_NOTES: ReleaseDay[] = [
   {
+    date: '2026-09-28',
+    notes: [
+      {
+        title: 'Overview stays put',
+        summary:
+          "On narrower phones the Overview tab slid sideways under your thumb. The crew, engine, helicopter and personnel counts now fit, with a long personnel label taking two lines.",
+        fix: true,
+      },
+    ],
+  },
+  {
     date: '2026-09-25',
     notes: [
       {
