@@ -31,18 +31,22 @@ _KEEP_UPPER = {"NF", "FS", "NFS", "BLM", "NPS", "OHV", "ATV", "UTV", "II", "III"
                "IV", "VI", "NW", "NE", "SW", "SE", "USFS", "PCT", "CDT", "CCC",
                "TH", "RD", "HWY", "US", "SR", "MTB"}
 _SMALL = {"of", "the", "and", "to", "at", "on", "in", "by"}
+# Placeholder values the services use for "no value" (live: USFS 'N/A' in
+# 9,810 TERRA rows' use/season/restriction fields, BLM '<Null>' names).
+_NA = {"N/A", "NA", "NONE", "UNKNOWN", "UNK", "UNNAMED", "NULL", "<NULL>"}
 
 
 def _clean(v) -> str:
     if v is None:
         return ""
-    return re.sub(r"\s+", " ", str(v)).strip()
+    s = re.sub(r"\s+", " ", str(v))
+    return re.sub(r"[\x00-\x1f\x7f]", "", s).strip()  # NPS has a '\x08D & H Canal Trail'
 
 
 def _word(w: str, first: bool) -> str:
     if not w:
         return w
-    core = w.strip("()#.,")
+    core = w.strip("()#.,:;")  # 'PCT:' keeps its capitals
     if core.upper() in _KEEP_UPPER or any(ch.isdigit() for ch in core):
         return w.upper()
     lw = w.lower()
@@ -56,7 +60,7 @@ def tidy_name(v) -> str | None:
     """Trim, collapse spaces, and title-case ALL-CAPS names (keeping NF, BLM,
     route numbers...). Mixed-case names are left as the agency wrote them."""
     s = _clean(v)
-    if not s or s.upper() in ("N/A", "NA", "NONE", "UNKNOWN", "UNNAMED", "NULL"):
+    if not s or s.upper() in _NA:
         return None
     if re.search(r"[a-z]", s):
         return s
@@ -65,8 +69,10 @@ def tidy_name(v) -> str | None:
 
 
 def _window(v) -> str | None:
-    """'05/15-09/15 ' -> '05/15–09/15'."""
+    """'05/15-09/15 ' -> '05/15–09/15'; 'N/A' -> None."""
     s = _clean(v)
+    if s.upper() in _NA:
+        return None
     m = re.fullmatch(r"(\d{2}/\d{2})\s*-\s*(\d{2}/\d{2})", s)
     return f"{m.group(1)}–{m.group(2)}" if m else (s or None)
 
@@ -115,9 +121,13 @@ def normalize_usfs(p: dict, src_date: str) -> dict | None:
     ])
     cls = _clean(p.get("TRAIL_CLASS"))
     sma = _clean(p.get("SPECIAL_MGMT_AREA")).upper()
+    # live SPECIAL_MGMT_AREA holds 'WSA - WILDERNESS STUDY AREA' (not designated
+    # Wilderness); NATIONAL_TRAIL_DESIGNATION 3 = PCT/AT/CDT/NCT, 2 = NRTs
+    ntd = _clean(p.get("NATIONAL_TRAIL_DESIGNATION"))
     mgmt = _join([
-        "Wilderness" if "WILDERNESS" in sma else None,
-        "National Scenic/Historic Trail" if _clean(p.get("NATIONAL_TRAIL_DESIGNATION")) == "3" else None,
+        "Wilderness Study Area" if "WILDERNESS STUDY" in sma
+        else ("Wilderness" if "WILDERNESS" in sma else None),
+        {"3": "National Scenic/Historic Trail", "2": "National Recreation Trail"}.get(ntd),
     ])
     return {
         "tid": f"usfs:{cn}:{bmp:.3f}",
@@ -140,10 +150,21 @@ def normalize_usfs(p: dict, src_date: str) -> dict | None:
 # BLM
 # ---------------------------------------------------------------------------
 
+# PLAN_ALLOW_MODE_TRNSPRT, per the layer's coded-value domain (e.g.
+# MTC_ATV_SHARED = 'Shared Motorcycle, ATV, Mountain Bike, Electric Mountain
+# Bike, Equestrian, Hiking'). MTC_SHARED's label is just 'Motorcycle Shared';
+# it follows the other *_SHARED codes (the motor class + hiker/stock/bike).
+# UNK and the over-snow codes publish no summer use.
 _BLM_USE = {
-    "HIK_ONLY": "H", "EQU_HIK_ONLY": "HP", "BIKE_HIK_ONLY": "HB",
-    "NON_MOTO_SHARED": "HPB", "MTC_ATV_SHARED": "MA", "TECH_VEH_SHARED": "MA4",
+    "HIK_ONLY": "H", "EQU_ONLY": "P", "EQU_HIK_ONLY": "HP", "BIKE_ONLY": "B",
+    "BIKE_HIK_ONLY": "HB", "NON_MOTO_SHARED": "HPB",
+    "MTC_ONLY": "M", "TECH_MTC_ONLY": "M", "MTC_SHARED": "HPBM",
+    "MTC_ATV_ONLY": "MA", "MTC_ATV_UTV_ONLY": "MA",
+    "MTC_ATV_SHARED": "HPBMA", "MTC_ATV_UTV_SHARED": "HPBMA",
+    "ALL_MOTO_VEH": "HPBMA4", "TECH_VEH_SHARED": "HPBMA4", "TECH_HI_CLEAR_VEH_ONLY": "4",
 }
+_BLM_DESIGNATION = {"NST": "National Scenic Trail", "NHT": "National Historic Trail",
+                    "NRT": "National Recreation Trail"}
 _BLM_ACCESS = {
     "ADMIN ONLY": "Admin only (agency/fire use)",
     "AUTHORIZED/PERMITTED USER ONLY": "Authorized/permitted users only",
@@ -164,15 +185,15 @@ def normalize_blm(p: dict, layer: str, src_date: str) -> dict | None:
     letters = _BLM_USE.get(mode, "")
     uses = _ordered(letters)
     foot = "yes" if "H" in letters else "unknown"
-    season = _clean(p.get("PLAN_SEASON_RSTRCT_CODE"))
-    if season.upper() in ("", "NONE", "UNK", "UNKNOWN", "N/A"):
-        season = ""
+    # a YES/NO/UNK status (domain 'Planned Seasonal Restriction Status'), not a window
+    seasonal = _code(p.get("PLAN_SEASON_RSTRCT_CODE")) == "YES"
     observed = _code(p.get("OBSRVE_ROUTE_USE_CLASS"))
     restr = _join([
         _BLM_ACCESS.get(_code(p.get("PLAN_ACCESS_RSTRCT"))),
         "Observed impassable" if observed == "IMPASSABLE" else None,
     ])
     special = _clean(p.get("ROUTE_SPCL_DSGNTN_TYPE"))
+    special = _BLM_DESIGNATION.get(special.upper()) or tidy_name(special)
     st = _clean(p.get("ADMIN_ST")).upper()
     return {
         "tid": f"blm:{'n' if layer == 'not_assessed' else 'm'}{int(oid)}",
@@ -183,9 +204,9 @@ def normalize_blm(p: dict, layer: str, src_date: str) -> dict | None:
         "uses": uses,
         "foot": foot,
         "restr": restr,
-        "season": season or None,
+        "season": "Seasonal restrictions" if seasonal else None,
         "status": "not_assessed" if layer == "not_assessed" else "open",
-        "mgmt": tidy_name(special) if special.upper() not in ("", "NONE", "UNKNOWN", "N/A") else None,
+        "mgmt": special,
         "unit": f"BLM {st}" if st else "BLM",
         "src_date": src_date,
     }
@@ -200,10 +221,12 @@ NPS_DROP_TYPE = {"WATER TRAIL", "SNOW TRAIL", "FERRY ROUTE"}
 _NPS_TOKENS = [
     (("HIKER", "PEDESTRIAN", "HIKE", "HIKING", "WALK", "FOOT"), "H"),
     (("HORSE", "EQUESTRIAN", "PACK", "STOCK", "SADDLE"), "P"),
-    (("BICYCLE", "BIKE", "MOUNTAIN BIKE", "CYCLING"), "B"),
+    (("BICYCLE", "BIKE", "MOUNTAIN BIKE", "CYCLING", "BIKING"), "B"),
     (("MOTORCYCLE",), "M"),
-    (("ATV", "OHV", "UTV"), "A"),
-    (("4WD", "HIGH CLEARANCE"), "4"),
+    # live TRLUSE spells them out: 'All-Terrain Vehicle' (~1,080 rows),
+    # 'Four-Wheel Drive Vehicle > 50” in Tread Width'
+    (("ATV", "OHV", "UTV", "ALL-TERRAIN"), "A"),
+    (("4WD", "HIGH CLEARANCE", "FOUR-WHEEL"), "4"),
 ]
 
 

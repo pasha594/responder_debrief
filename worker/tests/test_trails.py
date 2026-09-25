@@ -31,6 +31,9 @@ class TestNames:
         ("O'BRIEN CREEK", "O'brien Creek"),
         ("Mixed Case Kept", "Mixed Case Kept"),
         ("", None), (None, None), ("N/A", None), ("UNNAMED", None),
+        # live, 2026-09-25
+        ("PCT: GLACIER PEAK WILDERNESS", "PCT: Glacier Peak Wilderness"),
+        ("  <Null>", None), ("\bD & H Canal Trail", "D & H Canal Trail"),
     ])
     def test_tidy_name(self, raw, want):
         assert tn.tidy_name(raw) == want
@@ -83,7 +86,7 @@ class TestBlm:
         assert (r["uses"], r["foot"], r["restr"], r["status"]) == ("H,P,B", "yes", None, "open")
 
     def test_not_assessed_and_admin_only(self):
-        row = dict(self.ROW, PLAN_ALLOW_MODE_TRNSPRT="MTC_ATV_SHARED",
+        row = dict(self.ROW, PLAN_ALLOW_MODE_TRNSPRT="MTC_ATV_ONLY",
                    PLAN_ACCESS_RSTRCT="admin only", ROUTE_PRMRY_NM="")
         r = tn.normalize_blm(row, "not_assessed", "2026-09-21")
         assert r["tid"] == "blm:n42" and r["status"] == "not_assessed"
@@ -130,6 +133,77 @@ class TestNps:
         assert (r["cls"], r["uses"], r["src_date"]) == (0, "", "2026-09-22")
         r2 = tn.normalize_nps(dict(self.ROW, TRLFEATTYPE="Unofficial Trail"), "d")
         assert r2["status"] == "unofficial"
+
+    @pytest.mark.parametrize("trluse,uses", [
+        ("Hiker/Pedestrian|All-Terrain Vehicle|Four-Wheel Drive Vehicle > 50” in Tread Width",
+         "H,A,4"),
+        ("Hiking & Biking", "H,B"),
+        ("Hike | PackOrSaddle", "H,P"),
+    ])
+    def test_live_trluse_spellings(self, trluse, uses):
+        assert tn.nps_uses(trluse)[0] == uses
+
+
+class TestLiveRows:
+    """Rows exactly as the live services returned them on 2026-09-25 (the
+    spot check of the first real-data build), with what the popup and Walk
+    notes should get. USFS rows come from the EDW REST layer (field names
+    upper-cased to match the FGDB we ingest)."""
+
+    def test_usfs_centerline_na_row(self):
+        # the PCT through the SISI fire area: a TrailNFS_Centerline record,
+        # every attribute 'N/A' (4,520 such TERRA rows)
+        raw = {"TRAIL_CN": "5064.005511", "BMP": 267.2, "TRAIL_NO": "2000",
+               "TRAIL_NAME": "PCT: GLACIER PEAK WILDERNESS", "TRAIL_CLASS": "N",
+               "ALLOWED_TERRA_USE": "N/A", "HIKER_PEDESTRIAN_MANAGED": "N/A",
+               "HIKER_PEDESTRIAN_RESTRICTED": "N/A", "SPECIAL_MGMT_AREA": "N/A",
+               "NATIONAL_TRAIL_DESIGNATION": 0}
+        r = tn.normalize_usfs(raw, "2026-09-23")
+        assert r["name"] == "PCT: Glacier Peak Wilderness" and r["num"] == "2000"
+        assert (r["cls"], r["uses"], r["foot"]) == (0, "", "unknown")
+        assert (r["restr"], r["season"], r["mgmt"]) == (None, None, None)
+
+    def test_usfs_wsa_and_nrt(self):
+        wsa = {"TRAIL_CN": "3446010337", "BMP": 6.0, "TRAIL_NO": "809.4A",
+               "TRAIL_NAME": "EAST DUNOIR TRAIL", "TRAIL_CLASS": "1", "ALLOWED_TERRA_USE": "21",
+               "HIKER_PEDESTRIAN_MANAGED": None, "HIKER_PEDESTRIAN_RESTRICTED": None,
+               "SPECIAL_MGMT_AREA": "WSA - WILDERNESS STUDY AREA", "NATIONAL_TRAIL_DESIGNATION": 1}
+        assert tn.normalize_usfs(wsa, "d")["mgmt"] == "Wilderness Study Area"
+        nrt = {"TRAIL_CN": "5012.008161", "BMP": 1.3949, "TRAIL_NO": "52706",
+               "TRAIL_NAME": "DEER MOUNTAIN NATIONAL RECREAT", "TRAIL_CLASS": "3",
+               "ALLOWED_TERRA_USE": "321", "HIKER_PEDESTRIAN_MANAGED": "05/15-09/15",
+               "HIKER_PEDESTRIAN_RESTRICTED": None, "SPECIAL_MGMT_AREA": None,
+               "NATIONAL_TRAIL_DESIGNATION": 2}
+        r = tn.normalize_usfs(nrt, "d")
+        assert (r["mgmt"], r["season"], r["restr"]) == ("National Recreation Trail",
+                                                        "05/15–09/15", None)
+
+    def test_blm_domain_codes(self):
+        tab = {"OBJECTID": 13451, "ROUTE_PRMRY_NM": "Tabeguache Trail", "ADMIN_ST": "CO",
+               "PLAN_ALLOW_MODE_TRNSPRT": "MTC_ATV_SHARED", "PLAN_ACCESS_RSTRCT": "None",
+               "PLAN_SEASON_RSTRCT_CODE": "NO", "OBSRVE_ROUTE_USE_CLASS": "ATV",
+               "ROUTE_SPCL_DSGNTN_TYPE": "NRT"}
+        r = tn.normalize_blm(tab, "managed", "2026-09-21")
+        assert (r["uses"], r["foot"]) == ("H,P,B,M,A", "yes")
+        assert (r["season"], r["mgmt"], r["restr"]) == (None, "National Recreation Trail", None)
+        grand = {"OBJECTID": 14264, "ROUTE_PRMRY_NM": "Grandview Ridge Trail", "ADMIN_ST": "CO",
+                 "PLAN_ALLOW_MODE_TRNSPRT": "NON_MOTO_SHARED", "PLAN_ACCESS_RSTRCT": "None",
+                 "PLAN_SEASON_RSTRCT_CODE": "YES", "OBSRVE_ROUTE_USE_CLASS": "Non-Motorized",
+                 "ROUTE_SPCL_DSGNTN_TYPE": None}
+        assert tn.normalize_blm(grand, "managed", "d")["season"] == "Seasonal restrictions"
+        null = {"OBJECTID": 16968, "ROUTE_PRMRY_NM": "  <Null>", "ADMIN_ST": "UT",
+                "PLAN_ALLOW_MODE_TRNSPRT": "MTC_SHARED", "PLAN_ACCESS_RSTRCT": "None",
+                "PLAN_SEASON_RSTRCT_CODE": "NO", "OBSRVE_ROUTE_USE_CLASS": "Unknown",
+                "ROUTE_SPCL_DSGNTN_TYPE": None}
+        r = tn.normalize_blm(null, "managed", "d")
+        assert (r["name"], r["uses"], r["season"]) == (None, "H,P,B,M", None)
+        nst = {"OBJECTID": 5107, "ROUTE_PRMRY_NM": "1591", "ADMIN_ST": "AZ",
+               "PLAN_ALLOW_MODE_TRNSPRT": None, "PLAN_ACCESS_RSTRCT": None,
+               "PLAN_SEASON_RSTRCT_CODE": None, "OBSRVE_ROUTE_USE_CLASS": "Stock",
+               "ROUTE_SPCL_DSGNTN_TYPE": "NST"}
+        r = tn.normalize_blm(nst, "not_assessed", "d")
+        assert (r["mgmt"], r["uses"], r["season"]) == ("National Scenic Trail", "", None)
+        assert tn.normalize_blm(dict(nst, ROUTE_SPCL_DSGNTN_TYPE="UNK"), "managed", "d")["mgmt"] is None
 
 
 NOW = datetime(2026, 9, 25, 12, tzinfo=timezone.utc)
