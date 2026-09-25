@@ -1,11 +1,11 @@
 {
  "schema": "rd-routing-bundle/1",
  "recipe": 1,
- "bundle_id": "ba00154d78df",
+ "bundle_id": "9d77487426c7",
  "cornea_id": "{SYNTH-0001}",
  "fire_key": "synth-0001",
  "fire_name": "Synthetic Ridge",
- "built_at": "2026-09-25T01:46:18Z",
+ "built_at": "2026-09-25T17:28:25Z",
  "crs": {
   "epsg": 32611,
   "zone": 11,
@@ -32,29 +32,38 @@
  },
  "files": {
   "grid": {
-   "path": "/routing/synth-0001/bba00154d78df/grid.tif",
-   "bytes": 8278,
-   "sha256": "fc5f3d0439097f55afe1834ba8f9494825d92ac75a8cd333b80496837db92b2f"
+   "path": "/routing/synth-0001/b9d77487426c7/grid.tif",
+   "bytes": 9495,
+   "sha256": "dca31c32aa7fa1904331c2714cbcd773dadabc734d1f9d6d3364c3b49aa77219"
   },
   "dem": {
-   "path": "/routing/synth-0001/bba00154d78df/dem.tif",
-   "bytes": 9698,
-   "sha256": "defdd86c04d223d0efcaff1cb37cd7095554c0bfd64ca90c32bf6bf8acd08d55"
+   "path": "/routing/synth-0001/b9d77487426c7/dem.tif",
+   "bytes": 10439,
+   "sha256": "968e667adb61fbd061660e8d56c839bdb5d98a93c47a172c641e7455a1a0884a"
   },
   "graph": {
-   "path": "/routing/synth-0001/bba00154d78df/graph.bin.gz",
+   "path": "/routing/synth-0001/b9d77487426c7/graph.bin.gz",
    "bytes": 390,
-   "sha256": "2f7add7f79a0292a7c84c7ef5a0669e3d0e4ee85931eb5abccbd8034e44e41ed",
+   "sha256": "30a78273e617e9108a745e643e460726e362b7992872cb3d2104854e96993666",
    "nodes": 5,
    "edges": 5
   },
   "trails": {
-   "path": "/routing/synth-0001/bba00154d78df/trails.pmtiles",
-   "bytes": 13306,
-   "sha256": "a4732c1bb7ddcbfae02c8155863ec70ebee3efe1d3a29a458955f445ca44dc08",
+   "path": "/routing/synth-0001/b9d77487426c7/trails.pmtiles",
+   "bytes": 13232,
+   "sha256": "28ba7ed7a8f136be65d2ae7ba771ea10cdbc5ed799b8fa73f07263ccd579d53e",
    "minzoom": 10,
    "maxzoom": 14
   }
+ },
+ "streams": {
+  "band": 3,
+  "names": [
+   "Big Creek",
+   "Wild River",
+   "Ridge Creek"
+  ],
+  "truncated": false
  },
  "sources": {
   "landfire": {
@@ -77,16 +86,17 @@
  },
  "stats": {
   "cells": 285690,
-  "impassable_pct": 0.44,
+  "impassable_pct": 0.71,
   "nodata_pct": 0.0,
   "steep_pct": 0.14,
-  "stream_cells": 567,
+  "stream_cells": 571,
+  "river_cells": 649,
   "class_pct": {
    "1": 0.78,
-   "3": 48.98,
+   "3": 48.72,
    "4": 49.65,
    "6": 0.14,
-   "10": 0.31,
+   "10": 0.58,
    "11": 0.14
   },
   "graph": {
@@ -104,6 +114,7 @@
    "agency_features": 2,
    "agency_dropped_covered": 1,
    "agency_runs_added": 1,
+   "agency_runs_parallel": 0,
    "osm_edges_named": 1,
    "snapped": 2
   }
@@ -121,7 +132,11 @@
  "inputs": {
   "recipe": 1,
   "cost_model": "getv2-evc+sullivan2020/1",
+  "cost_grid": 3,
+  "nhd_trim": 2,
+  "osm_filter": 2,
   "graph_format": "RDG1",
+  "graph_build": 2,
   "epsg": 32611,
   "grid": {
    "x0": 651780.0,
@@ -134,7 +149,8 @@
   "lf_epoch": "2026-09",
   "topo": "LF2020",
   "osm_hash": "79edd177a58540e7",
-  "trails_hash": "5426804d1e263f4c",
+  "osm_water_hash": "c38c1e4b4de7a126",
+  "trails_hash": "2ec2ca43ac0ac284",
   "nhd": [
    "99999999"
   ]

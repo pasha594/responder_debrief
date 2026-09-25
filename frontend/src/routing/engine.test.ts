@@ -5,7 +5,9 @@
  * forest road FS 100 along y=-4000; a path (Ridge Trail #101) from
  * (-3000,-4000) to (3000,4000) over a N–S ridge at x=0; High Traverse #202
  * from (3000,4000) east and south to the road; timber west of the ridge,
- * dense brush east; a lake at (-2000,-2500) r 500; a creek near y=1000.
+ * dense brush east; a lake at (-2000,-2500) r 500; Ridge Creek near y=1000;
+ * Big Creek, an NHD order-5 river (impassable), N–S at x≈7300; the OSM
+ * Wild River near (6500,-6400). grid.tif band 3 names the three.
  */
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
@@ -87,15 +89,24 @@ describe('OffroadEngine on the synthetic bundle', () => {
     expect(r.steps[0].text).toMatch(/^Head cross-country N/);
   });
 
-  it('warns about a cross-country crossing of a mapped perennial stream', async () => {
+  it('warns about a cross-country crossing of a mapped perennial stream, by name', async () => {
     // SISI: routes forded the Stehekin River and Agnes Creek with only
-    // "crossing 1 stream" in a step (the creek here runs E–W near y=1000)
+    // "crossing 1 stream" in a step (Ridge Creek here runs E–W near y=1000,
+    // named in grid.tif band 3)
     const e = await engineP;
+    expect(e.grid.streamNames).toEqual(['Big Creek', 'Wild River', 'Ridge Creek']);
     const r = ok(routeSync(e, at(-5000, 0), at(-5000, 2000), { avoidPerimeter: true }));
     expect(r.legs!.reduce((s, l) => s + (l.streamCrossings ?? 0), 0)).toBe(1);
-    const n = r.notes!.find((x) => x.code === 'XC_STREAM');
-    expect(n?.level).toBe('warn');
-    expect(n?.text).toMatch(/^Cross-country, the route crosses a mapped perennial stream with no bridge\./);
+    expect(r.steps[0].text).toMatch(/crossing Ridge Creek/);
+    expect(r.notes!.find((x) => x.code === 'XC_STREAM')).toEqual({ level: 'warn', code: 'XC_STREAM',
+      text: 'Unbridged crossing of Ridge Creek, cross-country. Check depth and current before you commit.' });
+  });
+
+  it('never fords a river: Big Creek (NHD order 5) walls off the east edge', async () => {
+    const e = await engineP;
+    const r = routeSync(e, at(6000, 0), at(7800, 0), { avoidPerimeter: false });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.code).toBe('no-path');
   });
 
   it('snaps a lakeshore pin, and refuses a pin in mid-lake', async () => {
@@ -383,11 +394,12 @@ describe('named stream crossings (bundle `streams` + grid band 3)', () => {
   it('a bundle without stream names keeps the old wording (rivers not modeled)', async () => {
     const r = creek(false)(5);
     expect(r.notes!.find((n) => n.code === 'XC_STREAM')!.text).toMatch(/Stream size isn't modeled/);
-    // a descriptor that claims band 3 on a 2-band grid.tif decodes without names
+    // an older descriptor (no `streams`) decodes the same grid.tif without names
     const { decodeGrid } = await import('./gridDecode');
-    const g = await decodeGrid(buf('grid.tif'), buf('dem.tif'), { ...bundle, streams: { band: 3, names: ['X'] } });
+    const g = await decodeGrid(buf('grid.tif'), buf('dem.tif'), { ...bundle, streams: undefined });
     expect(g.stream).toBeUndefined();
     expect(g.streamNames).toBeUndefined();
+    expect((await decodeGrid(buf('grid.tif'), buf('dem.tif'), bundle)).stream?.length).toBe(g.pace.length);
   });
 });
 
