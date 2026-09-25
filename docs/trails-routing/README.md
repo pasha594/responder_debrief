@@ -50,22 +50,12 @@ repo is public).
 
 ## Files here
 
-- `research/` — data sources, routing engines, off-trail travel science,
-  browser routing feasibility (benchmarks) — from the initial research pass.
-- `codebase-map/` — verified maps of the worker, map layers, offline packs,
-  directions, plus live-verified tile-hosting and data-API facts. Start here.
-- `designs/design_{pipeline,field,model}.md` — three complete competing designs.
-- `designs/judges.json` — two judges' scores. Tie on total (pipeline = field
-  = 43, model = 39). Recommended synthesis (from the safety judge, agreed in
-  spirit by the fit judge): **field as the base** for routing, UX and offline;
-  graft **pipeline's** worker infrastructure (catalog.json fire list,
-  `catalogs/health/*.json`, content-addressed bundle ids with a check/skip
-  action, plan-stage osmium extracts, perennial-only lakes, count-verified
-  paging, CPL_DEBUG degradation counting, BufferSource trails extract); graft
-  **model's** per-pixel LANDFIRE mosaic, blocked-by-perimeter alternative,
-  parity + golden-route validation, OSM-topology-preserving conflation,
-  range-first time display. Must-fix items are listed per judge.
-- `designs/costmodel_check.py` — numeric check of the cost model.
+- `STATUS.md` — what is built, how it was tested on real data, open questions.
+- `FINAL_PLAN.md` — the merged design (STATUS wins where they disagree).
+
+The research notes, codebase maps and the three competing draft designs that
+led here were trimmed before merging to main; they remain in this branch's
+history (commit 30d76d5).
 
 ## Must-knows the judges flagged
 

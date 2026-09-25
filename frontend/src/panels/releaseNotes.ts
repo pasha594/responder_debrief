@@ -30,6 +30,21 @@ export const RELEASE_NOTES: ReleaseDay[] = [
     date: '2026-09-25',
     notes: [
       {
+        title: 'Trails on the map',
+        summary:
+          'Forest Service, BLM and Park Service trails in the Layers tab. Tap a trail for its name, number and allowed uses. Downloaded fires keep their trails offline.',
+      },
+      {
+        title: 'Walking directions over trails and cross-country',
+        summary:
+          'Walk now follows real trails, goes cross-country where it has to, and stays out of the latest fire perimeter, timed at a loaded crew’s pace. It works with no signal on downloaded fires. Starting with Sisi, rolling out to every active fire.',
+      },
+      {
+        title: 'Vegetation layer',
+        summary:
+          'Shows the grass, brush, timber and slash a cross-country walk goes through, from the same data the walking directions use.',
+      },
+      {
         title: 'Names on historic perimeters',
         summary: 'Each old fire scar now shows its name and year in its middle, no tap needed.',
       },
