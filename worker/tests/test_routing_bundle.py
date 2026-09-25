@@ -228,3 +228,12 @@ def test_nhd_trim_keeps_perennial_only(tmp_path):
     counts = dict(zip(__import__("re").findall(r"Layer name: (\w+)", inf),
                       map(int, __import__("re").findall(r"Feature Count: (\d+)", inf))))
     assert counts == {"streams": 1, "water": 3}  # 39004 + 43600 + the NHDArea river
+
+
+def test_long_thin_fire_is_not_clipped():
+    # ~85 km E-W, ~5 km N-S perimeter: fits the cell budget at 30 m
+    a = rp.aoi_for([-120.0, 44.0], (-120.55, 43.98, -119.45, 44.02))
+    g = a["grid"]
+    assert not a["clipped"] and g["cell_m"] == 30
+    assert g["width"] * g["height"] <= config.ROUTING_MAX_CELLS
+    assert g["width"] * 30 > 85_000

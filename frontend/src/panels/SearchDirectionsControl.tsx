@@ -382,6 +382,9 @@ export function SearchDirectionsControl() {
   const online = useStore((s) => s.offline.online);
   const walk = useWalkContext();
   const walkSeq = useRef(0);
+  /** True while a Walk rerun is in flight: its cached result is stale (older
+   * endpoints / perimeter / avoid setting) and must not be re-applied. */
+  const hikeStale = useRef(false);
   const modeError = (p: RouteProfile, st: ModeState | undefined): string | null => {
     if (st === 'offline') return 'Needs a connection — Walk works offline inside the fire\'s routing area.';
     if (st && typeof st === 'object' && 'error' in st) return st.error;
@@ -458,10 +461,17 @@ export function SearchDirectionsControl() {
     const mySeq = ++walkSeq.current;
     const { a, b } = directions;
     if (!a || !b) return;
+    hikeStale.current = true;
     setModes((m) => ({ ...m, hike: 'pending' }));
+    if (useStore.getState().directions.profile === 'hike') {
+      // never leave a route computed for other inputs on screen
+      actions.setDirectionsRoute(null);
+      setRouteError(null);
+    }
     void routeWalk(a.coords, b.coords, walk.ctx())
       .then((result) => {
         if (mySeq !== walkSeq.current) return;
+        hikeStale.current = false;
         setModes((m) => ({ ...m, hike: result }));
         if (useStore.getState().directions.profile === 'hike') applyRoute(result);
         if (result.engine === 'offroad') {
@@ -477,6 +487,7 @@ export function SearchDirectionsControl() {
       .catch((err: unknown) => {
         if (mySeq !== walkSeq.current) return;
         if (err instanceof WalkError && err.code === 'superseded') return;
+        hikeStale.current = false;
         const state: ModeState = err instanceof WalkError
           ? { error: err.message, alternative: err.alternative }
           : 'failed';
@@ -491,6 +502,7 @@ export function SearchDirectionsControl() {
   useEffect(() => {
     const cached = modes[directions.profile];
     if (directions.route || !directions.a || !directions.b) return;
+    if (directions.profile === 'hike' && hikeStale.current) return;
     const err = modeError(directions.profile, cached);
     if (err) setRouteError(err);
     else if (cached && typeof cached === 'object' && !('error' in cached)) applyRoute(cached);

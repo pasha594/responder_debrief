@@ -131,7 +131,15 @@ def download_region(client: httpx.Client, region: dict, workdir: Path, log=print
                     ) -> tuple[Path, str | None]:
     dest = workdir / f"{region['id'].replace('/', '_')}.osm.pbf"
     resp = download_to(client, region["pbf"], dest, timeout=3600)
+    # Geofabrik may redirect -latest to a dated file (the name is the
+    # date) or serve it directly; Last-Modified covers the latter.
     date = osm_date_from_url(str(resp.url))
+    if date is None and resp.headers.get("last-modified"):
+        from email.utils import parsedate_to_datetime
+        try:
+            date = parsedate_to_datetime(resp.headers["last-modified"]).strftime("%Y-%m-%d")
+        except (TypeError, ValueError):
+            date = None
     log(f"[osm] {region['id']}: {dest.stat().st_size / 1e6:.0f} MB ({date})")
     return dest, date
 

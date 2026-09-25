@@ -77,7 +77,9 @@ def aoi_for(point, perim_bbox, prev: dict | None = None) -> dict:
     clipped = False
     if (want[2] - want[0]) * (want[3] - want[1]) / cell ** 2 > config.ROUTING_MAX_CELLS:
         cell = cell * 2
-    side_cap = min(config.ROUTING_MAX_SIDE_M, math.sqrt(config.ROUTING_MAX_CELLS) * cell)
+    # A long, thin fire may exceed sqrt(MAX_CELLS) cells on one side and
+    # still fit the cell budget; only the absolute side limit clips.
+    side_cap = config.ROUTING_MAX_SIDE_M
     ccx, ccy = (core[0] + core[2]) / 2, (core[1] + core[3]) / 2
     if want[2] - want[0] > side_cap:
         want = (ccx - side_cap / 2, want[1], ccx + side_cap / 2, want[3])
@@ -85,6 +87,9 @@ def aoi_for(point, perim_bbox, prev: dict | None = None) -> dict:
     if want[3] - want[1] > side_cap:
         want = (want[0], ccy - side_cap / 2, want[2], ccy + side_cap / 2)
         clipped = True
+    if cell == config.ROUTING_CELL_M and (want[2] - want[0]) * (want[3] - want[1]) / cell ** 2 \
+            > config.ROUTING_MAX_CELLS:
+        cell *= 2
     x0 = math.floor(want[0] / cell) * cell
     y0 = math.ceil(want[3] / cell) * cell
     width = int(math.ceil((want[2] - x0) / cell))

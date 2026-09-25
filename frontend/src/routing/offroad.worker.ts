@@ -36,7 +36,17 @@ async function runRoute(m: Extract<ToWorker, { t: 'route' }>): Promise<void> {
     return;
   }
   latestRoute = m.id;
-  const it = engine.route(m.a, m.b, { avoidPerimeter: m.avoidPerimeter, perimeterDate: m.perimeterDate });
+  try {
+    await drive(m);
+  } catch (err) {
+    // e.g. a RangeError allocating a whole-grid search on a small phone —
+    // never leave the caller waiting on "Computing…"
+    scope.postMessage({ t: 'error', id: m.id, code: 'budget', message: String(err) });
+  }
+}
+
+async function drive(m: Extract<ToWorker, { t: 'route' }>): Promise<void> {
+  const it = engine!.route(m.a, m.b, { avoidPerimeter: m.avoidPerimeter, perimeterDate: m.perimeterDate });
   let slices = 0;
   for (;;) {
     const r = it.next();

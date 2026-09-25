@@ -16,6 +16,7 @@
 import { routeHikeOnline, type RouteLeg, type RouteNote, type RouteResult } from './routing';
 import type { PerimeterFeature } from './types';
 import { insideRoutingArea } from '../routing/bundleIndex';
+import { loadPackedBundle } from '../routing/hooks';
 import { ensureBundle, routeOffroad, setPerimeter } from '../routing/offroadClient';
 import { ageHours, crossesPerimeter, metresBetween, polygonsOf } from '../routing/safety';
 import type { RoutingBundle } from '../routing/types';
@@ -80,18 +81,38 @@ function perimeterNotes(p: WalkPerimeter | null, ctx: WalkContext, avoided: bool
   return out;
 }
 
-async function offroad(a: LonLat, b: LonLat, bundle: RoutingBundle, ctx: WalkContext,
+async function offroad(a: LonLat, b: LonLat, bundleIn: RoutingBundle, ctx: WalkContext,
   perim: WalkPerimeter | null): Promise<RouteResult> {
+  let bundle = bundleIn;
   ctx.onStatus?.(`Loading terrain model for this fire · ${(sizeOf(bundle) / 1e6).toFixed(1)} MB…`);
   try {
     await ensureBundle(bundle);
   } catch (err) {
-    throw new WalkError('load-failed', WALK_ERROR_TEXT['load-failed'] + ` (${String(err).slice(0, 80)})`);
+    // A newer live bundle than the pack holds, on a dead network: route on
+    // the packed one rather than failing.
+    const packed = ctx.corneaId ? await loadPackedBundle(ctx.corneaId) : null;
+    if (packed && packed.bundle_id !== bundle.bundle_id
+        && insideRoutingArea(packed, a) && insideRoutingArea(packed, b)) {
+      bundle = packed;
+      try {
+        await ensureBundle(bundle);
+      } catch (err2) {
+        ctx.onStatus?.(null);
+        throw new WalkError('load-failed', WALK_ERROR_TEXT['load-failed'] + ` (${String(err2).slice(0, 80)})`);
+      }
+    } else {
+      ctx.onStatus?.(null);
+      throw new WalkError('load-failed', WALK_ERROR_TEXT['load-failed'] + ` (${String(err).slice(0, 80)})`);
+    }
   }
   await setPerimeter(perim ? perim.path : null, perim ? polygonsOf(perim.feature.geometry) : null);
   ctx.onStatus?.('Computing walking route…');
-  const res = await routeOffroad(a, b, !!perim && ctx.avoidPerimeter, perim?.date ?? null);
-  ctx.onStatus?.(null);
+  let res;
+  try {
+    res = await routeOffroad(a, b, !!perim && ctx.avoidPerimeter, perim?.date ?? null);
+  } finally {
+    ctx.onStatus?.(null);
+  }
   if (res.ok) {
     res.route.notes = [...(res.route.notes ?? []),
       ...perimeterNotes(perim, ctx, !!res.route.provenance?.avoidPerimeter)];

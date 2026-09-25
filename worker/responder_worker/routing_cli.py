@@ -293,9 +293,13 @@ def cmd_routing_one(args) -> int:
             shutil.rmtree(work, ignore_errors=True)
     log(f"[routing-one] {json.dumps(res)}")
     if res["built"] or res["unchanged"]:
-        pointers = {cid: storage.get_json(rb.pointer_key(rp.fire_key(cid)))
-                    for cid in res["built"] + res["unchanged"]}
-        storage.put_json("catalogs/routing.json", rb.index_doc(pointers, _now()))
+        # Merge into the live index (never replace it with just this fire).
+        idx = storage.get_json("catalogs/routing.json") or {}
+        fresh = rb.index_doc({cid: storage.get_json(rb.pointer_key(rp.fire_key(cid)))
+                              for cid in res["built"] + res["unchanged"]}, _now())
+        if (idx.get("recipe") or config.ROUTING_RECIPE) == config.ROUTING_RECIPE:
+            fresh["fires"] = {**(idx.get("fires") or {}), **fresh["fires"]}
+        storage.put_json("catalogs/routing.json", fresh)
     return 0 if not res["failed"] else 1
 
 

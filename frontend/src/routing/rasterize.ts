@@ -42,28 +42,28 @@ function supercover(mask: Uint8Array, w: number, h: number, x0: number, y0: numb
 }
 
 function fillPolygon(mask: Uint8Array, w: number, h: number, poly: GridPolygon): void {
-  let minR = Infinity;
-  let maxR = -Infinity;
+  // Edge-driven scanline: each edge deposits its crossings only into the
+  // rows it spans (cost ~ perimeter length in cells, not rows × vertices —
+  // NIFC perimeters run to 100k vertices).
+  const rows = new Map<number, number[]>();
   for (const ring of poly) {
-    for (const [, y] of ring) {
-      if (y < minR) minR = y;
-      if (y > maxR) maxR = y;
-    }
-  }
-  const r0 = Math.max(0, Math.floor(minR));
-  const r1 = Math.min(h - 1, Math.ceil(maxR));
-  const xs: number[] = [];
-  for (let r = r0; r <= r1; r++) {
-    const y = r + 0.5;
-    xs.length = 0;
-    for (const ring of poly) {
-      const n = ring.length;
-      for (let i = 0, j = n - 1; i < n; j = i++) {
-        const [xi, yi] = ring[i];
-        const [xj, yj] = ring[j];
-        if ((yi > y) !== (yj > y)) xs.push(xi + ((y - yi) * (xj - xi)) / (yj - yi));
+    const n = ring.length;
+    for (let i = 0, j = n - 1; i < n; j = i++) {
+      const [xi, yi] = ring[i];
+      const [xj, yj] = ring[j];
+      if (yi === yj) continue;
+      const lo = Math.max(0, Math.ceil(Math.min(yi, yj) - 0.5));
+      const hi = Math.min(h - 1, Math.ceil(Math.max(yi, yj) - 0.5) - 1);
+      for (let r = lo; r <= hi; r++) {
+        const y = r + 0.5;
+        if ((yi > y) === (yj > y)) continue;
+        let xs = rows.get(r);
+        if (!xs) rows.set(r, (xs = []));
+        xs.push(xi + ((y - yi) * (xj - xi)) / (yj - yi));
       }
     }
+  }
+  for (const [r, xs] of rows) {
     xs.sort((a, b) => a - b);
     for (let k = 0; k + 1 < xs.length; k += 2) {
       const ca = Math.max(0, Math.ceil(xs[k] - 0.5));

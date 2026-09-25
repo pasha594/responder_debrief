@@ -112,7 +112,9 @@ export async function routeOffroad(a: [number, number], b: [number, number], avo
   perimeterDate: string | null): Promise<OffroadResult> {
   const m = await call({ t: 'route', a, b, avoidPerimeter, perimeterDate });
   if (m.t === 'route') return m.result;
-  if (m.t === 'error') return { ok: false, code: 'decode-failed', message: m.message };
+  if (m.t === 'error') {
+    return { ok: false, code: m.code === 'budget' ? 'budget' : 'decode-failed', message: m.message };
+  }
   throw new Error('unexpected worker reply');
 }
 
