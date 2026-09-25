@@ -11,12 +11,14 @@ Model (docs/trails-routing/FINAL_PLAN.md §2.5; research/offtrail_travel_science
 - GET v2 vegetation multipliers M: tree 4; shrub 1 + 3·cover; herb, sparse,
   barren, agriculture, developed 1; x2 for heavy litter (FBFM40 TL4/TL5/TL7);
   x5 for slash/blowdown (SB1-SB4; GET's table value); x5 on perennial creeks.
-  Snow/ice 3 and unknown 4 are our choices (GET is silent; conservative).
+  Unknown 4 is our choice (GET is silent; conservative).
 - Impassable: slope > 45°, open water (EVC 11, EVT 7292, FBFM40 NB8=98, NHD
   perennial waterbody or river polygon), rivers and large creeks (nhd.py:
   NHD stream order >= 5 or a "River" name, OSM river/canal; classed as
-  water), and no data. Road and trail crossings stay open: graph nodes may
-  sit on impassable cells.
+  water), glaciers and permanent snow/ice (EVC 12, EVT 7735, FBFM40 NB2=92:
+  crevasses and ice need equipment a crew does not carry; GET is silent),
+  and no data. Road and trail crossings stay open: graph nodes may sit on
+  impassable cells.
 
 Lifeform comes from EVC, which encodes lifeform AND cover in one code
 (110-199 tree %, 210-299 shrub %, 310-399 herb %), so no EVT lookup table is
@@ -45,7 +47,8 @@ import numpy as np
 # multipliers, barriers, the hydro burn in nhd.py), so existing bundles
 # rebuild instead of staying "unchanged" until the monthly LANDFIRE epoch.
 # 2: rivers and large creeks are impassable (nhd.hydro_grids).
-COST_GRID_VERSION = 2
+# 3: glaciers and permanent snow/ice are impassable.
+COST_GRID_VERSION = 3
 
 PACE_MIN = 0.8
 PACE_SPAN = 1024.0
@@ -61,7 +64,7 @@ DENSE_SHRUB_COVER = 0.40
 LF_NODATA = (-9999, 32767)  # exportImage and WCS NoData
 MAX_SLOPE = 45.0
 
-M_TREE, M_SNOW, M_UNKNOWN = 4.0, 3.0, 4.0
+M_TREE, M_UNKNOWN = 4.0, 4.0
 M_LITTER, M_SLASH, M_STREAM = 2.0, 5.0, 5.0
 LITTER_FBFM = (184, 185, 187)          # TL4, TL5, TL7
 SLASH_FBFM = (201, 202, 203, 204)      # SB1-SB4
@@ -130,12 +133,12 @@ def _classify(evt, evc, fbfm):
     put(sh, VEG_SHRUB_DENSE, 2.5)
     put(((fb >= 161) & (fb <= 165)) | ((fb >= 181) & (fb <= 189)), VEG_TIMBER, M_TREE)
     put(fb == 91, VEG_DEVELOPED, 1.0)
-    put(fb == 92, VEG_SNOW, M_SNOW)
+    put(fb == 92, VEG_SNOW, M_UNKNOWN)  # snow/ice: impassable (compute)
     put(fb == 93, VEG_DEVELOPED, 1.0)
     put(fb == 99, VEG_SPARSE, 1.0)
 
     e = evc
-    put(e == 12, VEG_SNOW, M_SNOW)
+    put(e == 12, VEG_SNOW, M_UNKNOWN)
     put(((e >= 13) & (e <= 25)) | ((e >= 61) & (e <= 82)), VEG_DEVELOPED, 1.0)
     put((e == 31) | (e == 32) | (e == 100), VEG_SPARSE, 1.0)
     put((e >= 110) & (e <= 199), VEG_TIMBER, M_TREE)
@@ -145,7 +148,7 @@ def _classify(evt, evc, fbfm):
     m[shrub] = 1.0 + 3.0 * cover[shrub]
     put((e >= 310) & (e <= 399), VEG_GRASS, 1.0)
 
-    put(evt == EVT_SNOW, VEG_SNOW, M_SNOW)
+    put(evt == EVT_SNOW, VEG_SNOW, M_UNKNOWN)
     put((evt == EVT_BARREN) & (cls == VEG_UNKNOWN), VEG_SPARSE, 1.0)
     return cls, m, cover
 
@@ -182,7 +185,8 @@ def compute(*, evt, evc, fbfm, slope, elev, streams=None, rivers=None, water=Non
     is_water = open_water | rivers
     steep = (slope > MAX_SLOPE) & ~topo_nodata
     veg_nodata = ~valid_lf(evc) & ~valid_lf(fbfm) & ~valid_lf(evt)
-    impassable = is_water | steep | topo_nodata | veg_nodata
+    ice = cls == VEG_SNOW
+    impassable = is_water | steep | ice | topo_nodata | veg_nodata
 
     s = np.where(topo_nodata, 0.0, slope)
     pace = pace_encode(m / r_get(s))

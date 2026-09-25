@@ -57,7 +57,7 @@ class TestCostGrid:
         assert m[0, 1] == pytest.approx(8.0, rel=0.02)        # tree x litter
         assert m[0, 2] == pytest.approx(1.3, rel=0.02)        # shrub 10 %
         assert m[0, 3] == pytest.approx(3.7, rel=0.02)        # shrub 90 %
-        assert m[1, 1] == pytest.approx(3.0, rel=0.02)        # snow
+        assert r["pace"][1, 1] == cg.IMPASSABLE                # snow/ice
         assert r["pace"][1, 2] == cg.IMPASSABLE                # open water
         assert m[2, 3] == pytest.approx(5.0, rel=0.02)        # herb x slash
         v = r["veg"] & 0x0F
@@ -65,6 +65,23 @@ class TestCostGrid:
         assert v[0, 2] == cg.VEG_SHRUB_LIGHT and v[0, 3] == cg.VEG_SHRUB_DENSE
         assert v[1, 2] == cg.VEG_WATER and v[2, 3] == cg.VEG_SLASH
         assert v[1, 0] == cg.VEG_SPARSE and v[2, 1] == cg.VEG_DEVELOPED
+        assert v[1, 1] == cg.VEG_SNOW
+
+    def test_glaciers_and_permanent_snow_are_impassable(self):
+        # SISI has 1,381 cells of EVC 12 / EVT 7735 ("North American Glacier
+        # and Ice Field") at a median 29° that routes could cross at 3x
+        evc = np.full((3, 4), 320)
+        evc[0, 0] = 12                                           # EVC snow-ice
+        evt = np.full((3, 4), 7011)
+        evt[0, 1] = cg.EVT_SNOW                                  # EVT glacier
+        fb = np.full((3, 4), 102)
+        fb[0, 2] = 92                                            # FBFM40 NB2
+        evc[0, 2] = -9999
+        r = cg.compute(**_grid(evc=evc, evt=evt, fbfm=fb))
+        assert (r["pace"][0, :3] == cg.IMPASSABLE).all()
+        assert ((r["veg"][0, :3] & 0x0F) == cg.VEG_SNOW).all()  # still drawn as snow/ice
+        assert (r["pace"][1:] < cg.IMPASSABLE).all() and r["pace"][0, 3] < cg.IMPASSABLE
+        assert r["stats"]["impassable_pct"] == 25.0
 
     def test_terrain_slope_and_impassable(self):
         slope = np.array([[0, 20, 30, 44], [46, 60, -9999, 10], [0, 0, 0, 0]], dtype=float)
@@ -109,6 +126,7 @@ class TestCostGrid:
         assert v[0, 0] == cg.VEG_GRASS and v[0, 1] == cg.VEG_SHRUB_LIGHT
         assert v[0, 2] == cg.VEG_SHRUB_DENSE and v[0, 3] == cg.VEG_TIMBER
         assert v[1, 0] == cg.VEG_SPARSE and v[1, 2] == cg.VEG_SNOW
+        assert r["pace"][1, 2] == cg.IMPASSABLE  # NB2 snow/ice
         assert r["pace"][2, 2] == cg.IMPASSABLE  # all three veg layers nodata
 
     def test_mosaic_per_pixel(self):
