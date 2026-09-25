@@ -59,3 +59,41 @@ def get_optional(client: httpx.Client, url: str, **kwargs) -> httpx.Response | N
         if exc.response.status_code == 404:
             return None
         raise
+
+
+@retry(
+    retry=retry_if_exception(_retryable),
+    stop=stop_after_attempt(config.RETRY_ATTEMPTS),
+    wait=wait_exponential(multiplier=1, min=1, max=20),
+    reraise=True,
+)
+def download_to(client: httpx.Client, url: str, dest, *, headers: dict | None = None,
+                timeout: float = 600.0, **kwargs) -> httpx.Response:
+    """Stream a GET to `dest` (temp file + rename) instead of buffering the
+    body like get(): national trail zips and state OSM files run to GBs.
+
+    Returns the response (body consumed). A 304 writes nothing. Raises for
+    4xx/5xx; retries transport errors / 429 / 5xx like get(). Verifies the
+    byte count against Content-Length when the server sent one.
+    """
+    from pathlib import Path
+
+    dest = Path(dest)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    tmp = dest.with_name(dest.name + ".part")
+    with client.stream("GET", url, headers=headers, timeout=timeout, **kwargs) as resp:
+        if resp.status_code == 304:
+            return resp
+        resp.raise_for_status()
+        n = 0
+        with open(tmp, "wb") as f:
+            for chunk in resp.iter_bytes(1 << 20):
+                f.write(chunk)
+                n += len(chunk)
+        want = resp.headers.get("content-length")
+        if want is not None and resp.headers.get("content-encoding") in (None, "identity") \
+                and int(want) != n:
+            tmp.unlink(missing_ok=True)
+            raise httpx.TransportError(f"short download {n}/{want} bytes: {url}")
+    tmp.replace(dest)
+    return resp
