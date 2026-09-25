@@ -285,6 +285,66 @@ function bearing(a: [number, number], b: [number, number]): string {
   return DIRS[Math.round(deg / 45) % 8];
 }
 
+const M_PER_DEG = 111_320;
+/** Douglas–Peucker tolerance for a cross-country step's bends. */
+const BEND_TOL_M = 80;
+const MAX_PARTS = 4;
+/** Shorter parts fold into a neighbour: every part reads 0.1 mi or more. */
+const MIN_PART_M = M_PER_MI / 10;
+
+function segDist(p: number[], a: number[], b: number[]): number {
+  const dx = b[0] - a[0];
+  const dy = b[1] - a[1];
+  const len2 = dx * dx + dy * dy;
+  const t = len2 ? Math.max(0, Math.min(1, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / len2)) : 0;
+  return Math.hypot(p[0] - a[0] - t * dx, p[1] - a[1] - t * dy);
+}
+
+/** A cross-country leg's main bends as compass parts (NE 0.4 mi, then N
+ * 0.6 mi): one bearing from end to end would send a crew across the river
+ * or cliff band the drawn line bends around. Douglas–Peucker in local
+ * metres, farthest vertex first so the cap keeps the biggest bends; a tiny
+ * part folds into its neighbour, and neighbours with one bearing join.
+ * Part distances are along the line, scaled to the leg's distance. */
+function xcParts(l: RouteLeg): { dir: string; m: number }[] {
+  const c = l.coordinates;
+  const kx = Math.cos((c[0][1] * Math.PI) / 180) * M_PER_DEG;
+  const p = c.map(([lon, lat]) => [lon * kx, lat * M_PER_DEG]);
+  const cum = [0];
+  for (let i = 1; i < p.length; i++) cum.push(cum[i - 1] + Math.hypot(p[i][0] - p[i - 1][0], p[i][1] - p[i - 1][1]));
+  const keep = [0, p.length - 1];
+  while (keep.length <= MAX_PARTS) {
+    let best = -1;
+    let far = BEND_TOL_M;
+    for (let j = 0; j + 1 < keep.length; j++) {
+      for (let i = keep[j] + 1; i < keep[j + 1]; i++) {
+        const d = segDist(p[i], p[keep[j]], p[keep[j + 1]]);
+        if (d > far) {
+          far = d;
+          best = i;
+        }
+      }
+    }
+    if (best < 0) break;
+    keep.push(best);
+    keep.sort((a, b) => a - b);
+  }
+  const scale = cum[cum.length - 1] ? l.distanceM / cum[cum.length - 1] : 0;
+  const parts: { dir: string; m: number }[] = [];
+  for (let j = 0; j + 1 < keep.length; j++) {
+    const dir = bearing(c[keep[j]], c[keep[j + 1]]);
+    const m = (cum[keep[j + 1]] - cum[keep[j]]) * scale;
+    const last = parts[parts.length - 1];
+    if (!last) parts.push({ dir, m });
+    else if (last.m < MIN_PART_M) { // a tiny first part joins the next
+      last.dir = dir;
+      last.m += m;
+    } else if (last.dir === dir || m < MIN_PART_M) last.m += m;
+    else parts.push({ dir, m });
+  }
+  return parts;
+}
+
 function ll(p: [number, number]): string {
   return `${p[1].toFixed(5)}, ${p[0].toFixed(5)}`;
 }
@@ -340,9 +400,13 @@ export function stepsFor(legs: WalkLeg[]): RouteStep[] {
       const cross = l.streamCrossings ? `, crossing ${fordsText([l]).text}` : '';
       const lead = first ? 'Head cross-country' : `Leave the ${legs[i - 1]?.kind === 'road' ? 'road' : 'trail'} at ${ll(c[0])}; go cross-country`;
       const climb = climbText(l);
+      const through = veg ? ` through ${veg}` : '';
+      const parts = xcParts(l);
+      const way = parts.length > 1
+        ? `${fmtMiles(l.distanceM)}${through}: ${parts.map((p) => `${p.dir} ${fmtMiles(p.m)}`).join(', then ')}`
+        : `${bearing(c[0], c[c.length - 1])} ${fmtMiles(l.distanceM)}${through}`;
       steps.push({
-        text: `${lead} ${bearing(c[0], c[c.length - 1])} ${fmtMiles(l.distanceM)}`
-          + `${veg ? ` through ${veg}` : ''}${cross}${climb ? `, ${climb}` : ''}${fmtAbout(l)}`,
+        text: `${lead} ${way}${cross}${climb ? `, ${climb}` : ''}${fmtAbout(l)}`,
         distanceM: l.distanceM,
       });
     } else if (l.kind === 'gap') {
