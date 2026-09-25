@@ -1,112 +1,326 @@
 # Trails overlay + offline Walk: build status
 
-Overnight build, 2026-09-25, branch `trails-offroad-routing`. Nothing is merged to
-`main` and no PR is open. The plan is `FINAL_PLAN.md`.
+Branch `trails-offroad-routing`. Built overnight on 2026-09-25 and first run on
+real data later that day. Nothing is merged to `main`, no PR is open, nothing is
+pushed, and nothing has been written to B2. The plan is `FINAL_PLAN.md`. Where it
+disagrees with "Contract changes since the plan" below, this file wins.
 
 ## Summary for the owner
 
-The whole feature is built on this branch: the worker jobs, the two workflows and
-the frontend. Everything builds, and every automated test passes (worker 305,
-frontend 482).
+The whole feature is built: the worker jobs, the two workflows and the frontend.
+Every automated test passes: worker 363, frontend 517. One more frontend file,
+the golden routes, runs only when you point it at a real bundle.
 
-**None of it has run against real data yet.** This session's network policy
-blocked every data host: USFS, BLM, NPS, LANDFIRE, TNM, Geofabrik, the fire API
-and our B2 bucket. The code is therefore tested against local fixtures and a
-synthetic "fire" scene that the worker builds with the real GDAL 3.8.4 and
-osmium 1.16. Those are the same versions the CI runner installs.
+**Real data has now run, as local dry runs.** Nothing went to B2.
+- **National trails build:** all three agencies, 130,736 trails.
+- **One fire's routing bundle:** SISI in the North Cascades, around Stehekin, WA.
+- **16 SISI routes** through the app's own routing engine.
 
-**Your first step:** dispatch **Trails build** with `dry_run` checked, then
-**Routing bundles** with `dry_run` checked (optionally `fire=<slug>`). Download
-the artifacts. The checklist is at the end of this file.
+That first contact found more than 20 real bugs. All are fixed, with tests. The
+worst:
+- the router forded the Stehekin River and Agnes Creek;
+- it walked across glaciers;
+- a pin 45 m outside the fire turned perimeter avoidance off, and the route went
+  straight through the fire;
+- it cut switchbacks to save seconds;
+- the LANDFIRE request box was garbage;
+- the build used no OpenStreetMap data at all;
+- 8,368 Forest Service trails said "Hiker restricted N/A".
 
-## What's done
+**Two cost-model questions are yours:**
+1. Should rock and talus stay as fast as grass?
+2. Should tree cost scale with canopy cover?
 
-### Worker (Python, `worker/responder_worker/`)
+They are the main reason some routes still look wrong: see "Needs your call".
 
-| Area | Module(s) | Notes |
+**Not yet run anywhere:**
+- the CI runner's versions (GDAL 3.8.4, osmium 1.16);
+- the plan/build/index path;
+- the whole app in a browser on the final bundle, including offline;
+- any fire other than SISI.
+
+## Owner decisions taken (2026-09-25)
+
+| Decision | How it is built |
+|---|---|
+| A fixed cost for **leaving** a trail or road, so routes stop cutting switchbacks | `costModel.LEAVE_TRAIL_PENALTY_S = 90`. It only affects which route is chosen and is never added to a reported time. The move into the goal cell does not pay it, and neither does a start that is already off the network. A pin *on* a trail does pay it on its first cross-country step, so it can't cut the first switchback for free. That goes a bit beyond the literal decision: say if you don't want it. |
+| Times stay at loaded-crew pace (Sullivan 2020 hotshot crews, ~50 lb packs) | Unchanged. |
+| Keep the current relative time ranges | `durationRangeS` is still computed (about 0.8x to 1.5x the typical time). After hands-on testing (ebe302b), the card, the mode button and the steps show **the typical time only** and say it is a fit hotshot crew's pace. |
+| Session defaults, safety-conservative (not yet confirmed by you) | Glaciers and permanent snow/ice are impassable cross-country. BLM `MTC_SHARED` means motorcycles only, and hiker access is "unknown", not inferred. `STRT_LGL_VEH` maps to 4WD. The GET v2 multipliers are otherwise unchanged: rock and canopy wait for your call. |
+
+## Real-data results
+
+### National trails (dry run of `sync-trails`, recipe 2)
+
+| | |
+|---|---|
+| Build | `b20260925-7eed4edc`: 179 s on this laptop, exit 0, GDAL 3.13.2 |
+| Trails | 74,867 USFS · 19,532 BLM managed · 5,038 BLM not assessed · 31,299 NPS. Dropped: 3,289 USFS and 3 NPS with no geometry, 189 NPS by rule |
+| Source dates | USFS 2026-09-23 · BLM 2026-09-21 · NPS 2026-09-22 |
+| PMTiles | 105.5 MB, 81,344 tiles at z7–13. Largest tile 137 KB (z7, Sierra Nevada). 0 degraded tiles. `pmtiles verify` OK |
+| FGB | 420.5 MB (the routing build reads the fire's area from it) |
+| Checked against the live services | 30 records (10 per agency), re-normalized before and after the fixes: 0 mismatches. Real tile properties were run through the app's popup code |
+| Values after today's fixes | USFS trails with no class: 4,287 → 2,696. 74,837 of 74,867 USFS trails now name their forest. BLM trails wrongly claiming hiker access: 1,637 → 0. BLM trails with no uses: 12,440 → 8,197 |
+
+### SISI routing bundle (`routing-one --dry-run --force --fire sisi`)
+
+| | |
+|---|---|
+| Bundle | `1318f3a35b9d` (fire `{DC4342D9-B479-44F1-906C-8ABD42E1F59C}`), built from worker HEAD 92a1e31 and trails `b20260925-7eed4edc`. 36 s wall with the NHD and OSM downloads cached; the first build took 48 s |
+| Grid | 729 x 743 cells at 30 m, UTM 10N, about 8 km past the perimeter on every side. Perimeter: 44 polygons, 2026-09-25T10:15:48Z |
+| Sources | LANDFIRE LF2025 via `exportImage` · OSM `us/washington` 2026-09-24 · NHD HU8 17020008/09, 17110005/06. No warnings |
+| Ground | Impassable 8.8%: over 45° 7.8%, water and rivers 0.78% (2,563 river cells), snow/ice 0.25% (1,381 cells, all impassable). 21,133 creek cells can be crossed. 55 named streams in band 3; the first are Stehekin River, Agnes Creek, Blackberry Creek and Sun Creek |
+| Graph | 493 nodes and 519 edges, in 3 components (the largest holds 99.2%): 149.2 km of OSM trail, 28.4 km of road, 14.3 km of track, 6.7 km of added agency trail. Conflation: 117 agency lines; 75 covered by OSM; 24 runs added; 25 parallel copies and 9 same-named braids dropped; 290 OSM edges named |
+| Size | 1.31 MB: grid 536 KB, DEM 444 KB, graph 35 KB, trails.pmtiles 291 KB |
+| Engine (node, this laptop) | Load 55–60 ms, perimeter mask 8 ms, route 1–265 ms |
+
+### SISI routes (golden set, app engine; `frontend/src/routing/golden.ts`)
+
+Times are typical, with the model's fast–slow range. "On network" is the share
+of the distance on trails and roads. "Cuts" counts trail → cross-country → trail
+hops, with how much each saves over staying on the trail.
+
+| Route | Result | Before today's fixes |
 |---|---|---|
-| Foundations | `gdal_cli.py`, `utm.py`, `pmtiles_inspect.py`, `http.download_to`, `config.py` | GDAL through the CLI only; raster I/O goes through ENVI/VRT. UTM uses the Krüger series and matches PROJ to about 1 nm. A stdlib PMTiles reader means GDAL 3.8.4 never reads a PMTiles. Key rules: `trails/` and `routing/` are immutable, `work/` is private, pointers live under `catalogs/`. Content types added for pmtiles, fgb, tif, gz and gpkg; Content-Encoding is never set. `numpy` is added to the deps. |
-| Trails | `trails_normalize.py`, `trails.py`, `trails_cli.py` (`sync-trails`), `.github/workflows/trails.yml` | Probe, then decide (builds at most weekly), then fetch: the USFS FGDB zip, and BLM/NPS through GDAL ESRIJSON paging with count checks. Then normalize, apply the sanity gate (floors, plus a 10% drop limit), and build GPKG, FGB and PMTiles z7–13 (two-layer CONF, verified on 3.8.4). CPL_DEBUG=MVT counts degraded tiles. Publishes `trails/b{id}/…` first and `catalogs/trails.json` last. Health goes to `catalogs/health/trails.json`. |
-| Routing plan | `routing_plan.py`, `perimeters.py`, `routing_cli.py` (`routing-plan`) | The fire list comes from our published `catalog.json`. Perimeters come from `FIRE_API_DEV` using verbatim paths, fetched only when `poly_last_updated` changed. The AOI is the perimeter bbox + 8 km, at least 16 km a side; 30 m cells up to 6.25M cells, else 60 m, else a 150 km clip. It never shrinks and has 2 km hysteresis. Actions are build, check, skip, backoff or unsupported (non-CONUS). Priority is `PRIORITY_FIRES`, then acres. Shards are region-affine. |
-| Routing build | `routing_bundle.py`, `landfire.py`, `nhd.py`, `cost_grid.py`, `osm_extract.py`, `graph_build.py` (`routing-build`, `routing-one`, `routing-index`), `.github/workflows/routing.yml` | **LANDFIRE:** `exportImage` in 5070, snapped to the CONUS grid, with a WCS fallback and a per-pixel LF2025/LF2024 mosaic. **NHD:** TNM lookup with the `(HU) 8` / `_HU8_` rule plus `prodFormats` and a total check. Each HU8 is trimmed to perennial streams and perennial water and cached at `work/nhd/`. **Cost model:** GET v2 on terrain slope, packed as pace code + veg class + DEM. **OSM:** Geofabrik leaf regions, then osmium tags-filter and a multi-bbox extract, then an OPL parser. **Graph:** exact OSM topology, with conflation that keeps OSM edges and moves agency names onto them; T5/T6 and via_ferrata are excluded. **Output:** RDG1 graph and a per-fire trails+ways PMTiles. Bundle ids hash the actual AOI inputs, so unchanged fires skip. Each fire's pointer is written last, and the index is rebuilt from pointers only. |
+| **a** Company Creek trailhead → trail km 12 | 12.0 km, ↑1,124 m, 2 h 50 (2 h 15–4 h), 99.8% on network, 0 cuts | same |
+| **a2** Devore Creek trailhead → trail km 11 | 11.0 km, ↑1,264 m, 2 h 40 (2 h 05–3 h 50), 100%, 0 cuts | same |
+| **b** road end → McGregor Mountain Trail km 9 | 10.0 km, ↑1,664 m, 2 h 40 (2 h 05–3 h 55), 97.8%, **1 cut**: 221 m, ↑120 m of rock in 11 min, saving 89 s | 7 cuts, each saving 0–2.6 min |
+| **b_rev** the same, downhill | 9.9 km, 2 h 20 (1 h 50–3 h 30), 97.2%, 1 cut: 280 m, ↓166 m of rock in 11 min, saving 160 s | 4 cuts (penalty off) |
+| **c1** Rainbow Lake Trail → off-trail rock bench | 2.6 km, ↑297 m, 1 h 20 (1 h–1 h 55), 57%, **1 cut** saving 110 s. Warns: fords North Fork Rainbow Creek | 2 cuts; clipped 11 m of open water |
+| **c2** PCT → off-trail timber | 1.1 km, ↑258 m, 1 h 45 (1 h 20–2 h 40), 14%. Warns: fords South Fork Agnes Creek | same time; the stream had no name |
+| **d** across the fire, avoidance on | 14.6 km, 6 h 45 (5 h 30–9 h 45), 76%. Stays out of the fire; closest approach 79 m, with a NEAR_PERIM note. Goes the long way, with 3.4 km of cross-country timber, because Agnes Creek is now a wall | 10.4 km, 2 h 40, **forded Agnes Creek** at Agnes Gorge, no note |
+| **d_off** the same, avoidance off | 10.3 km, 2 h 10, 2.2 km inside the fire, with a CROSSES_PERIM note | no note |
+| **e** start inside the perimeter | 8.7 km, 10 h 05 (7 h 45–16 h 10), 4.6 km inside the fire (its own polygon only). Notes: ENDPOINT_IN_PERIM, CROSSES_PERIM, XC_STREAM (Cabin Creek) | avoidance off for the whole route; no crossing note |
+| **f** Company Creek Road → Stehekin Valley Road, across the river | 6.0 km of road over **Harlequin Bridge**, 1 h 15 | **forded the Stehekin River** 2.9 km from the bridge |
+| **f2** a second pair across the river, 274 m apart | 5.1 km over Harlequin Bridge, 1 h | forded |
+| **f3** either bank 330 m above High Bridge | 2.0 km over the Stehekin Valley Road bridge, 1 h 05 | new |
+| **g** pin 45 m outside the fire (in the 60 m standoff) → far side | 17.0 km, 8 h, never enters the fire; closest approach 38 m, next to the pin. Notes: ENDPOINT_NEAR_PERIM, NEAR_PERIM | **straight through the fire**; its only note lumped the standoff in with inside |
+| **g2** PCT → pin 45 m outside the north-east edge | 28.9 km, 14 h 05, around by Harlequin Bridge (the pin is across the river from the road, and the fire lies between) | through the fire; then a 23 h 35 climb (fixed by 548b819) |
+| **h** straight line over the McGregor Mountain snowfield | 2.1 km around it, on rock, 1 h 10 | crossed snow cells at 3x |
+| **h2** straight line over a glacier south of Agnes Creek | 2.2 km around it, on rock, 1 h 50 | crossed it |
 
-### Frontend (`frontend/src/`)
+All 16 pass the golden checks (see "How it was tested"). The worst remaining
+problem is the cost model, not the routing: steep rock is priced like grass, and
+timber is priced very slowly. See "Needs your call".
 
-| Area | Files | Notes |
-|---|---|---|
-| Trails layer | `map/pmtilesSource.ts`, `map/layers/trailsLayer.ts`, `trailsStyle.ts`, `panels/layers/TrailsRow.tsx` | The `pmtiles` Protocol (npm, approved). Online it reads the national archive (S3 URL preferred); offline it reads the packed per-fire extract from an OPFS `File`. Teal casing and core per ground. OSM ways show only on the offline ground. Popups are escaped and show restrictions plus "Walk here". `rd-trails-hit` is in `FEATURE_LAYERS` and `INTERACTIVE`; the popup yields to route claims, the draw tool and priority features. `trl` URL param. |
-| Routing core | `routing/{costModel,pacecode,heap,rasterize,rdg1,gridDecode,hybridGraph,astar,sampler,smooth,legs,engine,safety}.ts` | Pure and node-tested. Hybrid A* uses window-local cells, portals at every densified vertex, a hard perimeter block (60 m standoff, graph included), endpoint snapping ≤150 m, avoidance off when an endpoint is inside the perimeter, and a `blocked_by_perimeter` alternative. Sliced search passes; horizontal-distance times; Sullivan tertiles on trails; GET × α off trail. |
-| Worker + Walk | `routing/{offroad.worker,offroadClient,protocol,bundleIndex,hooks}.ts`, `api/walkRouting.ts`, `api/routing.ts`, `panels/walk/*`, `panels/SearchDirectionsControl.tsx`, `map/layers/routeLayer.ts` | Module worker (`worker.format: 'es'`). Buffers are fetched on the main thread through the pack wrapper and transferred to the worker. Walk uses the offline router inside the area; outside it uses ORS/Valhalla plus untimed dotted gaps with ONLINE_NO_PERIM and CROSSES_PERIM. Only Walk reruns when its context changes. Errors are kept per mode; offline Drive/Apparatus show "Needs a connection"; the slow bound leads. Legs draw solid, dashed with vegetation colour, or dotted, with join dots. The card shows the permanent label, notes, avoid toggle, provenance, ODbL line and steps. |
-| Vegetation, area, offline | `map/layers/{vegetationLayer,routingAreaLayer}.ts`, `offline/{packModel,packs,opfs}.ts`, `panels/OfflineCard.tsx` | The vegetation canvas is rendered by the worker. The routing-area dashed box shows in Walk. The pack plan adds the index snapshot, the descriptor and 4 immutable files. Range requests bypass the pack. Immutable packed URLs are served pack-first. `packsReady` and `packedFile` added. The packed bundle is preferred offline. |
-| Credits and health | `SourcesView.tsx`, `HealthView.tsx`, `README.md` | Credits for USFS, BLM, NPS, OSM (ODbL), LANDFIRE, NHD and the travel-rate research. Per-workflow run strips plus freshness rows from the new health docs. |
+## Fixes made today (all with tests; each new test fails on the code before it)
+
+**Trails ETL**
+
+| Commit | Fix |
+|---|---|
+| f96db30 | Garbage values found against the live services. The USFS 'N/A' window read "Hiker restricted N/A" on 8,368 trails and reached Walk notes. A Wilderness Study Area was labelled Wilderness. BLM showed "Season: NO". BLM and NPS uses were missing. 'PCT:' was title-cased. |
+| 559ae29 | `src_date` stays an ISO string. GDAL typed it as a date, so tiles said '2026/01/12'. |
+| 79186c4 | A `TRAILS_RECIPE` bump now republishes (reason 'recipe'); the recipe is now 2. BLM `MTC_SHARED` means motorcycles only, and `STRT_LGL_VEH` maps to 4WD. USFS class 3 comes from 'TC3', and the forest name from ADMIN_ORG. |
+
+**Routing worker**
+
+| Commit | Fix |
+|---|---|
+| 17f243d | Under numpy 2, `gdaltransform` got 'np.float64(…)' text and projected garbage. The LANDFIRE box came out 26,708 x 172,455 px, and every build failed. |
+| 4d85a99 | `bbox_5070` now refuses an implausible projected box, whatever the cause. |
+| 53816a2, 85d5922 | In the live Geofabrik index, US states have parent 'north-america', so no OSM was ever used. That is fixed. A short region list now fails the job once, instead of failing every fire. |
+| 4514759 | **Rivers are walls.** NHD stream order ≥ 5, a name ending in "River", or OSM `waterway=river` makes the line impassable water (class 10). New grid band 3 names each stream, listed in `bundle.json` `streams`. Smaller creeks keep the x5 cost. |
+| 12688ad | **Glaciers and permanent snow/ice are impassable** (EVC 12, EVT 7735, FBFM40 NB2). They cost 3x before. |
+| 6651d7e, 0263497 | The bundle id now covers the graph builder, cost grid, NHD trim and OSM filter code, and the NHD cache is keyed by trim version. A fix to any of them therefore rebuilds every bundle. Before, it would have waited up to a month. |
+| 02f35e9, 51d425d, 92a1e31 | Conflation. Agency lines drawn 10–40 m off the OSM line are not new trails. Their name, number, restriction and flags now reach the whole matched OSM trail. A same-named agency braid yields to the OSM line. |
+
+**Walk (frontend)**
+
+| Commit | Fix |
+|---|---|
+| 94849b5 | The 90 s leave-trail penalty. McGregor route: 7 cuts → 1. |
+| 6476cfe, 8d7e03a | A pin in the standoff or inside one polygon opens only what it needs, and the rest of the fire stays blocked. Every Walk route is checked against the perimeter: CROSSES_PERIM, NEAR_PERIM within 200 m, and PERIM_OLD even with avoidance off. |
+| 40b7eef | Smoothing can no longer clip the corner of a barrier cell (c1 cut 11 m through open water). |
+| 1c74a02, fe96108 | One step per trail. Short cuts are mentioned in the step. An OSM restriction starts a new step, and a ref alone does not. |
+| 88b87dc, c3de3ea, 946fbae | Fords are named ("Unbridged crossing of Weasel Creek…"). Snow/ice is marked impassable in the legend. |
+| 548b819 | When a cheaper route may leave the search window, the search widens (g2: 23 h 35 → 14 h 05). |
+| 16d6aed | **A pin on a road over river cells starts on the road.** 178 SISI graph vertices sit on river cells. A pin there used to snap to the nearest walkable cell, which for 7 of them lies across more river. The line then began with a wade: route f's first leg had 11 m of water, and a Company Creek Road pin 25 m. In the synthetic test, a pin nearer the far bank got no route at all. |
+| 154f632 | The legend says "Open water or river" and "Perennial creek (crossable)". |
+| ebe302b, 6878674 | From hands-on testing: typical time only; the credit moved to the map attribution; the map toolbar lets clicks through; the step list scrolls. |
+| 4d2aa8d | The golden-route harness (below). |
+
+## Contract changes since the plan
+
+These replace the corresponding parts of FINAL_PLAN §2.
+
+- **`grid.tif`** has 3 Byte bands. Band 3 is `stream`: 0 means none; k means
+  `bundle.json` `streams.names[k-1]`. `streams` is `{band: 3, names: [...], truncated}`,
+  with at most 255 names: rivers first, then the longest streams.
+- **Rivers** are class 10 with an id > 0 and no stream bit; pace 255. The stream
+  bit now means a creek below river size (x5).
+- **Snow/ice** is class 9, pace 255.
+- **New stat** `river_cells`.
+- **Bundle id inputs:**
+  - added: `cost_grid` (COST_GRID_VERSION 3), `nhd_trim` (2), `osm_filter` (2),
+    `graph_build` (4) and `osm_water_hash`;
+  - the `recipe` is still 1, so no app update is required.
+- **NHD cache key:** `work/nhd/v{N}/{huc8}.gpkg`.
+- **Trails:**
+  - `state/trails.json` and `build.json` carry `recipe` (now 2);
+  - the USFS `unit` is the forest name.
 
 ## How it was tested
 
 | Command | Result |
 |---|---|
-| `cd frontend && npm ci && npx tsc --noEmit && npx vitest run && npx vite build` | ci OK, tsc clean, **482 tests pass (49 files)**, build OK. `offroad.worker-*.js` plus the geotiff codec chunks are emitted. |
-| `cd worker && uv sync && uv run pytest` | **305 pass.** The GDAL/osmium tests ran for real, not skipped: `apt-get install gdal-bin osmium-tool` gave GDAL 3.8.4+dfsg-3ubuntu3 and osmium 1.16.0 (Ubuntu 24.04, same as CI). |
+| `cd worker && uv run pytest -q` | **363 passed.** The GDAL/osmium tests ran for real, but on GDAL 3.13.2 and osmium 1.19.1, not CI's 3.8.4 and 1.16. |
+| `cd frontend && npx tsc --noEmit && npx vitest run && npx vite build` | tsc clean. **517 passed**, plus the golden file skipped (it names the variable to set). Build OK. |
+| Golden routes on the real SISI bundle | **17 of 17 pass** on `1318f3a35b9d` (16 routes plus a check that the fire has goldens). |
 
-Key tests:
-- **`worker/tests/test_routing_bundle.py`** builds a whole bundle from `tests/routing_scene.py` through gdalwarp, gdal_rasterize, ogr2ogr (FGB, GPKG, PMTiles) and osmium. The synthetic scene has a ridge, timber and brush, a lake, slash, a cliff, a creek, an OSM road and path, and two USFS trails. The test checks upload order (pointer last), descriptor, rasters, graph names, conflation and PMTiles layers, and that a rerun is `unchanged`.
-- **`worker/scripts/make_routing_fixture.py`** writes that bundle into `frontend/src/routing/__fixtures__/synthetic/`.
-- **`frontend/src/routing/engine.test.ts`** routes on the real worker bytes: road stays on road; the ridge follows `Ridge Trail #101`; cross-country goes through timber; lakeshore snapping works, and a mid-lake pin gets an error; the perimeter detour never enters the fire; an endpoint inside the perimeter gets its note; a ring of fire gives `blocked_by_perimeter` with an alternative; outside the area gives an error. **A\* ≡ Dijkstra** on 40 random grids.
-- **`frontend/src/map/pmtilesSource.test.ts`** reads the worker's per-fire PMTiles through the OPFS-style source with the real `pmtiles` library.
-- **`test_trails.py`** runs an end-to-end sync on local sources through the GDAL 3.8.4 PMTiles writer.
-- **Chromium smoke run** (Playwright + Vite dev; the harness was not committed): the bundle loaded in the worker in 242 ms, the ridge route computed in 59 ms, the perimeter detour and the vegetation image worked. It also found and fixed a bug: servers that label `.gz` files with `Content-Encoding: gzip`, as Vite does, broke graph decoding.
-- **Scale check:** a synthetic 240k-vertex OSM network plus 400 agency trails conflates in 15 s. It took minutes before the fix in commit 33fd951.
-- **Review:** a separate reviewer read the whole diff. Its 6 findings plus 1 unverified item are fixed in commit 4ca45ee.
+Running the golden routes:
+
+```sh
+cd worker && uv run python scripts/golden_bundle.py <out>/routing/<fire_key>/b<id> /tmp/golden/sisi
+cd frontend && ROUTING_GOLDEN_DIR=/tmp/golden/sisi npx vitest run src/routing/golden.test.ts
+```
+
+**The copy script** checks each file's sha256 and stores the perimeter the routes
+were written against. Pass `--perimeter FILE`, or it fetches the latest from the
+DEV fire API. Real bundles are never committed.
+
+**Each route runs through `routeWalk`**, so the notes are the ones the Walk card
+shows. Every route is checked for these:
+- no cross-country cell of a barrier class (river/water, snow/ice, over 45°);
+- every cut saves the 90 s penalty over the network between its ends, with 10 s
+  of slack;
+- with avoidance on, the line enters no fire polygon that a pin isn't in;
+- at most 15 m of the line lies in the fire or standoff away from the pins.
+
+Each route also checks its own bounds and notes. Preconditions fail as such, not
+as routing bugs: where each pin sits on the perimeter, and what the straight line
+crosses.
+
+**The harness catches known regressions.** I checked it against three older
+states:
+- the pre-river bundle `d515909392c7`: f and f2 ford, h and h2 cross snow;
+- the engine before 16d6aed: f starts with 64 m cross-country, 11 m of it water;
+- `LEAVE_TRAIL_PENALTY_S = 0`: b cuts 7 switchbacks.
 
 ## Not verified yet
 
-1. **No real data has run anywhere.** Not verified:
-   - the agency service response shapes;
-   - GDAL ESRIJSON paging on 3.8.4;
-   - LANDFIRE `exportImage` and WCS responses (codes and sizes);
-   - TNM JSON, which is parsed per the recorded format; the fixture is reconstructed, not captured;
-   - Geofabrik `index-v1.json` ids, parent structure and redirect behaviour;
-   - FGDB field names from the live zip.
-2. **Golden routes on real terrain** have not run: Iron Creek → Stanley Lake with trail share ≥ 0.85, and the Bob Marshall summit. Nor have phone timings on mid-range devices.
-3. **The whole app in a browser** has not been exercised: MapLibre with the trails layer, popups, the Walk card, and offline pack download → airplane mode. Only the worker pipeline ran in Chromium. The OPFS source is unit-tested in node, not in a browser.
-4. **National build size and time on the runner** are not measured. The estimate is 160–290 MB and minutes to tens of minutes; `timeout-minutes` is 120.
-5. **The EVT lookup table is not used.** Lifeform comes from EVC, with FBFM40 as the fallback. EVT and EVC disagree on about 8.5% of cells; there, EVC's call wins, which is usually herb over shrub or tree and so faster.
-6. **Supersede in the browser:** the smoke test's first route finished before the second request arrived, so the superseded path was not exercised. It is covered only by code review.
+1. **CI versions.** GDAL 3.8.4 and osmium 1.16 have not run anything. Two things
+   to watch on 3.8.4:
+   - the NHD trim's GPKG native SQL (`-sql` with a LEFT JOIN on NHDFlowlineVAA and
+     an IN subquery), which `test_nhd_trim_keeps_perennial_only` covers on CI;
+   - the `ogrinfo -q` layer listing.
 
-## Decisions I made (revisit any)
+   One CI dry run of each workflow (`dry_run` checked, `fire=SISI`) settles it.
+2. **The CI path.** Only `routing-one --trails-src <local FGB>` ran. Not run:
+   - `routing-plan`, `routing-build --shard` and `routing-index`;
+   - the `/vsicurl/` read of the 420 MB FGB;
+   - `catalogs/health/routing.json`;
+   - AOI never-shrink/hysteresis;
+   - backoff.
 
-- **Trails default `auto`:** on only on the offline ground, where there is no basemap. An explicit on/off choice wins and persists across fires. USGS Topo already draws trails.
-- **Headline time is the slow tertile**, shown as `≤2h 50m`. The card shows range and typical.
-- **Perimeter standoff is 60 m.** Hotspots are not a factor in routing, and there is no HOTSPOT_NEAR warning yet (not built).
-- **LANDFIRE epoch in the bundle id is monthly.** Every bundle rebuilds about monthly so LF2025 coverage and OSM changes get picked up. That costs roughly 80 CI-minutes a month.
-- **Routing cadence is every 3 h**, plus a run after each Trails build. Trails check daily and build at most weekly (≥ 6 days, or any change after 30 days).
-- **AOI** is the perimeter bbox + 8 km, minimum 16 km a side. Grids over 6.25M cells switch to 60 m cells; sides over 150 km are clipped.
-- **OSM:** apt osmium-tool with a Python OPL parser, not pyosmium. Geofabrik PBFs are not stored in actions/cache.
-- **The prune command is not written.** Nothing deletes automatically (convention). README recommends a B2 hidden-version lifecycle rule for `catalogs/` and `work/`.
-- **GET's slash multiplier is 5×**, the table value. Snow is 3× and unknown ground 4×; both are my choices, since GET is silent on them.
-- **The online fallback** models cross-country gaps with the offline router when both ends are inside the area. Otherwise the gap is a straight untimed line.
+   Because the trails came from a local file, `sources.trails.build_id` is null in
+   the SISI bundle.
+3. **The app in a browser.** Only your hands-on Walk test on SISI has run in a
+   browser (it led to ebe302b and 6878674), and that was on an earlier bundle.
+   Not run:
+   - the final bundle `1318f3a35b9d` in the app;
+   - the national trails layer and its popups;
+   - vegetation;
+   - an offline pack download, then airplane mode;
+   - phone timings (the budget is < 2 s load and < 1 s per route).
+
+   The final bundle is at `scratchpad/realdata/routing-out/` (pointer and index
+   included). The trails build is at `scratchpad/realdata/trails-out3/`. Serve a
+   static build from the scratchpad (the dev server can't launch from ~/Desktop).
+4. **Other fires.** SISI is small: a 22 km box at 30 m cells, one Geofabrik
+   region, one UTM zone, fully covered by LF2025, and a perimeter with no holes.
+   These have run only in unit tests, never on real data:
+   - 60 m grids, clipping, several regions or zones;
+   - the LF2024 per-pixel mosaic and the WCS fallback;
+   - perimeter holes;
+   - `blocked_by_perimeter`.
+
+   The golden routes from the plan (Iron Creek → Stanley Lake, Bob Marshall) have
+   not run.
+5. **Fixtures and ground truth.** The TNM fixture is still a reconstructed Idaho
+   excerpt, not a captured response. Where NPS/USFS and OSM draw the same trail up
+   to 130 m apart, which line is on the ground is unknown.
+6. **USFS "Centerline" rows** (all 8 USFS trails around SISI):
+   - allowed uses are not published and cannot be joined from other rows, so the
+     popup reads "Allowed uses not published";
+   - 2,696 rows keep class 0 because their band is 'TC1-2' or 'TC4-5';
+   - Wilderness is not shown, since SPECIAL_MGMT_AREA is 'N/A'.
 
 ## Needs your call
 
-1. **ODbL posture:** graphs and the per-fire `ways` layer are published publicly on B2. The attribution line is in the route card and on the Sources page.
-2. **Safety wording:** the label, notes and error texts are in `api/walkRouting.ts`, `routing/engine.ts` and `panels/walk/WalkRouteDetails.tsx`. Should "modeled, not scouted" also apply to online engines?
-3. **Whether to use the S3-endpoint URL for PMTiles.** The pointer carries `pmtiles_url_s3` when `B2_S3_ENDPOINT` is set, and the frontend prefers it. Chrome caches it; the native URL is not cached.
-4. **AK/HI/PR are unsupported** in v1. The index lists no bundle for them.
-5. **Merge strategy.** Other sessions edit `store.ts`, `useMapLayerSync.ts`, `zOrder.ts` and `SearchDirectionsControl.tsx`. My diffs there are small and additive, but they will need a rebase or merge.
+1. **Rock, talus and bedrock multiplier** (pending). Barren ground costs the same
+   as grass (M = 1) up to 45°. On SISI that is 11% of cells: all LANDFIRE
+   bedrock/cliff/talus, median slope 34°. The multiplier:
+   - drives the remaining cuts: b's is 221 m of rock up 120 m in 11 min, saving
+     89 s; b_rev's is 280 m down 166 m in 11 min;
+   - makes h walk 1.7 km of steep rock in an hour.
+
+   Options:
+   - a 2–3x barren multiplier;
+   - a lower impassable slope for bedrock/talus (e.g. > 35°);
+   - a cap on the cross-country climb and descent rate.
+
+   It is one constant in `cost_grid.py`; bump `COST_GRID_VERSION` and the bundles
+   rebuild.
+2. **Tree canopy scaling** (pending). Every tree cell costs 4x whatever its EVC
+   cover, and heavy litter 8x. On SISI, 34,625 cells with 10–29% cover are as slow
+   as dense timber (median 0.36 km/h). This is why:
+   - d now takes 3.4 km cross-country, mostly timber, in 4 h 20;
+   - e takes 10 h, with 3.95 km cross-country, mostly timber, in 9 h 05;
+   - c2 takes 1 h 45 for 920 m.
+
+   Options: scale with cover as brush already does, or cap it. Relative costs
+   matter more than absolute ones, since they decide the route.
+3. **River threshold.** RIVER_ORDER = 5 (NHD HR stream order). Order-4 creeks stay
+   crossable at 5x unless OSM calls them a river.
+4. **A pin inside the fire opens its whole polygon** (route e: 4.6 km inside the
+   fire, 10 h). Should a pin inside instead route out by the nearest edge?
+5. **The start-on-trail penalty rule**: see the first table.
+6. **"Near-optimal" note on short pairs.** f (260 m apart) and g get WEIGHTED
+   because the only bridge is outside the 2 km search window. The fallback searches
+   the whole grid at weight 1.2. On a grid SISI's size, weight 1 would be exact and
+   still fast.
+7. Still open from the overnight build:
+   - the ODbL posture (graphs and `ways` are public on B2);
+   - whether "modeled, not scouted" also applies to online engines;
+   - the S3-endpoint PMTiles URL;
+   - AK/HI/PR unsupported;
+   - the merge strategy for `store.ts`, `useMapLayerSync.ts`, `zOrder.ts` and
+     `SearchDirectionsControl.tsx`.
+
+## Decisions I made (revisit any)
+
+- **Trails default `auto`:** shown only on the offline ground, where there is no
+  basemap. An explicit on/off wins and persists.
+- **Perimeter standoff is 60 m.** A pin in it opens about 105 m around itself. A
+  pin inside a polygon opens that polygon and its own standoff.
+- **Walk notes:**
+  - NEAR_PERIM within 200 m;
+  - PERIM_OLD over 12 h;
+  - no HOTSPOT_NEAR yet.
+- **Network snap:** a pin on impassable ground within 30 m of a road or trail
+  vertex starts on it. SNAP_MOVED appears when the pin moved 5 m or more.
+- **Monthly LANDFIRE epoch** in the bundle id: every bundle rebuilds about monthly.
+- **Cadence:** routing every 3 h. Trails check daily and build at most weekly.
+- **AOI:** perimeter bbox + 8 km, at least 16 km a side; 60 m cells above 6.25M
+  cells; clipped at 150 km.
+- **Hazards:** unknown ground 4x; GET slash 5x. Snow was 3x; it is now impassable
+  (session default).
+- **No prune command.** Nothing deletes automatically.
 
 ## Where to resume
 
-1. Dispatch **Trails build** with `dry_run` checked. Download `trails-dryrun` and check:
-   - `catalogs/trails.json` counts are about 75k USFS, 19.5k BLM managed, 5k not assessed and 31k NPS;
-   - `uv run python -m responder_worker.pmtiles_inspect out/trails/b*/trails.pmtiles`;
-   - the `degraded_tiles` count.
-
-   Fix any source-shape surprises in `trails.py` or `trails_normalize.py`.
-2. Dispatch **Routing bundles** with `dry_run` checked and `fire=<a big CONUS fire>`. Inspect:
-   - `bundle.json` stats and warnings;
-   - `gdalinfo -stats grid.tif`;
-   - `graph_build.decode_rdg1` counts.
-
-   Then point a local build at it: copy the `out/` tree under `frontend/public/data/` and use a dev build (DATA_BASE_URL `/data`). Walk the golden routes.
-3. Run for real: Trails build, then Routing bundles. Watch the `/health` rows.
-4. Browser QA of the full app, including offline: download the pack, switch to airplane mode, then check trails, Walk and vegetation.
-5. Later work: HOTSPOT_NEAR, the EVT LUT (recipe 2), a manual prune command, GPX export, phone timing.
+1. **Answer the cost-model questions** (rock, canopy). Then:
+   - change `cost_grid.py`;
+   - bump `COST_GRID_VERSION`;
+   - rebuild SISI with `routing-one --dry-run --force --fire sisi --trails-src …`;
+   - rerun the golden routes. Tighten b/c1 `maxCuts` to 0 if the rock change
+     removes the cuts.
+2. **Dispatch Trails build, then Routing bundles,** with `dry_run` checked and
+   `fire=SISI`, on the CI runner (GDAL 3.8.4). Compare the output with the local
+   numbers above.
+3. **Browser QA on the final SISI bundle,** online and offline, including the pack
+   download.
+4. **Add a second, bigger fire,** with its own golden routes in `golden.ts`.
+   Choose one that exercises 60 m cells, two regions or a perimeter with holes.
+5. **Run for real:** Trails build, then Routing bundles. Watch the `/health` rows.
