@@ -1,12 +1,10 @@
 /**
- * Entry points to QR sharing (QrDialog), behind the `?qr=1` switch while it
- * is tested on phones (share/flag.ts):
+ * Entry points to QR sharing (QrDialog):
  *   - QrShareControl: a round button beside 3D on the fire map — show this
  *     view as a code, or scan one;
  *   - ScanCodeButton: the fire directory's way in — scan only.
  */
 import { useCallback, useState } from 'react';
-import { QR_SHARING_ENABLED } from '../share/flag';
 import { QrDialog } from './QrDialog';
 
 function QrIcon() {
@@ -20,7 +18,6 @@ function QrIcon() {
 export function QrShareControl() {
   const [open, setOpen] = useState(false);
   const close = useCallback(() => setOpen(false), []);
-  if (!QR_SHARING_ENABLED) return null;
   return (
     <>
       <button
@@ -40,7 +37,6 @@ export function QrShareControl() {
 export function ScanCodeButton() {
   const [open, setOpen] = useState(false);
   const close = useCallback(() => setOpen(false), []);
-  if (!QR_SHARING_ENABLED) return null;
   return (
     <>
       <button

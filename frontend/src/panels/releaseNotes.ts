@@ -27,6 +27,16 @@ export interface ReleaseDay {
 
 export const RELEASE_NOTES: ReleaseDay[] = [
   {
+    date: '2026-09-25',
+    notes: [
+      {
+        title: 'Share by QR code',
+        summary:
+          'The QR button beside 3D shows your map view, layers, incident map and drawings as a code. Another phone scans it with Scan code, no signal needed if both phones downloaded the fire.',
+      },
+    ],
+  },
+  {
     date: '2026-09-24',
     notes: [
       {
