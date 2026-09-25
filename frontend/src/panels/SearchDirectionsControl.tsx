@@ -554,8 +554,8 @@ export function SearchDirectionsControl() {
               {MODES.map(({ p, label, Icon }) => {
                 const gated = p === 'apparatus' && !apparatusAvailable;
                 const state = modes[p];
-                // Walk leads with the SLOW end of its range (IRPG: time it
-                // with your slowest person).
+                // Walk shows its typical (hotshot-crew) time as an estimate;
+                // the card gives the slow end — not an upper limit.
                 const time =
                   state === 'pending'
                     ? '…'
@@ -563,7 +563,7 @@ export function SearchDirectionsControl() {
                       ? '—'
                       : state
                         ? state.durationRangeS
-                          ? `≤${fmtDurationShort(state.durationRangeS[1])}`
+                          ? `~${fmtDurationShort(state.durationS)}`
                           : fmtDurationShort(state.durationS)
                         : null;
                 return (

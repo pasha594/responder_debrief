@@ -1,9 +1,12 @@
 /**
- * Walk route card: slow–fast range (slow bound first — IRPG: time escape
- * routes with your slowest person), trail vs cross-country split, the
- * cross-country vegetation breakdown, climb, notes, the perimeter toggle,
- * provenance, attribution and steps. "Cross-country legs are modeled, not
- * scouted." is always shown on a modeled route and cannot be dismissed.
+ * Walk route card: typical and slow crew times, trail vs cross-country
+ * split, the cross-country vegetation breakdown, climb, notes, the
+ * perimeter toggle, provenance, attribution and steps. The times are
+ * Sullivan 2020's hotshot crews with packs: typical = the middle tertile,
+ * slow = the low tertile. One in six of those observations was slower still,
+ * and other crews are usually slower, so neither is an upper limit.
+ * "Cross-country legs are modeled, not scouted." is always shown on a
+ * modeled route and cannot be dismissed.
  */
 import { useState } from 'react';
 import type { RouteResult } from '../../api/routing';
@@ -48,8 +51,8 @@ export function WalkRouteDetails({ route }: { route: RouteResult }) {
       <div className="rd-walk-time">
         {range ? (
           <>
-            <strong>up to {fmtDur(range[1])}</strong>
-            <span className="rd-walk-muted"> · {fmtDur(range[0])}–{fmtDur(range[1])}, typical {fmtDur(route.durationS)}</span>
+            <strong>Crew pace: typical {fmtDur(route.durationS)} · slow {fmtDur(range[1])}</strong>
+            <span className="rd-walk-muted"> (fit hotshot crews with packs; slower crews take longer)</span>
           </>
         ) : (
           <strong>{fmtDur(route.durationS)}</strong>
@@ -86,7 +89,7 @@ export function WalkRouteDetails({ route }: { route: RouteResult }) {
       {(route.modeled || route.engine === 'offroad') && (
         <div className="rd-walk-label" role="note">
           ⚠ Cross-country legs are modeled, not scouted.
-          <span className="rd-walk-sub"> Times assume a loaded crew in daylight. Scout and time escape routes with your slowest person.</span>
+          <span className="rd-walk-sub"> Times are a fit hotshot crew's pace with packs, in daylight. Trail times come from GPS-tracked crews; cross-country times are modeled, not measured. Scout and time escape routes with your slowest person.</span>
         </div>
       )}
       {(route.notes ?? []).map((n) => (
