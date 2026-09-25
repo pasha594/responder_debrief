@@ -6,15 +6,21 @@
  */
 import { useStore } from '../../state/store';
 import { useFireBundle } from '../../routing/hooks';
-import { TRAIL_PAINT } from '../../map/layers/trailsStyle';
+import { TrailsLegend } from '../LayerLegends';
 import { VegetationLegend } from '../VegetationLegend';
 import { LayerRow } from './LayerRow';
 
-export function TrailsRow() {
+/** Whether trails are drawn: 'auto' means only while offline. */
+export function useTrailsOn(): boolean {
   const mode = useStore((s) => s.layers.trails.mode);
   const online = useStore((s) => s.offline.online);
+  return mode === 'on' || (mode === 'auto' && !online);
+}
+
+export function TrailsRow() {
+  const online = useStore((s) => s.offline.online);
   const setMode = useStore((s) => s.actions.setTrailsMode);
-  const on = mode === 'on' || (mode === 'auto' && !online);
+  const on = useTrailsOn();
   return (
     <LayerRow
       label="Trails"
@@ -23,13 +29,7 @@ export function TrailsRow() {
       checked={on}
       onChange={() => setMode(on ? 'off' : 'on')}
     >
-      {on && (
-        <div className="rd-hist-legend" aria-hidden="true">
-          <span className="rd-hist-chip" style={{ background: TRAIL_PAINT.topo.core }} /> trail
-          <span className="rd-hist-chip" style={{ background: TRAIL_PAINT.topo.core, opacity: 0.55 }} /> not
-          assessed (BLM)
-        </div>
-      )}
+      {on && <TrailsLegend />}
     </LayerRow>
   );
 }

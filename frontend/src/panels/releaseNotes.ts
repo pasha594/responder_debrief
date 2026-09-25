@@ -30,6 +30,11 @@ export const RELEASE_NOTES: ReleaseDay[] = [
     date: '2026-09-28',
     notes: [
       {
+        title: 'One key for everything on the map',
+        summary:
+          'The Key pill now lists every layer on the map: hotspot age, perimeters, historic perimeters, trails, vegetation, land ownership, weather, the fire forecast and IR. It works from any tab; with many layers on, it scrolls.',
+      },
+      {
         title: 'Overview stays put',
         summary:
           "On narrower phones the Overview tab slid sideways under your thumb. The crew, engine, helicopter and personnel counts now fit, with a long personnel label taking two lines.",

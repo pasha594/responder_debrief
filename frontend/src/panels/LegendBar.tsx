@@ -1,8 +1,8 @@
 /**
- * The map's key, bottom-left above the timeline. Mirrors the spread product
- * the map draws (read from the store, so it holds on every tab), every
- * visible weather layer, the IR flight shown on the map, and the vegetation
- * layer. Folded to a "Key · N" pill by default so it doesn't cover the map
+ * The map's key, bottom-left above the timeline: one entry per layer drawn
+ * on the map, in the Layers tab's order (then the IR flight from Maps), all
+ * read from the store so it holds on every tab. Live traffic and road
+ * incidents have no key yet (TomTom's own colors). Folded to a "Key · N" pill by default so it doesn't cover the map
  * (each layer's row in the side panel carries the same key); open or folded
  * is remembered on this device. A native <details>, so keyboard and screen
  * readers get a real disclosure for free.
@@ -31,6 +31,14 @@ import { IrHeatLegend } from './IrHeatLegend';
 import { useManifestForFire } from './tabs/IncidentMapsTab';
 import { VegetationLegend } from './VegetationLegend';
 import { useFireBundle } from '../routing/hooks';
+import {
+  HistoricPerimetersLegend,
+  HotspotAgeLegend,
+  LandLegend,
+  PerimeterChip,
+  TrailsLegend,
+} from './LayerLegends';
+import { useTrailsOn } from './layers/TrailsRow';
 
 const OPEN_KEY = 'rd-map-key-open';
 
@@ -71,6 +79,13 @@ export function LegendBar() {
   const vegVisible = useStore((s) => s.layers.vegetation.visible);
   const view = useStore((s) => s.view);
   const corneaId = view.mode === 'fire' ? view.corneaId : null;
+  // The fire's own layers only draw on a fire's page.
+  const onFire = corneaId !== null;
+  const showHotspots = useStore((s) => s.layers.hotspots.visible) && onFire;
+  const showPerimeters = useStore((s) => s.layers.perimeters.visible) && onFire;
+  const showHistoric = useStore((s) => s.layers.historicPerimeters.visible) && onFire;
+  const showTrails = useTrailsOn() && onFire;
+  const showLand = useStore((s) => s.layers.land.visible) && onFire;
   const [open, setOpen] = useState(readOpen);
 
   const { data: catalog } = useMasterCatalog();
@@ -133,7 +148,9 @@ export function LegendBar() {
     return rows;
   }, [weatherState, weatherRuns]);
 
-  const count = (showSpread ? 1 : 0) + weatherRows.length + (irFlight ? 1 : 0) + (showVeg ? 1 : 0);
+  const count =
+    [showHotspots, showPerimeters, showHistoric, showTrails, showVeg, showLand, showSpread, irFlight]
+      .filter(Boolean).length + weatherRows.length;
   if (count === 0) return null;
 
   return (
@@ -155,6 +172,52 @@ export function LegendBar() {
         </svg>
       </summary>
       <div className="rd-legendbar-body">
+        {showHotspots && (
+          <div>
+            <div className="rd-legendbar-caption">Hotspots</div>
+            <HotspotAgeLegend />
+          </div>
+        )}
+        {showPerimeters && (
+          <div className="rd-legendbar-row">
+            <span className="rd-legendbar-label">Perimeter</span>
+            <PerimeterChip />
+          </div>
+        )}
+        {showHistoric && (
+          <div>
+            <div className="rd-legendbar-caption">Historic perimeters</div>
+            <HistoricPerimetersLegend />
+          </div>
+        )}
+        {showTrails && (
+          <div>
+            <div className="rd-legendbar-caption">Trails</div>
+            <TrailsLegend />
+          </div>
+        )}
+        {showVeg && (
+          <div>
+            <div className="rd-legendbar-caption">Vegetation</div>
+            <VegetationLegend />
+          </div>
+        )}
+        {showLand && corneaId && (
+          <div>
+            <div className="rd-legendbar-caption">Land ownership</div>
+            <LandLegend corneaId={corneaId} />
+          </div>
+        )}
+        {weatherRows.map((row) => (
+          <div key={row.product} className="rd-legendbar-row">
+            <span className="rd-legendbar-label">{row.label}</span>
+            {row.stops ? (
+              <GradientLegend stops={row.stops} units={row.units} />
+            ) : (
+              <LegendImg src={row.url} alt={`${row.label} legend`} />
+            )}
+          </div>
+        ))}
         {showSpread && (
           <div className="rd-legendbar-spread">
             <div className="rd-legendbar-caption">{SPREAD_PRODUCT_LABELS[spreadProduct]}</div>
@@ -189,22 +252,6 @@ export function LegendBar() {
             <IrHeatLegend heatTypes={irFlight.heat_types} />
           </div>
         )}
-        {showVeg && (
-          <div>
-            <div className="rd-legendbar-caption">Vegetation</div>
-            <VegetationLegend />
-          </div>
-        )}
-        {weatherRows.map((row) => (
-          <div key={row.product} className="rd-legendbar-weather-row">
-            <span className="rd-legendbar-label">{row.label}</span>
-            {row.stops ? (
-              <GradientLegend stops={row.stops} units={row.units} />
-            ) : (
-              <LegendImg src={row.url} alt={`${row.label} legend`} />
-            )}
-          </div>
-        ))}
       </div>
     </details>
   );

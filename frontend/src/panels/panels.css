@@ -1108,6 +1108,17 @@
   display: flex;
   flex-direction: column;
   gap: 6px;
+  /* With many layers on, scroll inside the card rather than run under the
+     top line of map buttons and the Draw tools under it on the left (they
+     end ~155px down). 260px = that clearance + the card's own summary and
+     padding + its lift over the PyreCast credit. */
+  max-height: calc(100dvh - var(--timeline-h) - 260px);
+  overflow-y: auto;
+}
+/* The row keys indent under their checkbox; the map key has none. */
+.rd-legendbar .rd-hist-legend,
+.rd-legendbar .rd-land-legend {
+  padding: 2px 0 0;
 }
 
 .rd-app:has(.rd-credit) .rd-legendbar {
@@ -1299,12 +1310,13 @@
   margin-top: 3px;
 }
 
-.rd-legendbar-weather-row {
+/* One-line entries: label, then its ramp or single symbol. */
+.rd-legendbar-row {
   display: flex;
   align-items: center;
   gap: 8px;
 }
-.rd-legendbar-weather-row img {
+.rd-legendbar-row img {
   height: 24px;
   width: 64px;
   object-fit: cover;

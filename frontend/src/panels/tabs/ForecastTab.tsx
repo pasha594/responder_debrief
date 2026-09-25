@@ -16,11 +16,9 @@ import { TrailsRow, VegetationRow } from '../layers/TrailsRow';
 import {
   latestRun,
   useFire,
-  useFireLandStatus,
   useMasterCatalog,
   usePyrecastRuns,
 } from '../../api/queries';
-import { LAND_CLASSES, landChipStyle } from '../../api/nifcLandStatus';
 import {
   nearestPercentile,
   productPercentiles,
@@ -35,13 +33,18 @@ import {
 } from '../../spread/toaBands';
 import { staleBadgeLabel } from '../../spread/runMeta';
 import { trafficAvailable } from '../../map/layers/trafficLayer';
-import { AGE_ORANGE, AGE_PURPLE, AGE_YELLOW } from '../../map/layers/hotspotLayer';
 import { incidentsAvailable } from '../../api/tomtomTraffic';
 import { useStore, type ToaMode } from '../../state/store';
 import { formatDateTime, formatRelative } from '../../utils/format';
 import { GradientLegend } from '../../utils/GradientLegend';
 import { LegendSwatch, ToaBandLegend, ToaTimelineLegend } from '../ToaLegends';
 import { WeatherSection } from './WeatherSection';
+import {
+  HistoricPerimetersLegend,
+  HotspotAgeLegend,
+  LandLegend,
+  PerimeterChip,
+} from '../LayerLegends';
 
 export const SPREAD_PRODUCT_LABELS: Record<SpreadProduct, string> = {
   'time-of-arrival': 'Fire spread (time of arrival)',
@@ -317,33 +320,6 @@ function FireForecastSection({ corneaId }: { corneaId: string }) {
   );
 }
 
-/** The agencies actually in view around this fire, in NIFC's colors, then
- * private land (unshaded) — or where the download stands. */
-function LandLegend({ corneaId }: { corneaId: string }) {
-  const { data, isLoading, isError, bbox } = useFireLandStatus(corneaId, true);
-  const present = useMemo(() => {
-    const cats = new Set(data?.features.map((f) => f.properties.JurisdictionalCategory));
-    return LAND_CLASSES.filter((c) => c.codes.some((code) => cats.has(code)));
-  }, [data]);
-  if (!bbox) return null; // no known origin to look around
-  if (isError) return <div className="rd-land-legend">Couldn't reach NIFC — needs a connection</div>;
-  if (isLoading || !data) return <div className="rd-land-legend">Loading land status…</div>;
-  return (
-    <div className="rd-land-legend" aria-hidden="true">
-      {present.map((c) => (
-        <span key={c.label} className="rd-land-key">
-          <span className="rd-hist-chip" style={landChipStyle(c)} />
-          {c.label}
-        </span>
-      ))}
-      <span className="rd-land-key">
-        <span className="rd-hist-chip rd-land-chip--private" />
-        Private
-      </span>
-    </div>
-  );
-}
-
 function MapLayerToggles({ corneaId }: { corneaId: string }) {
   const hotspots = useStore((s) => s.layers.hotspots.visible);
   const perimeters = useStore((s) => s.layers.perimeters.visible);
@@ -353,17 +329,11 @@ function MapLayerToggles({ corneaId }: { corneaId: string }) {
   return (
     <section className="rd-section">
       <LayerRow label="Hotspots" checked={hotspots} onChange={() => actions.toggleHotspots()}>
-        {hotspots && (
-          <div className="rd-hist-legend" aria-hidden="true">
-            <span className="rd-hist-chip rd-hist-chip--dot" style={{ background: AGE_YELLOW }} /> new
-            <span className="rd-hist-chip rd-hist-chip--dot" style={{ background: AGE_ORANGE }} /> 1 day
-            <span className="rd-hist-chip rd-hist-chip--dot" style={{ background: AGE_PURPLE }} /> 2 days
-          </div>
-        )}
+        {hotspots && <HotspotAgeLegend />}
       </LayerRow>
       <LayerRow
         label="Perimeters"
-        swatch={<span className="rd-perimeter-chip" aria-hidden="true" />}
+        swatch={<PerimeterChip />}
         checked={perimeters}
         onChange={() => actions.togglePerimeters()}
       />
@@ -372,13 +342,7 @@ function MapLayerToggles({ corneaId }: { corneaId: string }) {
         checked={historic}
         onChange={() => actions.toggleHistoricPerimeters()}
       >
-        {historic && (
-          <div className="rd-hist-legend" aria-hidden="true">
-            <span className="rd-hist-chip" style={{ background: '#e0a24a' }} /> recent
-            <span className="rd-hist-chip" style={{ background: '#a5875a' }} /> ~5 yr
-            <span className="rd-hist-chip" style={{ background: '#6f675f' }} /> 10 yr
-          </div>
-        )}
+        {historic && <HistoricPerimetersLegend />}
       </LayerRow>
       <TrailsRow />
       <VegetationRow corneaId={corneaId} />
