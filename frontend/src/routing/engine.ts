@@ -136,9 +136,10 @@ export class OffroadEngine {
    * for a pin on a cell the grid calls impassable. The worker burns rivers
    * under the roads and trails that follow them (SISI: 178 vertices on
    * river cells, where no portal reaches the network), and the nearest
-   * walkable cell can be the far bank: a pin on Company Creek Road was
-   * drawn wading 25 m of the Stehekin River, then sent 7.5 km round by
-   * Harlequin Bridge. */
+   * walkable cell can lie across more river: a pin on Company Creek Road
+   * was drawn wading 25 m of the Stehekin River before joining the road it
+   * was dropped on, and one nearer the far bank of a river that cuts it off
+   * got no route at all (engine.test.ts). */
   snapToNetwork(x: number, y: number, mask: Uint8Array | null): Snapped | null {
     const g = this.graph;
     const W = this.grid.width;
