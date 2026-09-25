@@ -13,14 +13,14 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { lonLatToUtm, utmToLonLat } from '../spread/utm';
 import type { RouteLeg, RouteResult } from '../api/routing';
-import { HybridSearch, searchWindow } from './astar';
+import { HybridSearch, searchWindow, type Window } from './astar';
 import { LEAVE_TRAIL_PENALTY_S, sullivanRate } from './costModel';
 import { OffroadEngine, routeSync } from './engine';
 import type { RoutingGrid } from './gridDecode';
 import { buildHybridGraph } from './hybridGraph';
 import { buildLegs, climbOf, fmtDur, stepsFor } from './legs';
 import { PACE_LUT } from './pacecode';
-import type { Rdg1 } from './rdg1';
+import { KIND, type Rdg1 } from './rdg1';
 import type { RoutingBundle } from './types';
 
 const dir = new URL('./__fixtures__/synthetic/', import.meta.url);
@@ -221,46 +221,135 @@ describe('A* is exact at weight 1', () => {
     return ((seed >>> 0) % 1_000_000) / 1_000_000;
   };
 
+  const w = 30;
+  const h = 24;
+  function randomGrid(blocked: number, maxCode = 120, [sc, sr] = [1, 1], [gc, gr] = [25, 21]) {
+    const grid: RoutingGrid = {
+      width: w, height: h, cell: 30,
+      pace: Uint8Array.from({ length: w * h }, () => (rnd() < blocked ? 255 : 1 + Math.floor(rnd() * maxCode))),
+      veg: new Uint8Array(w * h),
+      dem: Int16Array.from({ length: w * h }, (_, i) => Math.round(1000 + 40 * Math.sin(i / 7) + rnd() * 10)),
+    };
+    // a straight road across the middle row, 2 nodes, decimetres
+    const y = Math.round(12.5 * 300);
+    const rdg = {
+      epsg: 32611, x0: 0, y0: 0,
+      nodes: Int32Array.from([150, y, 8850, y]),
+      from: Uint32Array.from([0]), to: Uint32Array.from([1]),
+      dstart: Uint32Array.from([0, 1]), deltas: Int16Array.from([8700, 0]),
+      name: Uint32Array.from([0xffffffff]), ref: Uint32Array.from([0xffffffff]),
+      note: Uint32Array.from([0xffffffff]), kind: Uint8Array.from([3]), src: Uint8Array.from([1]),
+      sac: Uint8Array.from([0]), flags: Uint8Array.from([0]), strings: [],
+    } as Rdg1;
+    const graph = buildHybridGraph(rdg, grid);
+    const start = { x: sc * 30 + 15, y: sr * 30 + 15, cell: sr * w + sc };
+    const goal = { x: gc * 30 + 15, y: gr * 30 + 15, cell: gr * w + gc };
+    grid.pace[start.cell] = 10;
+    grid.pace[goal.cell] = 10;
+    const run = (weight: number, win: Window) => {
+      const s = new HybridSearch({ grid, graph, mask: null, window: win, start, goal, weight, maxSettled: 1e7 });
+      while (s.step(1e6) === 'running');
+      return s;
+    };
+    return { run, full: searchWindow(grid, start, goal, true) };
+  }
+
   it('matches Dijkstra (weight 0) on 40 random grids with a road', () => {
     for (let t = 0; t < 40; t++) {
-      const w = 30;
-      const h = 24;
-      const grid: RoutingGrid = {
-        width: w, height: h, cell: 30,
-        pace: Uint8Array.from({ length: w * h }, () => (rnd() < 0.12 ? 255 : 1 + Math.floor(rnd() * 120))),
-        veg: new Uint8Array(w * h),
-        dem: Int16Array.from({ length: w * h }, (_, i) => Math.round(1000 + 40 * Math.sin(i / 7) + rnd() * 10)),
-      };
-      // a straight road across the middle row, 2 nodes, decimetres
-      const y = Math.round(12.5 * 300);
-      const rdg = {
-        epsg: 32611, x0: 0, y0: 0,
-        nodes: Int32Array.from([150, y, 8850, y]),
-        from: Uint32Array.from([0]), to: Uint32Array.from([1]),
-        dstart: Uint32Array.from([0, 1]), deltas: Int16Array.from([8700, 0]),
-        name: Uint32Array.from([0xffffffff]), ref: Uint32Array.from([0xffffffff]),
-        note: Uint32Array.from([0xffffffff]), kind: Uint8Array.from([3]), src: Uint8Array.from([1]),
-        sac: Uint8Array.from([0]), flags: Uint8Array.from([0]), strings: [],
-      } as Rdg1;
-      const graph = buildHybridGraph(rdg, grid);
-      const start = { x: 45, y: 45, cell: 1 * w + 1 };
-      const goal = { x: 25 * 30 + 15, y: 21 * 30 + 15, cell: 21 * w + 25 };
-      grid.pace[start.cell] = 10;
-      grid.pace[goal.cell] = 10;
-      const win = searchWindow(grid, start, goal, true);
-      const run = (weight: number) => {
-        const s = new HybridSearch({ grid, graph, mask: null, window: win, start, goal, weight, maxSettled: 1e7 });
-        while (s.step(1e6) === 'running');
-        return s;
-      };
-      const a = run(1);
-      const d = run(0);
+      const { run, full } = randomGrid(0.12);
+      const a = run(1, full);
+      const d = run(0, full);
       expect(a.status).toBe(d.status);
       if (d.status === 'found') {
         expect(Math.abs(a.cost - d.cost)).toBeLessThan(1e-6 * d.cost);
         expect(a.settled).toBeLessThanOrEqual(d.settled);
       }
     }
+  });
+
+  it('exitBound never exceeds the best route that leaves the window (200 random grids and windows)', () => {
+    let worse = 0;
+    let certified = 0;
+    for (let t = 0; t < 200; t++) {
+      // start (col 9, row 6), goal (col 19, row 16), windows from tight to
+      // loose around them, so the best route is often outside the window
+      const { run, full } = randomGrid(0.3, 20, [9, 6], [19, 16]);
+      const best = run(1, full);
+      if (best.status !== 'found') continue;
+      const win: Window = { c0: Math.floor(rnd() * 9), r0: Math.floor(rnd() * 6),
+        c1: 20 + Math.floor(rnd() * 11), r1: 17 + Math.floor(rnd() * 8) };
+      const s = run(1, win);
+      const inWin = s.status === 'found' ? s.cost : Infinity;
+      const tol = 1e-5 * best.cost;
+      expect(inWin).toBeGreaterThanOrEqual(best.cost - tol);
+      // the window's route, or else a lower bound on the one outside it
+      expect(Math.min(inWin, s.exitBound)).toBeLessThanOrEqual(best.cost + tol);
+      if (inWin > best.cost + tol) worse++;
+      if (s.exitBound >= inWin) {
+        certified++;
+        expect(Math.abs(inWin - best.cost)).toBeLessThan(tol);
+      }
+    }
+    // both cases occur (11 and 28 with this seed)
+    expect(worse).toBeGreaterThan(5);
+    expect(certified).toBeGreaterThan(5);
+  });
+});
+
+describe('a route the search window leaves out', () => {
+  // 200x60 flat cells. A river along row 30 is impassable from col 20
+  // east; its west end (cols 0–19, rows 28–32) is slow brush. Bridge Road
+  // runs from A (col 40, row 20) east to a bridge at col 180, and back west
+  // to B (col 40, row 40): 9 km. The first window (A–B padded 2 km) holds
+  // only cols 0–107, so it sees the brush but not the bridge. SISI: a pin
+  // across the Stehekin River got a 23 h climb; the 14 h route used a bridge
+  // outside the window.
+  const W = 200;
+  const H = 60;
+  const X0 = 500_010;
+  const Y0 = 4_900_020;
+  function riverWithBridge() {
+    const grid: RoutingGrid = { width: W, height: H, cell: 30, pace: new Uint8Array(W * H).fill(40),
+      veg: new Uint8Array(W * H).fill(1), dem: new Int16Array(W * H).fill(600) };
+    for (let c = 0; c < W; c++) grid.pace[30 * W + c] = 255;
+    for (let r = 28; r <= 32; r++) for (let c = 0; c < 20; c++) grid.pace[r * W + c] = 200;
+    const rdg = {
+      epsg: 32611, x0: X0, y0: Y0,
+      nodes: Int32Array.from([12150, 6150, 12150, 12150]),
+      from: Uint32Array.from([0]), to: Uint32Array.from([1]),
+      dstart: Uint32Array.from([0, 5]),
+      deltas: Int16Array.from([21000, 0, 21000, 0, 0, 6000, -21000, 0, -21000, 0]),
+      name: Uint32Array.from([0]), ref: Uint32Array.from([0xffffffff]), note: Uint32Array.from([0xffffffff]),
+      kind: Uint8Array.from([KIND.unpaved]), src: Uint8Array.from([1]), sac: Uint8Array.from([0]),
+      flags: Uint8Array.from([0]), strings: ['Bridge Road'],
+    } as Rdg1;
+    const b = { ...bundle, warnings: [], crs: { epsg: 32611, zone: 11, northern: true },
+      grid: { x0: X0, y0: Y0, cell_m: 30, width: W, height: H } } as RoutingBundle;
+    const graph = buildHybridGraph(rdg, grid);
+    return { grid, graph, e: new OffroadEngine(b, grid, rdg, graph) };
+  }
+  const A = { x: 1215, y: 615, cell: 20 * W + 40 };
+  const B = { x: 1215, y: 1215, cell: 40 * W + 40 };
+
+  it('the first window finds only the slow way round, and knows a cheaper one may be outside', () => {
+    const { grid, graph } = riverWithBridge();
+    const win = searchWindow(grid, A, B);
+    expect(win.c1).toBeLessThan(180);
+    const s = new HybridSearch({ grid, graph, mask: null, window: win, start: A, goal: B, weight: 1, maxSettled: 1e7 });
+    while (s.step(1e6) === 'running');
+    expect(s.status).toBe('found');
+    expect(s.cost).toBeGreaterThan(20_000); // through the brush
+    expect(s.exitBound).toBeLessThan(s.cost);
+  });
+
+  it('takes the bridge outside the window, as an exact route', () => {
+    const { e } = riverWithBridge();
+    const r = ok(routeSync(e, e.toLonLat(A.x, A.y), e.toLonLat(B.x, B.y), { avoidPerimeter: false }));
+    const road = r.legs!.filter((l) => l.kind === 'road').reduce((s, l) => s + l.distanceM, 0);
+    expect(road).toBeGreaterThan(8_900);
+    expect(r.legs!.some((l) => l.name === 'Bridge Road')).toBe(true);
+    expect(r.durationS).toBeLessThan(10_000);
+    expect(r.notes!.some((n) => n.code === 'WEIGHTED')).toBe(false);
   });
 });
 

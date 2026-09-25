@@ -18,13 +18,16 @@
  * attached — shown only if the user asks. The engine never falls back to an
  * online engine: they don't know where the fire is.
  *
- * Search passes: (1) window around A–B, weight 1, 2.5M settled; if the
- * window has no path, (2) the whole grid, weight 1.2, 4M; if (1) ran out
- * of budget, (3) the window at weight 1.6 (WEIGHTED: near-optimal).
+ * Search passes: (1) window around A–B, weight 1, 2.5M settled; if a
+ * route that leaves the window could be cheaper than (1)'s (exitBound),
+ * (1b) a window wide enough to hold any cheaper route, weight 1, 4M; if
+ * the window has no path, (2) the whole grid, weight 1.2, 4M; if (1) ran
+ * out of budget, (3) the window at weight 1.6 (WEIGHTED: near-optimal).
  */
 import type { RouteNote, RouteResult } from '../api/routing';
 import { lonLatToUtm, utmToLonLat } from '../spread/utm';
 import { HybridSearch, searchWindow, type Window } from './astar';
+import { H_PACE } from './costModel';
 import { decodeGrid, type RoutingGrid } from './gridDecode';
 import { buildHybridGraph, cellOf, type HybridGraph } from './hybridGraph';
 import { buildLegs, fmtMiles, fordsText, stepsFor, totals, type Piece } from './legs';
@@ -163,13 +166,25 @@ export class OffroadEngine {
         yield s.settled;
       }
     };
+    const same = (p: Window, q: Window) => p.c0 === q.c0 && p.r0 === q.r0 && p.c1 === q.c1 && p.r1 === q.r1;
     const win = searchWindow(this.grid, a, b);
     const s1 = yield* run(win, 1.0, PASS1_CAP, this);
-    if (s1.status === 'found') return { s: s1, status: 'found', weighted: false };
+    if (s1.status === 'found') {
+      if (s1.exitBound >= s1.cost) return { s: s1, status: 'found', weighted: false };
+      // A cheaper route may leave the window (SISI: a river and the fire
+      // left a 23 h climb inside it; the best route, 14 h, went round by a
+      // bridge outside it). Any route that leaves a window padded by
+      // cost / (2 · H_PACE) costs more than s1, so the best route inside
+      // that one is the best on the whole grid.
+      const wide = searchWindow(this.grid, a, b, false, s1.cost / (2 * H_PACE));
+      if (same(wide, win)) return { s: s1, status: 'found', weighted: false };
+      const s2 = yield* run(wide, 1.0, PASS2_CAP, this);
+      if (s2.status === 'found') return { s: s2, status: 'found', weighted: false };
+      return { s: s1, status: 'found', weighted: true };
+    }
     const full = searchWindow(this.grid, a, b, true);
-    const same = full.c0 === win.c0 && full.r0 === win.r0 && full.c1 === win.c1 && full.r1 === win.r1;
     if (s1.status === 'exhausted') {
-      if (same) return { s: null, status: 'exhausted', weighted: false };
+      if (same(full, win)) return { s: null, status: 'exhausted', weighted: false };
       const s2 = yield* run(full, 1.2, PASS2_CAP, this);
       return { s: s2.status === 'found' ? s2 : null, status: s2.status, weighted: true };
     }

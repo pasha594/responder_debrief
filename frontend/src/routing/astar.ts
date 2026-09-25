@@ -26,6 +26,12 @@
  * h = straight-line distance · H_PACE · weight (admissible at weight 1).
  * `step(budget)` settles up to `budget` states and returns, so the worker
  * can yield between slices and drop a superseded search.
+ *
+ * The window is a guess, and a river or the fire can push the best route
+ * outside it. `exitBound` is a lower bound on any route that leaves the
+ * window: the least g + step + h over settled states with a usable
+ * neighbour outside. At weight 1, a found route with cost <= exitBound is
+ * the best on the whole grid; otherwise the engine searches wider.
  */
 import { H_PACE, LEAVE_TRAIL_PENALTY_S, alphaFast, gradeDeg } from './costModel';
 import type { RoutingGrid } from './gridDecode';
@@ -66,6 +72,8 @@ export class HybridSearch {
   settled = 0;
   status: SearchStatus = 'running';
   cost = Infinity;
+  /** Least possible cost of a route that leaves the window (see header). */
+  exitBound = Infinity;
   // Float32: seconds to ~0.01 s precision are plenty, and it cuts the
   // largest (whole-grid fallback) search by a third on a phone.
   private readonly g: Float32Array;
@@ -134,6 +142,13 @@ export class HybridSearch {
     return Math.hypot(x - this.inp.goal.x, y - this.inp.goal.y) * H_PACE * this.inp.weight;
   }
 
+  /** A route can leave the window at (x, y) having cost at least `g` so
+   * far; the rest costs at least the unweighted h. */
+  private noteExit(g: number, x: number, y: number): void {
+    const f = g + Math.hypot(x - this.inp.goal.x, y - this.inp.goal.y) * H_PACE;
+    if (f < this.exitBound) this.exitBound = f;
+  }
+
   private cellBlocked(cell: number): boolean {
     const m = this.inp.mask;
     return !Number.isFinite(PACE_LUT[this.inp.grid.pace[cell]]) || (!!m && m[cell] !== 0);
@@ -199,12 +214,20 @@ export class HybridSearch {
           for (let d = 0; d < 8; d++) {
             const nc = lc + DC[d];
             const nr = lr + DR[d];
-            if (nc < 0 || nr < 0 || nc >= this.ww || nr >= this.wh) continue;
+            const diag = d >= 4;
+            const dh = diag ? k * SQRT2 : k;
+            if (nc < 0 || nr < 0 || nc >= this.ww || nr >= this.wh) {
+              const gc = nc + this.inp.window.c0;
+              const gr = nr + this.inp.window.r0;
+              if (gc >= 0 && gr >= 0 && gc < W && gr < grid.height
+                && !this.cellBlocked(cu + DR[d] * W + DC[d])) {
+                this.noteExit(this.g[u] + dh * H_PACE, ux + DC[d] * k, uy + DR[d] * k);
+              }
+              continue;
+            }
             const cv = cu + DR[d] * W + DC[d];
             if (this.cellBlocked(cv)) continue;
-            const diag = d >= 4;
             if (diag && (this.cellBlocked(cu + DC[d]) || this.cellBlocked(cu + DR[d] * W))) continue;
-            const dh = diag ? k * SQRT2 : k;
             const zv = grid.dem[cv];
             const dz = zu === -32768 || zv === -32768 ? 0 : zv - zu;
             const cost = dh * 0.5 * (pu + PACE_LUT[grid.pace[cv]]) * alphaFast(gradeDeg(dz, dh));
@@ -225,7 +248,13 @@ export class HybridSearch {
         const node = u - wc;
         for (let i = graph.adjStart[node]; i < graph.adjStart[node + 1]; i++) {
           const v = graph.adjTo[i];
-          if (this.nodeBlocked(v)) continue;
+          if (this.nodeBlocked(v)) {
+            const cv = graph.cell[v];
+            if (cv >= 0 && this.cellState(cv) < 0 && !(this.inp.mask && this.inp.mask[cv])) {
+              this.noteExit(this.g[u] + graph.adjCost[i], graph.x[v], graph.y[v]);
+            }
+            continue;
+          }
           this.relax(u, wc + v, graph.adjCost[i], graph.x[v], graph.y[v]);
         }
         const cn = graph.cell[node];
@@ -263,11 +292,12 @@ export class HybridSearch {
   }
 }
 
-/** bbox(A, B) padded by clamp(½|AB|, 2 km, 15 km), clamped to the grid. */
+/** bbox(A, B) padded by clamp(½|AB|, 2 km, 15 km), or by `minPadM` if
+ * that is more, clamped to the grid. */
 export function searchWindow(grid: RoutingGrid, a: { x: number; y: number },
-  b: { x: number; y: number }, full = false): Window {
+  b: { x: number; y: number }, full = false, minPadM = 0): Window {
   if (full) return { c0: 0, r0: 0, c1: grid.width, r1: grid.height };
-  const pad = Math.max(2000, Math.min(15000, 0.5 * Math.hypot(a.x - b.x, a.y - b.y)));
+  const pad = Math.max(minPadM, 2000, Math.min(15000, 0.5 * Math.hypot(a.x - b.x, a.y - b.y)));
   const k = grid.cell;
   return {
     c0: Math.max(0, Math.floor((Math.min(a.x, b.x) - pad) / k)),
