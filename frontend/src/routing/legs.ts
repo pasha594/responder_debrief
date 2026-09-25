@@ -1,0 +1,303 @@
+/**
+ * Search path → route legs, times, climb and step text (pure).
+ *
+ * Pieces come from the engine: graph runs (node + RDG1 edge sequences) and
+ * cross-country runs (already smoothed grid-metre polylines). Graph runs
+ * split into legs where the way's name/kind changes; a cross-country run
+ * under 50 m between two graph legs is `minor` (drawn and counted, but no
+ * step and no join marker). Times: graph legs by Sullivan tertiles on the
+ * smoothed node elevations; cross-country legs by the sampler (GET pace ×
+ * α, scaled by the tertile ratios). Legs are treated as fully correlated —
+ * the range totals are sums of the per-leg fast and slow ends.
+ */
+import type { RouteLeg, RouteStep } from '../api/routing';
+import { SAC_FACTOR, gradeDeg, sullivanRate } from './costModel';
+import type { RoutingGrid } from './gridDecode';
+import { cellOf, demAt, type HybridGraph } from './hybridGraph';
+import { FLAG, KIND, SRC, str, type Rdg1 } from './rdg1';
+import { tallyPolyline } from './sampler';
+import { STREAM_BIT, vegClass } from './vegClasses';
+
+export type Piece =
+  | { kind: 'graph'; nodes: number[]; edges: number[] }
+  | { kind: 'xc'; pts: [number, number][] };
+
+export interface LegContext {
+  grid: RoutingGrid;
+  mask: Uint8Array | null;
+  graph: HybridGraph;
+  rdg: Rdg1;
+  toLonLat: (x: number, y: number) => [number, number];
+}
+
+const SAMPLE_M = 15;
+const CLIMB_HYSTERESIS_M = 3;
+const MINOR_XC_M = 50;
+const M_PER_MI = 1609.344;
+const FT_PER_M = 3.28084;
+
+/** Climb/descent with hysteresis: count only once a change from the last
+ * anchor reaches 3 m (30 m DEM noise must not read as climbing). */
+export function climbOf(zs: number[]): { climb: number; descent: number } {
+  let climb = 0;
+  let descent = 0;
+  if (!zs.length) return { climb, descent };
+  let anchor = zs[0];
+  for (const z of zs) {
+    const d = z - anchor;
+    if (d >= CLIMB_HYSTERESIS_M) {
+      climb += d;
+      anchor = z;
+    } else if (d <= -CLIMB_HYSTERESIS_M) {
+      descent -= d;
+      anchor = z;
+    }
+  }
+  return { climb, descent };
+}
+
+function densify(pts: [number, number][], step: number): [number, number][] {
+  const out: [number, number][] = pts.length ? [pts[0]] : [];
+  for (let i = 0; i + 1 < pts.length; i++) {
+    const [x0, y0] = pts[i];
+    const [x1, y1] = pts[i + 1];
+    const n = Math.max(1, Math.ceil(Math.hypot(x1 - x0, y1 - y0) / step));
+    for (let k = 1; k <= n; k++) out.push([x0 + ((x1 - x0) * k) / n, y0 + ((y1 - y0) * k) / n]);
+  }
+  return out;
+}
+
+function sourceOf(src: number): RouteLeg['source'] {
+  return src === SRC.usfs ? 'usfs' : src === SRC.blm ? 'blm' : src === SRC.nps ? 'nps' : 'osm';
+}
+
+function graphLeg(ctx: LegContext, nodes: number[], edges: number[]): RouteLeg {
+  const { graph: g, rdg } = ctx;
+  const e0 = edges[0];
+  let dist = 0;
+  let typ = 0;
+  let fast = 0;
+  let slow = 0;
+  for (let i = 0; i + 1 < nodes.length; i++) {
+    const u = nodes[i];
+    const v = nodes[i + 1];
+    const dh = Math.hypot(g.x[v] - g.x[u], g.y[v] - g.y[u]);
+    const th = gradeDeg(g.z[v] - g.z[u], dh);
+    const sac = SAC_FACTOR[rdg.sac[edges[i]]] ?? 1;
+    dist += dh;
+    typ += (dh / sullivanRate(th, 'mod')) * sac;
+    fast += (dh / sullivanRate(th, 'high')) * sac;
+    slow += (dh / sullivanRate(th, 'low')) * sac;
+  }
+  const { climb, descent } = climbOf(nodes.map((n) => g.z[n]));
+  const kind = rdg.kind[e0];
+  const flags = rdg.flags[e0];
+  const note = str(rdg, rdg.note[e0]);
+  return {
+    kind: kind === KIND.paved || kind === KIND.unpaved || kind === KIND.track ? 'road' : 'trail',
+    coordinates: nodes.map((n) => ctx.toLonLat(g.x[n], g.y[n])),
+    distanceM: dist,
+    climbM: climb,
+    descentM: descent,
+    durationS: typ,
+    durationRangeS: [fast, slow],
+    name: str(rdg, rdg.name[e0]),
+    ref: str(rdg, rdg.ref[e0]),
+    source: sourceOf(rdg.src[e0]),
+    restricted: note ?? (flags & FLAG.restricted ? 'Access restricted (OSM)' : null),
+  };
+}
+
+function xcLeg(ctx: LegContext, pts: [number, number][]): RouteLeg {
+  const { grid, mask } = ctx;
+  const t = tallyPolyline(grid, mask, pts);
+  const dense = densify(pts, SAMPLE_M);
+  const vegM: Record<number, number> = {};
+  const runs: { veg: number; from: number; to: number }[] = [];
+  let crossings = 0;
+  let inStream = false;
+  let dist = 0;
+  for (let j = 0; j + 1 < dense.length; j++) {
+    const [x0, y0] = dense[j];
+    const [x1, y1] = dense[j + 1];
+    const d = Math.hypot(x1 - x0, y1 - y0);
+    dist += d;
+    const cell = cellOf(grid, (x0 + x1) / 2, (y0 + y1) / 2);
+    const vb = cell >= 0 ? grid.veg[cell] : 0;
+    const cls = vegClass(vb).id;
+    vegM[cls] = (vegM[cls] ?? 0) + d;
+    const last = runs[runs.length - 1];
+    if (last && last.veg === cls) last.to = j + 1;
+    else runs.push({ veg: cls, from: j, to: j + 1 });
+    const s = (vb & STREAM_BIT) !== 0;
+    if (s && !inStream) crossings++;
+    inStream = s;
+  }
+  const { climb, descent } = climbOf(dense.map(([x, y]) => demAt(grid, x, y)));
+  return {
+    kind: 'xc',
+    coordinates: dense.map(([x, y]) => ctx.toLonLat(x, y)),
+    distanceM: dist,
+    climbM: climb,
+    descentM: descent,
+    durationS: t.cost,
+    durationRangeS: [t.fast, t.slow],
+    vegM,
+    vegRuns: runs,
+    streamCrossings: crossings,
+  };
+}
+
+function wayKey(rdg: Rdg1, e: number): string {
+  const k = rdg.kind[e];
+  const road = k === KIND.paved || k === KIND.unpaved || k === KIND.track;
+  return `${rdg.name[e]}|${rdg.ref[e]}|${road ? 'r' : 't'}`;
+}
+
+export function buildLegs(ctx: LegContext, pieces: Piece[]): RouteLeg[] {
+  const legs: RouteLeg[] = [];
+  for (const p of pieces) {
+    if (p.kind === 'xc') {
+      if (p.pts.length >= 2) legs.push(xcLeg(ctx, p.pts));
+      continue;
+    }
+    let start = 0;
+    for (let i = 1; i <= p.edges.length; i++) {
+      if (i === p.edges.length || wayKey(ctx.rdg, p.edges[i]) !== wayKey(ctx.rdg, p.edges[start])) {
+        legs.push(graphLeg(ctx, p.nodes.slice(start, i + 1), p.edges.slice(start, i)));
+        start = i;
+      }
+    }
+  }
+  for (let i = 1; i + 1 < legs.length; i++) {
+    const l = legs[i];
+    if (l.kind === 'xc' && l.distanceM < MINOR_XC_M && legs[i - 1].kind !== 'xc'
+        && legs[i + 1].kind !== 'xc') {
+      l.minor = true;
+    }
+  }
+  return legs.filter((l) => l.distanceM > 0.5);
+}
+
+export interface RouteTotals {
+  distanceM: number;
+  durationS: number;
+  rangeS: [number, number];
+  climbM: number;
+  descentM: number;
+  trailM: number;
+  xcM: number;
+}
+
+export function totals(legs: RouteLeg[]): RouteTotals {
+  const t: RouteTotals = { distanceM: 0, durationS: 0, rangeS: [0, 0], climbM: 0, descentM: 0, trailM: 0, xcM: 0 };
+  for (const l of legs) {
+    t.distanceM += l.distanceM;
+    t.climbM += l.climbM;
+    t.descentM += l.descentM;
+    if (l.kind === 'xc' || l.kind === 'gap') t.xcM += l.distanceM;
+    else t.trailM += l.distanceM;
+    if (l.durationS != null) {
+      t.durationS += l.durationS;
+      t.rangeS[0] += l.durationRangeS?.[0] ?? l.durationS;
+      t.rangeS[1] += l.durationRangeS?.[1] ?? l.durationS;
+    }
+  }
+  return t;
+}
+
+// ---------- text ----------
+
+export function fmtMiles(m: number): string {
+  const mi = m / M_PER_MI;
+  return mi < 0.1 ? `${Math.round(m * FT_PER_M / 10) * 10} ft` : `${mi.toFixed(1)} mi`;
+}
+
+export function fmtFeet(m: number): string {
+  return `${(Math.round((m * FT_PER_M) / 10) * 10).toLocaleString('en-US')} ft`;
+}
+
+/** < 60 min → nearest minute; else nearest 5 min. */
+export function fmtDur(s: number): string {
+  const min = s / 60;
+  if (min < 60) return `${Math.max(1, Math.round(min))} min`;
+  const r = Math.round(min / 5) * 5;
+  const h = Math.floor(r / 60);
+  const mm = r % 60;
+  return mm ? `${h} h ${String(mm).padStart(2, '0')} min` : `${h} h`;
+}
+
+function fmtMinRange(l: RouteLeg): string {
+  if (l.durationS == null) return '';
+  const [a, b] = l.durationRangeS ?? [l.durationS, l.durationS];
+  return ` — about ${fmtDur(l.durationS)} (${Math.round(a / 60)}–${Math.round(b / 60)} min)`;
+}
+
+const DIRS = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
+function bearing(a: [number, number], b: [number, number]): string {
+  const dx = (b[0] - a[0]) * Math.cos((a[1] * Math.PI) / 180);
+  const dy = b[1] - a[1];
+  const deg = ((Math.atan2(dx, dy) * 180) / Math.PI + 360) % 360;
+  return DIRS[Math.round(deg / 45) % 8];
+}
+
+function ll(p: [number, number]): string {
+  return `${p[1].toFixed(5)}, ${p[0].toFixed(5)}`;
+}
+
+function wayLabel(l: RouteLeg): string {
+  if (l.name) return l.name;
+  if (l.ref) return l.kind === 'road' ? `road ${l.ref}` : `trail ${l.ref}`;
+  return l.kind === 'road' ? 'unnamed road' : 'unnamed trail';
+}
+
+function climbText(l: RouteLeg): string {
+  const up = l.climbM >= 3 ? `↑ ${fmtFeet(l.climbM)}` : '';
+  const dn = l.descentM >= 3 ? `↓ ${fmtFeet(l.descentM)}` : '';
+  return [up, dn].filter(Boolean).join(' ');
+}
+
+function dominantVeg(l: RouteLeg): string {
+  const entries = Object.entries(l.vegM ?? {}).sort((a, b) => b[1] - a[1]);
+  if (!entries.length) return '';
+  const top = entries.slice(0, 2).filter(([, m], i) => i === 0 || m > 0.25 * l.distanceM);
+  return top.map(([id]) => vegClass(Number(id)).short).join(' and ');
+}
+
+export function stepsFor(legs: RouteLeg[]): RouteStep[] {
+  const steps: RouteStep[] = [];
+  let first = true;
+  for (let i = 0; i < legs.length; i++) {
+    const l = legs[i];
+    if (l.minor) continue;
+    const c = l.coordinates;
+    if (l.kind === 'xc') {
+      const veg = dominantVeg(l);
+      const cross = l.streamCrossings
+        ? `, crossing ${l.streamCrossings} stream${l.streamCrossings > 1 ? 's' : ''}` : '';
+      const lead = first ? 'Head cross-country' : `Leave the ${legs[i - 1]?.kind === 'road' ? 'road' : 'trail'} at ${ll(c[0])}; go cross-country`;
+      const climb = climbText(l);
+      steps.push({
+        text: `${lead} ${bearing(c[0], c[c.length - 1])} ${fmtMiles(l.distanceM)}`
+          + `${veg ? ` through ${veg}` : ''}${cross}${climb ? `, ${climb}` : ''}${fmtMinRange(l)}`,
+        distanceM: l.distanceM,
+      });
+    } else if (l.kind === 'gap') {
+      steps.push({ text: `Straight line ${fmtMiles(l.distanceM)} to the pin — not modeled, not timed`, distanceM: l.distanceM });
+    } else {
+      const prev = legs.slice(0, i).reverse().find((p) => !p.minor);
+      const label = wayLabel(l);
+      if (prev?.kind === 'xc') steps.push({ text: `Join ${label} at ${ll(c[0])}`, distanceM: 0 });
+      const verb = l.kind === 'road' ? (l.name || l.ref ? 'Continue on' : 'Follow') : 'Follow';
+      const climb = climbText(l);
+      const restr = l.restricted ? ` · Restricted: ${l.restricted}` : '';
+      steps.push({
+        text: `${verb} ${label} ${fmtMiles(l.distanceM)}${climb ? `, ${climb}` : ''}${fmtMinRange(l)}${restr}`,
+        distanceM: l.distanceM,
+      });
+    }
+    first = false;
+  }
+  steps.push({ text: 'Arrive at B', distanceM: 0 });
+  return steps;
+}

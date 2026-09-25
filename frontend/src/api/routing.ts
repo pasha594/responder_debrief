@@ -32,6 +32,44 @@ export interface RouteStep {
   distanceM: number;
 }
 
+export type RouteEngine = 'tomtom' | 'osrm' | 'ors' | 'valhalla' | 'offroad';
+
+/**
+ * One piece of a Walk route (offline router / online fallback). Road and
+ * trail legs draw solid; 'xc' (cross-country, modeled) draws dashed and
+ * coloured by vegetation; 'gap' is a straight untimed line to a pin the
+ * online engine could not reach; 'net' is an online-engine segment.
+ */
+export interface RouteLeg {
+  kind: 'road' | 'trail' | 'net' | 'xc' | 'gap';
+  coordinates: [number, number][];
+  distanceM: number;
+  climbM: number;
+  descentM: number;
+  /** Typical seconds; null for untimed gap legs. */
+  durationS: number | null;
+  /** [fast, slow] seconds. */
+  durationRangeS?: [number, number];
+  name?: string | null;
+  ref?: string | null;
+  source?: 'osm' | 'usfs' | 'blm' | 'nps' | null;
+  /** Official restriction text (routes use the trail anyway). */
+  restricted?: string | null;
+  /** xc only: horizontal metres by vegetation class id. */
+  vegM?: Record<number, number>;
+  /** xc only: coordinate index ranges of constant vegetation class. */
+  vegRuns?: { veg: number; from: number; to: number }[];
+  streamCrossings?: number;
+  /** A short cross-country hop between two trail legs (no step, no join). */
+  minor?: boolean;
+}
+
+export interface RouteNote {
+  level: 'info' | 'warn';
+  code: string;
+  text: string;
+}
+
 export interface RouteResult {
   geometry: { type: 'LineString'; coordinates: [number, number][] };
   distanceM: number;
@@ -39,7 +77,25 @@ export interface RouteResult {
   /** Seconds of the duration attributable to current traffic (TomTom only). */
   trafficDelayS: number | null;
   steps: RouteStep[];
-  engine: 'tomtom' | 'osrm' | 'ors' | 'valhalla';
+  engine: RouteEngine;
+  /** Walk only (additive; the drive engines never set these). */
+  legs?: RouteLeg[];
+  /** [fast, slow] seconds for the timed legs. */
+  durationRangeS?: [number, number];
+  /** True when any part is a model (the offline router), not an engine. */
+  modeled?: boolean;
+  notes?: RouteNote[];
+  provenance?: {
+    bundleId: string;
+    builtAt: string;
+    perimeterDate: string | null;
+    avoidPerimeter: boolean;
+    cellM: number;
+    weighted: boolean;
+    ms: number;
+    landfire?: string | null;
+    osmDate?: string | null;
+  };
 }
 
 const TOMTOM_KEY = import.meta.env.VITE_TOMTOM_KEY as string | undefined;
@@ -261,6 +317,12 @@ export async function fetchRoute(
     }
     return routeOsrm(a, b);
   }
+  return routeHikeOnline(a, b);
+}
+
+/** The online foot engines (ORS foot-hiking, else FOSSGIS Valhalla) — the
+ * Walk fallback outside a fire's offline routing area. */
+export async function routeHikeOnline(a: LonLat, b: LonLat): Promise<RouteResult> {
   if (ORS_KEY) {
     try {
       return await routeOrs(a, b);
