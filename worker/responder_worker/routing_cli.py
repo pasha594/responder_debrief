@@ -71,6 +71,23 @@ def _pad(b, d=0.01):
     return (b[0] - d, b[1] - d, b[2] + d, b[3] + d)
 
 
+def us_regions(client) -> list[dict]:
+    """Geofabrik's US leaf regions, or a loud failure.
+
+    A layout change in the index (it once re-parented every state) makes
+    us_leaf_regions match few or no regions. Left to the per-fire guard in
+    run_shard, every fire would then record 'osm region unavailable' and,
+    after ROUTING_BACKOFF_FAILURES runs, sit in a 24 h backoff nationwide.
+    Raising here fails the job once, before any fire records a failure."""
+    regions = osm_extract.us_leaf_regions(osm_extract.load_index(client))
+    if len(regions) < config.ROUTING_MIN_US_REGIONS:
+        raise RuntimeError(
+            f"Geofabrik index gave {len(regions)} US leaf regions "
+            f"(expected >= {config.ROUTING_MIN_US_REGIONS}); its layout changed? "
+            "See osm_extract.us_leaf_regions")
+    return regions
+
+
 def make_plan(client, storage, *, fires: list[dict], regions_all: list[dict] | None,
               shards: int, priority: list[str], force: bool, now: datetime,
               max_fires: int | None = None, deadline_passed=lambda: False,
@@ -142,7 +159,7 @@ def cmd_routing_plan(args) -> int:
         fires = catalog.get("fires") or []
         if args.fire:
             fires = [f for f in fires if _match(f, args.fire)]
-        regions = osm_extract.us_leaf_regions(osm_extract.load_index(client))
+        regions = us_regions(client)
         plan = make_plan(client, storage, fires=fires, regions_all=regions, shards=args.shards,
                          priority=args.priority_fires.split(","), force=args.force, now=_now(),
                          max_fires=args.max_fires, deadline_passed=frames.deadline_passed)
@@ -182,7 +199,9 @@ def run_shard(client, storage, plan: dict, shard: int, *, workdir: Path, local_p
             for r in e["regions"]:
                 if r not in regions_needed:
                     regions_needed.append(r)
-        index = {r["id"]: r for r in osm_extract.us_leaf_regions(osm_extract.load_index(client))}
+        # reloaded for today's PBF URLs; a short list raises before any fire
+        # records a failure (us_regions)
+        index = {r["id"]: r for r in us_regions(client)} if regions_needed else {}
         for rid in regions_needed:
             if deadline_passed():
                 break
@@ -280,8 +299,7 @@ def cmd_routing_one(args) -> int:
             if not fires:
                 log(f"[routing-one] no active fire matches {args.fire!r}")
                 return 2
-        regions = None if args.local_pbf else osm_extract.us_leaf_regions(
-            osm_extract.load_index(client))
+        regions = None if args.local_pbf else us_regions(client)
         plan = make_plan(client, storage, fires=fires[:1], regions_all=regions, shards=1,
                          priority=[], force=True, now=now, adhoc=adhoc)
         plan["trails"] = None if args.trails_src else _read_json(storage, client, "catalogs/trails.json")

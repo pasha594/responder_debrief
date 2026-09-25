@@ -311,6 +311,10 @@ LANDFIRE_ORIGIN_Y = 3267405.0
 TNM_PRODUCTS = "https://tnmaccess.nationalmap.gov/api/v1/products"
 NHD_DATASET = "National Hydrography Dataset (NHD) Best Resolution"
 GEOFABRIK_INDEX = "https://download.geofabrik.de/index-v1.json"
+# The live index had 54 US leaf regions on 2026-09-25 (49 states + DC, PR,
+# USVI, norcal, socal). Fewer than this means its layout changed again, and
+# the routing job fails once instead of backing off every fire.
+ROUTING_MIN_US_REGIONS = 40
 
 ROUTING_RECIPE = 1
 ROUTING_SHARDS_DEFAULT = 4
