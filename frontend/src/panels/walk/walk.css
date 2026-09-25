@@ -1,0 +1,19 @@
+/* Walk route card (kept out of panels.css, which other work edits). */
+.rd-walk { display: flex; flex-direction: column; gap: 6px; font-size: 12px; margin-top: 4px; }
+.rd-walk-time strong { font-size: 14px; }
+.rd-walk-muted { color: var(--color-text-muted); }
+.rd-walk-split { display: flex; height: 5px; border-radius: 3px; overflow: hidden; background: var(--color-border, #444); }
+.rd-walk-bar--trail { background: #4aa3ff; }
+.rd-walk-bar--xc { background: repeating-linear-gradient(90deg, #c9a25a 0 6px, transparent 6px 10px); }
+.rd-walk-veg { line-height: 1.6; }
+.rd-walk-veg .rd-hist-chip { vertical-align: -1px; }
+.rd-walk-label { border-left: 3px solid #e0a24a; padding: 4px 8px; background: rgba(224, 162, 74, 0.12); border-radius: 4px; font-weight: 600; }
+.rd-walk-sub { display: block; font-weight: 400; color: var(--color-text-muted); }
+.rd-walk-note--warn { color: #e0a24a; }
+.rd-walk-note--info { color: var(--color-text-muted); }
+.rd-walk-prov { font-size: 11px; color: var(--color-text-muted); }
+.rd-walk-avoid { font-size: 12px; }
+.rd-walk-steps { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 4px; }
+.rd-walk-alt { align-self: flex-start; }
+.rd-trail-walk { margin-top: 6px; font: inherit; font-size: 12px; padding: 3px 10px; border-radius: 12px;
+  border: 1px solid currentColor; background: transparent; color: inherit; cursor: pointer; }

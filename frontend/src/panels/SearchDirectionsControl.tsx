@@ -16,6 +16,9 @@ import {
   type RouteProfile,
 } from '../api/routing';
 import { RANGE_COLORS } from '../map/layers/rangeLayer';
+import { WalkError, routeWalk } from '../api/walkRouting';
+import { useWalkContext } from './walk/useWalkRouting';
+import { WalkRouteDetails } from './walk/WalkRouteDetails';
 import { geolocationAvailable, locateOnce, watchLocation } from '../app/geolocation';
 import { track } from '../app/analytics';
 import { useStore } from '../state/store';
@@ -364,10 +367,31 @@ export function SearchDirectionsControl() {
 
   // ---- all-mode routing: when both ends exist, fetch every profile in
   // parallel (Google-style times row); the ACTIVE profile's result becomes
-  // the drawn route. Profile switches apply instantly from cache. ----
-  type ModeState = import('../api/routing').RouteResult | 'pending' | 'failed';
+  // the drawn route. Profile switches apply instantly from cache. Walk runs
+  // in its own effect (below): it also reruns when the fire's routing
+  // bundle or latest perimeter resolves, which must not refetch the drive
+  // engines. Offline, Drive/Apparatus say so instead of "no route". ----
+  type ModeState =
+    | import('../api/routing').RouteResult
+    | 'pending'
+    | 'failed'
+    | 'offline'
+    | { error: string; alternative?: import('../api/routing').RouteResult };
   const [modes, setModes] = useState<Partial<Record<RouteProfile, ModeState>>>({});
   const endpointsKey = `${directions.a?.coords}|${directions.b?.coords}`;
+  const online = useStore((s) => s.offline.online);
+  const walk = useWalkContext();
+  const walkSeq = useRef(0);
+  const modeError = (p: RouteProfile, st: ModeState | undefined): string | null => {
+    if (st === 'offline') return 'Needs a connection — Walk works offline inside the fire\'s routing area.';
+    if (st && typeof st === 'object' && 'error' in st) return st.error;
+    if (st === 'failed') {
+      return p === 'apparatus'
+        ? 'No apparatus-legal route found for these points.'
+        : 'No route found — try different points.';
+    }
+    return null;
+  };
 
   const applyRoute = (result: import('../api/routing').RouteResult) => {
     setRouteError(null);
@@ -402,6 +426,11 @@ export function SearchDirectionsControl() {
     setRouteError(null);
     track('directions_requested', { modes: profiles.length });
     for (const p of profiles) {
+      if (p === 'hike') continue; // the Walk effect owns it
+      if (!online) {
+        setModes((m) => ({ ...m, [p]: 'offline' }));
+        continue;
+      }
       void fetchRoute(a.coords, b.coords, p)
         .then((result) => {
           if (mySeq !== routeSeq.current) return;
@@ -421,20 +450,50 @@ export function SearchDirectionsControl() {
         });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [endpointsKey]);
+  }, [endpointsKey, online]);
+
+  // ---- Walk: the offline off-road router inside the fire's routing area,
+  // the online foot engines elsewhere (api/walkRouting). ----
+  useEffect(() => {
+    const mySeq = ++walkSeq.current;
+    const { a, b } = directions;
+    if (!a || !b) return;
+    setModes((m) => ({ ...m, hike: 'pending' }));
+    void routeWalk(a.coords, b.coords, walk.ctx())
+      .then((result) => {
+        if (mySeq !== walkSeq.current) return;
+        setModes((m) => ({ ...m, hike: result }));
+        if (useStore.getState().directions.profile === 'hike') applyRoute(result);
+        if (result.engine === 'offroad') {
+          track('walk_route_computed', {
+            engine: result.engine,
+            offline: !navigator.onLine,
+            ms_bucket: (result.provenance?.ms ?? 0) < 250 ? '<250'
+              : (result.provenance?.ms ?? 0) < 1000 ? '<1000' : (result.provenance?.ms ?? 0) < 3000 ? '<3000' : '>=3000',
+            avoided_perimeter: !!result.provenance?.avoidPerimeter,
+          });
+        }
+      })
+      .catch((err: unknown) => {
+        if (mySeq !== walkSeq.current) return;
+        if (err instanceof WalkError && err.code === 'superseded') return;
+        const state: ModeState = err instanceof WalkError
+          ? { error: err.message, alternative: err.alternative }
+          : 'failed';
+        setModes((m) => ({ ...m, hike: state }));
+        if (err instanceof WalkError) track('walk_route_failed', { code: err.code });
+        if (useStore.getState().directions.profile === 'hike') setRouteError(modeError('hike', state));
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [endpointsKey, walk.key]);
 
   // profile switch: apply from cache instantly
   useEffect(() => {
     const cached = modes[directions.profile];
     if (directions.route || !directions.a || !directions.b) return;
-    if (cached && cached !== 'pending' && cached !== 'failed') applyRoute(cached);
-    else if (cached === 'failed') {
-      setRouteError(
-        directions.profile === 'apparatus'
-          ? 'No apparatus-legal route found for these points.'
-          : 'No route found — try different points.',
-      );
-    }
+    const err = modeError(directions.profile, cached);
+    if (err) setRouteError(err);
+    else if (cached && typeof cached === 'object' && !('error' in cached)) applyRoute(cached);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [directions.profile, directions.route, modes]);
 
@@ -483,13 +542,17 @@ export function SearchDirectionsControl() {
               {MODES.map(({ p, label, Icon }) => {
                 const gated = p === 'apparatus' && !apparatusAvailable;
                 const state = modes[p];
+                // Walk leads with the SLOW end of its range (IRPG: time it
+                // with your slowest person).
                 const time =
                   state === 'pending'
                     ? '…'
-                    : state === 'failed'
+                    : state === 'failed' || state === 'offline' || (state && 'error' in state)
                       ? '—'
                       : state
-                        ? fmtDurationShort(state.durationS)
+                        ? state.durationRangeS
+                          ? `≤${fmtDurationShort(state.durationRangeS[1])}`
+                          : fmtDurationShort(state.durationS)
                         : null;
                 return (
                   <button
@@ -500,9 +563,13 @@ export function SearchDirectionsControl() {
                     title={
                       gated
                         ? 'Needs the TomTom key'
-                        : p === 'apparatus'
-                          ? 'Truck routing with typical engine/tender dimensions'
-                          : label
+                        : state === 'offline'
+                          ? 'Needs a connection'
+                          : p === 'apparatus'
+                            ? 'Truck routing with typical engine/tender dimensions'
+                            : p === 'hike'
+                              ? "Walk: trail + cross-country model inside this fire's routing area (works offline); online engine elsewhere"
+                              : label
                     }
                     aria-label={label}
                     onClick={() => actions.setDirectionsProfile(p)}
@@ -573,8 +640,22 @@ export function SearchDirectionsControl() {
               {!directions.b && (
                 <div className="rd-sd-note">Click the map or search to set the destination.</div>
               )}
+              {walk.status && directions.profile === 'hike' && modes.hike === 'pending' && (
+                <div className="rd-sd-note">{walk.status}</div>
+              )}
               {routeError && <div className="rd-sd-note rd-sd-error">{routeError}</div>}
-              {route && (
+              {routeError && directions.profile === 'hike' && (() => {
+                const st = modes.hike;
+                const alt = st && typeof st === 'object' && 'error' in st ? st.alternative : undefined;
+                return alt ? (
+                  <button type="button" className="rd-mini-btn rd-walk-alt"
+                    onClick={() => applyRoute(alt)}>
+                    Show the route through the perimeter
+                  </button>
+                ) : null;
+              })()}
+              {route?.legs && <WalkRouteDetails route={route} />}
+              {route && !route.legs && (
                 <div className="rd-sd-result">
                   <div className="rd-sd-summary">
                     <strong>{fmtDuration(route.durationS)}</strong> · {fmtDistance(route.distanceM)}
