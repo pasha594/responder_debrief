@@ -106,6 +106,25 @@ class TestShards:
         assert all(shards), [len(s) for s in shards]
 
 
+class TestRunShard:
+    def test_no_osm_region_fails_instead_of_building_without_roads(self, tmp_path, monkeypatch):
+        # A region-choice bug (the live Geofabrik index once matched no
+        # region for SISI) must fail the fire, never build it without OSM.
+        from responder_worker import osm_extract, routing_cli
+        monkeypatch.setattr(osm_extract, "load_index", lambda client: {"features": []})
+        storage = DryRunStorage(tmp_path / "out")
+        entry = {"cornea_id": "{X}", "fire_key": "x", "slug": "x", "regions": [],
+                 "aoi": rp.aoi_for([-115.0, 44.2], None)}
+        plan = {"shards": [{"shard": 0, "fires": [entry]}], "trails": None}
+
+        def build(*a, **kw):
+            raise AssertionError("must not build")
+        res = routing_cli.run_shard(None, storage, plan, 0, workdir=tmp_path / "w", build=build,
+                                    log=lambda m: None)
+        assert res["failed"] == [{"cornea_id": "{X}", "slug": "x", "error": "osm region unavailable"}]
+        assert storage.get_json(rb.state_key("x"))["failures"] == 1
+
+
 class TestIndexDoc:
     def test_from_pointers_only(self):
         good = {"recipe": config.ROUTING_RECIPE, "descriptor": "/routing/k/bx/bundle.json",

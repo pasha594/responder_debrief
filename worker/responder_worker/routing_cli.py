@@ -207,7 +207,8 @@ def run_shard(client, storage, plan: dict, shard: int, *, workdir: Path, local_p
             result["deferred"].append(e["cornea_id"])
             continue
         parts = extracts.get(fk) or []
-        if not local_pbf and len(parts) < len(e["regions"]):
+        # no region at all is a region-choice bug, never "a fire without roads"
+        if not local_pbf and (not e["regions"] or len(parts) < len(e["regions"])):
             result["failed"].append({"cornea_id": e["cornea_id"], "slug": e.get("slug"),
                                      "error": "osm region unavailable"})
             rb.record_state(storage, fk, ok=False, now=_now(), error="osm region unavailable")

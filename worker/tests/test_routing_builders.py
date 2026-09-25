@@ -171,6 +171,23 @@ class TestGeofabrik:
             "us/idaho", "us/montana"]
         assert osm_extract.regions_for_bbox(regions, (-108, 46, -107.9, 46.1)) == ["us/montana"]
 
+    def test_live_index_shape(self, fixtures):
+        # 12 features of index-v1.json as served 2026-09-25, verbatim: states
+        # are parented to "north-america" (not "us"), California's children
+        # are "norcal"/"socal", and "us", "us-west", "us-pacific" are leaves.
+        index = json.loads((fixtures / "routing" / "geofabrik_index_excerpt.json").read_text())
+        regions = osm_extract.us_leaf_regions(index)
+        assert sorted(r["id"] for r in regions) == [
+            "norcal", "socal", "us/idaho", "us/oregon", "us/washington"]
+        wa = next(r for r in regions if r["id"] == "us/washington")
+        assert wa["pbf"] == "https://download.geofabrik.de/north-america/us/washington-latest.osm.pbf"
+        # the SISI fire's AOI (North Cascades, 2026-09-25)
+        sisi = (-120.984579, 48.238661, -120.661058, 48.464635)
+        assert osm_extract.regions_for_bbox(regions, sisi) == ["us/washington"]
+        # on the BC line: Canada is never picked
+        assert osm_extract.regions_for_bbox(regions, (-120.2, 48.9, -120.0, 49.1)) == ["us/washington"]
+        assert osm_extract.regions_for_bbox(regions, (-119, 35.5, -118, 36.2)) == ["norcal", "socal"]
+
     def test_osm_date(self):
         assert osm_extract.osm_date_from_url(
             "https://download.geofabrik.de/north-america/us/idaho-260923.osm.pbf") == "2026-09-23"

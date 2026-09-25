@@ -33,7 +33,14 @@ from .http import download_to, get
 # ---------------------------------------------------------------------------
 
 def us_leaf_regions(index: dict) -> list[dict]:
-    """Geofabrik index features under 'us' that have no children."""
+    """Geofabrik index features inside the US that have no children.
+
+    The live index (2026-09-25) parents the states to "north-america", not
+    to "us": a state is known by its "us/" id ("us/washington"), and
+    California's children ("norcal", "socal") drop the prefix but have
+    parent "us/california". So a region is in the US when it or an ancestor
+    is "us" or has a "us/" id. "us" itself and the multi-state groupings
+    ("us-west", "us-pacific", also leaves) are never picked."""
     feats = index.get("features") or []
     by_id = {f["properties"]["id"]: f for f in feats if f.get("properties", {}).get("id")}
     parents = {f["properties"].get("parent") for f in feats}
@@ -42,7 +49,7 @@ def us_leaf_regions(index: dict) -> list[dict]:
         seen = set()
         while fid and fid not in seen:
             seen.add(fid)
-            if fid == "us":
+            if fid == "us" or fid.startswith("us/"):
                 return True
             fid = (by_id.get(fid) or {}).get("properties", {}).get("parent")
         return False
