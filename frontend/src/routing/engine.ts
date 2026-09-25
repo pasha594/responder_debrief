@@ -235,6 +235,12 @@ export class OffroadEngine {
         if (!last || last[0] !== c[0] || last[1] !== c[1]) coords.push(c);
       }
     }
+    let fords = 0;
+    for (const l of legs) if (l.kind === 'xc') fords += l.streamCrossings ?? 0;
+    if (fords) {
+      notes.push({ level: 'warn', code: 'XC_STREAM',
+        text: `Cross-country, the route crosses ${fords === 1 ? 'a mapped perennial stream' : `${fords} mapped perennial streams`} with no bridge. Stream size isn't modeled — a crossing may be a river. Check it before you commit.` });
+    }
     if (weighted) notes.push({ level: 'info', code: 'WEIGHTED', text: 'Long search — route is near-optimal, not guaranteed shortest.' });
     if (this.grid.cell > 30) {
       notes.push({ level: 'info', code: 'COARSE_GRID', text: `This fire's terrain model uses ${this.grid.cell} m cells — small cliffs and gullies may be missed.` });

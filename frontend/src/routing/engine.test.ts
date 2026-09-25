@@ -87,6 +87,17 @@ describe('OffroadEngine on the synthetic bundle', () => {
     expect(r.steps[0].text).toMatch(/^Head cross-country N/);
   });
 
+  it('warns about a cross-country crossing of a mapped perennial stream', async () => {
+    // SISI: routes forded the Stehekin River and Agnes Creek with only
+    // "crossing 1 stream" in a step (the creek here runs E–W near y=1000)
+    const e = await engineP;
+    const r = ok(routeSync(e, at(-5000, 0), at(-5000, 2000), { avoidPerimeter: true }));
+    expect(r.legs!.reduce((s, l) => s + (l.streamCrossings ?? 0), 0)).toBe(1);
+    const n = r.notes!.find((x) => x.code === 'XC_STREAM');
+    expect(n?.level).toBe('warn');
+    expect(n?.text).toMatch(/^Cross-country, the route crosses a mapped perennial stream with no bridge\./);
+  });
+
   it('snaps a lakeshore pin, and refuses a pin in mid-lake', async () => {
     const e = await engineP;
     const r = ok(routeSync(e, at(-2000, -2080), at(-2000, -1200), { avoidPerimeter: true }));
