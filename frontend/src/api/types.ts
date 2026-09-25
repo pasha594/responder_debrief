@@ -85,7 +85,7 @@ export interface HotspotProperties {
   source: string; // MODIS | SNPP | NOAA-20 | NOAA-21
   acq_date: string; // YYYY-MM-DD
   acq_time: string; // HHMM as float-ish string, e.g. "421.0"
-  confidence: string; // numeric for MODIS, l/n/h for VIIRS
+  confidence: string; // numeric for MODIS, l/n/h for VIIRS, L/M/H for Landsat
   frp: number | null;
   brightness: number | null;
   /** added at ingest: */

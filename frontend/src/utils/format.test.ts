@@ -3,6 +3,7 @@ import {
   daysSince,
   formatAcres,
   formatBytes,
+  formatClockDate,
   formatDateTime,
   formatDay,
   formatPct,
@@ -133,5 +134,31 @@ describe('daysSince', () => {
     expect(daysSince('2026-09-01T00:00:00Z', NOW)).toBe(0);
     expect(daysSince(null, NOW)).toBeNull();
     expect(daysSince('nope', NOW)).toBeNull();
+  });
+});
+
+describe('formatClockDate', () => {
+  it('renders hh:mm mm/dd zone in the fire-local zone', () => {
+    expect(formatClockDate(Date.parse('2026-09-19T09:45:00Z'), 'America/Los_Angeles')).toBe(
+      '02:45 09/19 PDT',
+    );
+    expect(formatClockDate(Date.parse('2026-01-05T20:30:00Z'), 'America/Denver')).toBe(
+      '13:30 01/05 MST',
+    );
+    expect(formatClockDate(Date.parse('2026-09-19T09:45:00Z'), 'UTC')).toBe('09:45 09/19 UTC');
+  });
+  it('uses 00 for midnight (never 24) and the fire-local calendar day', () => {
+    expect(formatClockDate(Date.parse('2026-08-18T07:05:00Z'), 'America/Los_Angeles')).toBe(
+      '00:05 08/18 PDT',
+    );
+    // Already the 18th in UTC, still the evening of the 17th in LA.
+    expect(formatClockDate(Date.parse('2026-08-18T05:00:00Z'), 'America/Los_Angeles')).toBe(
+      '22:00 08/17 PDT',
+    );
+  });
+  it('falls back to the viewer zone for a missing or invalid zone', () => {
+    const t = Date.parse('2026-09-19T09:45:00Z');
+    expect(formatClockDate(t, null)).toMatch(/^\d\d:\d\d \d\d\/\d\d \S+$/);
+    expect(formatClockDate(t, 'Not/AZone')).toMatch(/^\d\d:\d\d \d\d\/\d\d \S+$/);
   });
 });
