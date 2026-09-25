@@ -8,6 +8,7 @@ import { alphaFast, gradeDeg, tertileRatios } from './costModel';
 import type { RoutingGrid } from './gridDecode';
 import { cellOf, demAt } from './hybridGraph';
 import { PACE_LUT } from './pacecode';
+import { supercoverCells } from './rasterize';
 
 export interface XcTally {
   cost: number; // typical seconds
@@ -22,13 +23,24 @@ export function emptyTally(): XcTally {
 
 /**
  * Walk one segment in ≤ `step` metre pieces. `each` (optional) sees every
- * piece: (midpoint cell, horizontal metres, grade°). A piece over an
- * impassable or masked cell marks the tally blocked (its cost is skipped:
- * the engine only lets that happen on a snapped endpoint's own cell).
+ * piece: (midpoint cell, horizontal metres, grade°). The segment is blocked
+ * when ANY cell it passes through is impassable, masked or off the grid
+ * (supercover): piece midpoints alone let a smoothed SISI line clip 11 m
+ * through the corner of an open-water cell. A piece whose midpoint is on
+ * such a cell adds no cost (the engine only lets that happen on a snapped
+ * endpoint's own cell).
  */
 export function tallySegment(grid: RoutingGrid, mask: Uint8Array | null, x0: number, y0: number,
   x1: number, y1: number, t: XcTally, step = grid.cell / 2,
   each?: (cell: number, dh: number, grade: number) => void): XcTally {
+  if (!t.blocked) {
+    const k = grid.cell;
+    supercoverCells(x0 / k, y0 / k, x1 / k, y1 / k, (c, r) => {
+      const cell = c < 0 || r < 0 || c >= grid.width || r >= grid.height ? -1 : r * grid.width + c;
+      t.blocked = cell < 0 || !Number.isFinite(PACE_LUT[grid.pace[cell]]) || (!!mask && mask[cell] !== 0);
+      return t.blocked;
+    });
+  }
   const len = Math.hypot(x1 - x0, y1 - y0);
   const n = Math.max(1, Math.ceil(len / step));
   let px = x0;
