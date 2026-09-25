@@ -15,7 +15,7 @@ on:
   workflow_dispatch:
     inputs:
       fire:
-        description: "cornea_id, slug or name (optional; default all active fires)"
+        description: "cornea_id, slug or name (optional; default: SISI only while it is validated)"
         default: ""
       force:
         description: "Rebuild even if inputs are unchanged"
@@ -64,7 +64,9 @@ jobs:
           B2_S3_ENDPOINT: ${{ vars.B2_S3_ENDPOINT }}
           PRIORITY_FIRES: ${{ vars.PRIORITY_FIRES }}
           ROUTING_SHARDS: "4"
-          INPUT_FIRE: ${{ inputs.fire }}
+          # SISI only while the first real bundles are validated (owner,
+          # 2026-09-25). Drop the fallback to build every active fire.
+          INPUT_FIRE: ${{ inputs.fire || 'sisi' }}
           INPUT_FORCE: ${{ inputs.force }}
         run: |
           FLAGS=(--plan-out plan.json)
