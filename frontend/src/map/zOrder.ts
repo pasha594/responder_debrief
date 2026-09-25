@@ -10,7 +10,9 @@ export const RD_LAYER_ORDER = [
   // rasters (below basemap labels), bottom → top: incident-map sheets,
   // then the fire forecast, then weather. An ops map at full opacity must
   // never hide the forecast or smoke — those are the transient signal; the
-  // sheet is the reference underneath.
+  // sheet is the reference underneath. The vegetation classes (the Walk
+  // router's terrain model) are pure reference, so they sit under all of it.
+  'rd-vegetation',
   'rd-traffic',
   'rd-incident-map',
   'rd-spread-forecast',
@@ -26,9 +28,15 @@ export const RD_LAYER_ORDER = [
   'rd-weather-meq-a', 'rd-weather-meq-b',
   'rd-weather-apcp01-a', 'rd-weather-apcp01-b',
   'rd-weather-apcptot-a', 'rd-weather-apcptot-b',
+  // trails ride over the rasters but under basemap labels
+  'rd-trails-ways',
+  'rd-trails-casing',
+  'rd-trails-line',
   'rd-national-perimeters',
   // ── basemap symbol layers sit here ──
   // vectors above labels
+  'rd-trails-label',
+  'rd-trails-hit', // invisible wide tap target for trail popups
   'rd-wind-arrows', // over the weather rasters + labels, under perimeters/pins
   'rd-range-fill',
   'rd-range-line',
@@ -55,9 +63,14 @@ export const RD_LAYER_ORDER = [
   'rd-draw-line-letter',
   'rd-draw-pt-map',
   'rd-draw-pt',
-  // directions ride on the very top
+  // directions ride on the very top: the Walk routing-area box, then the
+  // route (solid road/trail legs, dashed cross-country, dotted untimed gaps)
+  'rd-routing-area',
   'rd-route-casing',
   'rd-route-line',
+  'rd-route-xc',
+  'rd-route-gap',
+  'rd-route-joins',
 ] as const;
 
 export type RdLayerId = (typeof RD_LAYER_ORDER)[number];

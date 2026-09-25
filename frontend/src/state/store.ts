@@ -108,6 +108,12 @@ export interface AppState {
     traffic: { visible: boolean };
     /** TomTom road incidents/closures (needs VITE_TOMTOM_KEY). */
     incidents: { visible: boolean };
+    /** USFS/BLM/NPS trails. 'auto' = on only on the offline ground (no
+     * basemap there); an explicit on/off always wins. A viewing preference:
+     * persists across fires, like traffic. */
+    trails: { mode: 'auto' | 'on' | 'off' };
+    /** LANDFIRE vegetation classes from the fire's routing bundle. */
+    vegetation: { visible: boolean; opacity: number };
   };
 
   range: {
@@ -128,6 +134,8 @@ export interface AppState {
     route: import('../api/routing').RouteResult | null;
     /** Map clicks fill route slots only while the search UI is engaged. */
     armed: boolean;
+    /** Offline Walk: hard-block the latest fire perimeter (+ standoff). */
+    avoidPerimeter: boolean;
   };
 
   /** Google-style dropped pin [lon, lat]: a plain click on an idle map marks
@@ -204,6 +212,9 @@ export interface AppState {
     setIrFlight(flightId: string | null): void;
     toggleTraffic(): void;
     toggleIncidents(): void;
+    setTrailsMode(mode: AppState['layers']['trails']['mode']): void;
+    setVegetation(patch: Partial<AppState['layers']['vegetation']>): void;
+    setAvoidPerimeter(on: boolean): void;
     setRangeRings(rings: import('../api/routing').RangeRing[]): void;
     setLocationFix(coords: [number, number] | null, accuracy: number | null): void;
     setLocationTracking(tracking: boolean): void;
@@ -310,13 +321,17 @@ export const useStore = create<AppState>((set, get) => ({
     irFlight: { flightId: null },
     traffic: { visible: false },
     incidents: { visible: false },
+    trails: { mode: 'auto' },
+    vegetation: { visible: false, opacity: 0.55 },
   },
 
   range: { rings: [] },
 
   location: { coords: null, accuracy: null, tracking: false },
 
-  directions: { a: null, b: null, profile: 'drive', route: null, armed: false },
+  directions: {
+    a: null, b: null, profile: 'drive', route: null, armed: false, avoidPerimeter: true,
+  },
 
   droppedPin: null,
 
@@ -371,7 +386,7 @@ export const useStore = create<AppState>((set, get) => ({
         },
         directions: {
           a: null, b: null, profile: s.directions.profile,
-          route: null, armed: false, picking: null,
+          route: null, armed: false, avoidPerimeter: s.directions.avoidPerimeter,
         },
         droppedPin: null,
         range: { rings: [] },
@@ -543,6 +558,16 @@ export const useStore = create<AppState>((set, get) => ({
         layers: { ...s.layers, incidents: { visible: !s.layers.incidents.visible } },
       }));
     },
+    setTrailsMode: (mode) => {
+      track('layer_toggled', { layer: 'trails', on: mode === 'on' });
+      set((s) => ({ layers: { ...s.layers, trails: { mode } } }));
+    },
+    setVegetation: (patch) => {
+      if (patch.visible !== undefined) track('layer_toggled', { layer: 'vegetation', on: patch.visible });
+      set((s) => ({ layers: { ...s.layers, vegetation: { ...s.layers.vegetation, ...patch } } }));
+    },
+    setAvoidPerimeter: (on) =>
+      set((s) => ({ directions: { ...s.directions, avoidPerimeter: on, route: null } })),
     setRangeRings: (rings) => set(() => ({ range: { rings } })),
     setLocationFix: (coords, accuracy) =>
       set((s) => ({ location: { ...s.location, coords, accuracy } })),
@@ -560,7 +585,7 @@ export const useStore = create<AppState>((set, get) => ({
       set((s) => ({
         directions: {
           a: null, b: null, profile: s.directions.profile,
-          route: null, armed: false,
+          route: null, armed: false, avoidPerimeter: s.directions.avoidPerimeter,
         },
         range: { rings: [] },
 

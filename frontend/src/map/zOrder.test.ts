@@ -44,6 +44,21 @@ describe('RD_LAYER_ORDER', () => {
     expect(idx('rd-weather-smoke-a')).toBeLessThan(idx('rd-national-perimeters'));
     expect(idx('rd-national-perimeters')).toBeLessThan(idx('rd-perimeter-fill'));
   });
+
+  it('puts vegetation at the bottom, trail lines under labels, route legs on top', () => {
+    const idx = (id: string) => RD_LAYER_ORDER.indexOf(id as (typeof RD_LAYER_ORDER)[number]);
+    const sentinel = idx('rd-national-perimeters');
+    expect(idx('rd-vegetation')).toBe(0);
+    for (const id of ['rd-trails-ways', 'rd-trails-casing', 'rd-trails-line']) {
+      expect(idx(id)).toBeGreaterThan(idx('rd-weather-smoke-a'));
+      expect(idx(id)).toBeLessThan(sentinel);
+    }
+    expect(idx('rd-trails-casing')).toBeLessThan(idx('rd-trails-line'));
+    expect(idx('rd-trails-hit')).toBeGreaterThan(sentinel);
+    expect(idx('rd-trails-hit')).toBeLessThan(idx('rd-perimeter-fill'));
+    expect(idx('rd-route-line')).toBeLessThan(idx('rd-route-xc'));
+    expect(RD_LAYER_ORDER[RD_LAYER_ORDER.length - 1]).toBe('rd-route-joins');
+  });
 });
 
 describe('ensureOrder', () => {

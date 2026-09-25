@@ -82,6 +82,59 @@ const SOURCES: Source[] = [
     url: 'https://www.usgs.gov/programs/national-geospatial-program/national-map',
     label: 'usgs.gov',
   },
+  {
+    name: 'USDA Forest Service — National Forest System Trails (EDW)',
+    what:
+      'Forest Service trail centerlines with class, allowed uses and hiker restrictions. Part of ' +
+      'the Trails layer and the offline Walk trail network.',
+    url: 'https://data.fs.usda.gov/geodata/edw/datasets.php',
+    label: 'data.fs.usda.gov',
+  },
+  {
+    name: 'Bureau of Land Management — Ground Transportation Linear Features',
+    what:
+      'BLM managed and not-yet-assessed trails with access restrictions. Part of the Trails layer ' +
+      'and the offline Walk trail network.',
+    url: 'https://gbp-blm-egis.hub.arcgis.com',
+    label: 'blm.gov GTLF',
+  },
+  {
+    name: 'National Park Service — Public Trails',
+    what: 'Park Service trails, part of the Trails layer and the offline Walk trail network.',
+    url: 'https://public-nps.opendata.arcgis.com',
+    label: 'nps.gov open data',
+  },
+  {
+    name: 'OpenStreetMap contributors',
+    what:
+      'Roads, tracks and paths for offline Walk routing and the offline road reference, from ' +
+      'Geofabrik extracts. The derived routing graphs are published under the Open Database ' +
+      'License (ODbL 1.0).',
+    url: 'https://www.openstreetmap.org/copyright',
+    label: 'openstreetmap.org/copyright',
+  },
+  {
+    name: 'LANDFIRE (USGS / USDA Forest Service / DOI)',
+    what:
+      'Existing vegetation type and cover, fuel models, slope and elevation behind the Vegetation ' +
+      'layer and the cross-country part of offline Walk routes.',
+    url: 'https://landfire.gov',
+    label: 'landfire.gov',
+  },
+  {
+    name: 'USGS National Hydrography Dataset',
+    what: 'Perennial streams and water bodies used as barriers and crossings in offline Walk routes.',
+    url: 'https://www.usgs.gov/national-hydrography',
+    label: 'usgs.gov/national-hydrography',
+  },
+  {
+    name: 'Travel-rate research',
+    what:
+      'Sullivan et al. 2020 (loaded hotshot crew hiking rates, on trail) and the USFS Ground ' +
+      'Evacuation Time v2 model (off-trail slope and vegetation costs).',
+    url: 'https://www.fs.usda.gov/rm/pubs_journals/2020/rmrs_2020_sullivan_p001.pdf',
+    label: 'fs.usda.gov (Sullivan et al. 2020)',
+  },
 ];
 
 export function SourcesView() {

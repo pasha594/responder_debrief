@@ -11,6 +11,8 @@
  *   hs  0 → hotspots hidden          pm  0 → perimeters hidden
  *   hist 1 → historic perimeters shown   tr 1 → live traffic shown
  *   ri 1 → road incidents shown
+ *   trl 1 → trails on, 0 → trails off (absent = auto: on only offline)
+ *   veg 1 → vegetation (routing terrain model) shown
  *   wx  visible weather products, dot-separated: tmpf.rh
  *   ff  fire forecast: {product}.{percentile}, e.g. time-of-arrival.50
  *   bm  basemap: map | satellite | topo (absent = DEFAULT_BASEMAP, topo)
@@ -39,6 +41,8 @@ export interface UrlViewState {
   historic?: true;
   traffic?: true;
   incidents?: true;
+  trails?: 'on' | 'off';
+  vegetation?: true;
   weather?: WeatherProduct[];
   spread?: { product: SpreadProduct; percentile: Percentile };
   basemap?: 'map' | 'satellite' | 'topo';
@@ -74,6 +78,8 @@ export function buildSearch(s: AppState): string {
   if (s.layers.historicPerimeters.visible) q.set('hist', '1');
   if (s.layers.traffic.visible) q.set('tr', '1');
   if (s.layers.incidents.visible) q.set('ri', '1');
+  if (s.layers.trails.mode !== 'auto') q.set('trl', s.layers.trails.mode === 'on' ? '1' : '0');
+  if (s.layers.vegetation.visible) q.set('veg', '1');
   const wx = (Object.keys(s.layers.weather) as WeatherProduct[])
     .filter((p) => s.layers.weather[p]?.visible)
     .sort();
@@ -104,6 +110,10 @@ export function decodeSearch(search: string): UrlViewState {
   if (q.get('hist') === '1') out.historic = true;
   if (q.get('tr') === '1') out.traffic = true;
   if (q.get('ri') === '1') out.incidents = true;
+  const trl = q.get('trl');
+  if (trl === '1') out.trails = 'on';
+  else if (trl === '0') out.trails = 'off';
+  if (q.get('veg') === '1') out.vegetation = true;
 
   const wx = q.get('wx');
   if (wx) {
@@ -153,6 +163,8 @@ export function applyViewState(
   if (v.historic && !s.layers.historicPerimeters.visible) actions.toggleHistoricPerimeters();
   if (v.traffic && !s.layers.traffic.visible) actions.toggleTraffic();
   if (v.incidents && !s.layers.incidents.visible) actions.toggleIncidents();
+  if (v.trails && s.layers.trails.mode !== v.trails) actions.setTrailsMode(v.trails);
+  if (v.vegetation && !s.layers.vegetation.visible) actions.setVegetation({ visible: true });
   for (const p of v.weather ?? []) actions.setWeatherLayer(p, { visible: true });
   if (v.spread) {
     actions.setSpreadProduct(v.spread.product); // also sets visible: true

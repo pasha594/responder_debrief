@@ -22,6 +22,10 @@ const stripUpgradeInsecureRequestsInDev = (): Plugin => ({
 export default defineConfig(({ mode }) => ({
   base: process.env.VITE_BASE ?? (mode === 'production' ? '/responder_debrief/' : '/'),
   plugins: [react(), stripUpgradeInsecureRequestsInDev()],
+  // The offline Walk router runs in a module Web Worker that imports geotiff,
+  // whose codecs are dynamic imports: the default 'iife' worker format can't
+  // code-split and fails the build.
+  worker: { format: 'es' as const },
   test: {
     environment: 'node',
     include: ['src/**/*.test.ts'],

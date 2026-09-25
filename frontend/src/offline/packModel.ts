@@ -13,6 +13,8 @@ import { DATA_BASE_URL, FIRE_API } from '../app/config';
 import { firesIndexUrl } from '../api/fireApi';
 import { dataUrl } from '../api/catalogs';
 import { spreadToaUrl, toaPercentiles, weatherImageUrl, windUvUrl } from '../api/wmsUrls';
+import { routingIndexUrl } from '../routing/bundleIndex';
+import type { RoutingBundle, RoutingIndexEntry } from '../routing/types';
 import type {
   HotspotArchiveIndex,
   IncidentManifest,
@@ -38,6 +40,8 @@ export interface PackPlan {
   estBytes: number;
   tileCount: number;
   mapSheetCount: number;
+  /** Offline Walk bundle bytes (descriptor-reported sizes), 0 when none. */
+  routingBytes: number;
 }
 
 const DAY_MS = 86_400_000;
@@ -119,6 +123,9 @@ export interface PackInputs {
   /** The run WeatherSection would render (renderable-first) + its products. */
   weatherRun: WeatherRun | null;
   weatherProducts: string[];
+  /** The fire's routing-index entry + its descriptor (both or neither). */
+  routingEntry?: RoutingIndexEntry | null;
+  routingBundle?: RoutingBundle | null;
   nowMs: number;
 }
 
@@ -134,6 +141,8 @@ export function snapshotUrls(inp: PackInputs): string[] {
   ];
   if (inp.manifestPath) urls.push(dataUrl(inp.manifestPath));
   if (inp.hotspotIndexPath) urls.push(dataUrl(inp.hotspotIndexPath));
+  // The index is how the offline app finds the bundle; packed as a snapshot.
+  if (inp.routingEntry && inp.routingBundle) urls.push(routingIndexUrl());
   return urls;
 }
 
@@ -243,11 +252,26 @@ export function buildPackPlan(inp: PackInputs): PackPlan {
     }
   }
 
+  // Offline Walk: descriptor + grid, DEM, graph, trails extract. All
+  // immutable (versioned bundle URLs) and none optional — the descriptor
+  // lists only files that exist, and a hole would break offline routing.
+  let routingBytes = 0;
+  if (inp.routingEntry && inp.routingBundle) {
+    files.push({ url: dataUrl(inp.routingEntry.descriptor), immutable: true, estBytes: EST.json });
+    const fs = inp.routingBundle.files;
+    for (const f of [fs.grid, fs.dem, fs.graph, fs.trails]) {
+      if (!f) continue;
+      files.push({ url: dataUrl(f.path), immutable: true, estBytes: f.bytes });
+      routingBytes += f.bytes;
+    }
+  }
+
   return {
     files,
     estBytes: files.reduce((sum, f) => sum + f.estBytes, 0),
     tileCount,
     mapSheetCount,
+    routingBytes,
   };
 }
 

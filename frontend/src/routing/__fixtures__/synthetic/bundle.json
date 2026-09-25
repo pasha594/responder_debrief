@@ -1,0 +1,142 @@
+{
+ "schema": "rd-routing-bundle/1",
+ "recipe": 1,
+ "bundle_id": "ba00154d78df",
+ "cornea_id": "{SYNTH-0001}",
+ "fire_key": "synth-0001",
+ "fire_name": "Synthetic Ridge",
+ "built_at": "2026-09-25T01:46:18Z",
+ "crs": {
+  "epsg": 32611,
+  "zone": 11,
+  "northern": true
+ },
+ "grid": {
+  "x0": 651780.0,
+  "y0": 4904040.0,
+  "cell_m": 30,
+  "width": 535,
+  "height": 534
+ },
+ "bounds4326": [
+  -115.102746,
+  44.126116,
+  -114.897125,
+  44.273775
+ ],
+ "aoi": {
+  "source": "point",
+  "perimeter_date": null,
+  "buffer_m": 8000,
+  "clipped": false
+ },
+ "files": {
+  "grid": {
+   "path": "/routing/synth-0001/bba00154d78df/grid.tif",
+   "bytes": 8278,
+   "sha256": "fc5f3d0439097f55afe1834ba8f9494825d92ac75a8cd333b80496837db92b2f"
+  },
+  "dem": {
+   "path": "/routing/synth-0001/bba00154d78df/dem.tif",
+   "bytes": 9698,
+   "sha256": "defdd86c04d223d0efcaff1cb37cd7095554c0bfd64ca90c32bf6bf8acd08d55"
+  },
+  "graph": {
+   "path": "/routing/synth-0001/bba00154d78df/graph.bin.gz",
+   "bytes": 390,
+   "sha256": "2f7add7f79a0292a7c84c7ef5a0669e3d0e4ee85931eb5abccbd8034e44e41ed",
+   "nodes": 5,
+   "edges": 5
+  },
+  "trails": {
+   "path": "/routing/synth-0001/bba00154d78df/trails.pmtiles",
+   "bytes": 13306,
+   "sha256": "a4732c1bb7ddcbfae02c8155863ec70ebee3efe1d3a29a458955f445ca44dc08",
+   "minzoom": 10,
+   "maxzoom": 14
+  }
+ },
+ "sources": {
+  "landfire": {
+   "veg": "LF2025+LF2024",
+   "topo": "LF2020",
+   "via": "exportImage"
+  },
+  "osm": {
+   "regions": [],
+   "date": null
+  },
+  "trails": {
+   "build_id": "20260925-synthetic"
+  },
+  "nhd": {
+   "huc8": [
+    "99999999"
+   ]
+  }
+ },
+ "stats": {
+  "cells": 285690,
+  "impassable_pct": 0.44,
+  "nodata_pct": 0.0,
+  "steep_pct": 0.14,
+  "stream_cells": 567,
+  "class_pct": {
+   "1": 0.78,
+   "3": 48.98,
+   "4": 49.65,
+   "6": 0.14,
+   "10": 0.31,
+   "11": 0.14
+  },
+  "graph": {
+   "nodes": 5,
+   "edges": 5,
+   "km": {
+    "agency_trail": 12.0,
+    "track": 14.0,
+    "trail": 10.0
+   },
+   "components": 1,
+   "largest_component_share": 1.0
+  },
+  "conflation": {
+   "agency_features": 2,
+   "agency_dropped_covered": 1,
+   "agency_runs_added": 1,
+   "osm_edges_named": 1,
+   "snapped": 2
+  }
+ },
+ "warnings": [],
+ "attribution": [
+  "© OpenStreetMap contributors (ODbL 1.0)",
+  "USFS",
+  "BLM",
+  "NPS",
+  "LANDFIRE",
+  "USGS NHD"
+ ],
+ "license": "graph.bin.gz and the 'ways' layer of trails.pmtiles are Derivative Databases of OpenStreetMap, available under the Open Database License 1.0.",
+ "inputs": {
+  "recipe": 1,
+  "cost_model": "getv2-evc+sullivan2020/1",
+  "graph_format": "RDG1",
+  "epsg": 32611,
+  "grid": {
+   "x0": 651780.0,
+   "y0": 4904040.0,
+   "cell_m": 30,
+   "width": 535,
+   "height": 534
+  },
+  "lf": "LF2025-else-LF2024/pixel",
+  "lf_epoch": "2026-09",
+  "topo": "LF2020",
+  "osm_hash": "79edd177a58540e7",
+  "trails_hash": "5426804d1e263f4c",
+  "nhd": [
+   "99999999"
+  ]
+ }
+}

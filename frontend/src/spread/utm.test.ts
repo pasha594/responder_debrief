@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { epsgToUtm, utmBoundsTo4326, utmToLonLat, zoneCentralMeridian } from './utm';
+import {
+  epsgToUtm,
+  lonLatToUtm,
+  utmBoundsTo4326,
+  utmToLonLat,
+  utmZoneFor,
+  zoneCentralMeridian,
+} from './utm';
 
 // Reference pairs generated with GDAL (gdaltransform -s_srs EPSG:326xx
 // -t_srs EPSG:4326) — zones 10, 11 and 13. Assertions at 1e-5° (~1 m),
@@ -72,5 +79,44 @@ describe('utmBoundsTo4326', () => {
     const [tl, , , bl] = corners;
     // West of the central meridian the grid tilts: TL and BL lons differ.
     expect(Math.abs(tl[0] - bl[0])).toBeGreaterThan(1e-4);
+  });
+});
+
+describe('lonLatToUtm (forward)', () => {
+  it('matches the GDAL reference pairs to a centimetre', () => {
+    for (const c of CASES) {
+      const z = epsgToUtm(c.epsg)!;
+      const [e, n] = lonLatToUtm(c.lonLat[0], c.lonLat[1], z.zone, z.northern);
+      expect(Math.abs(e - c.utm[0])).toBeLessThan(0.01);
+      expect(Math.abs(n - c.utm[1])).toBeLessThan(0.01);
+    }
+    // worker/responder_worker/utm.py test point (gdaltransform EPSG:32611)
+    const [e, n] = lonLatToUtm(-115, 44, 11);
+    expect(e).toBeCloseTo(660349.4106, 3);
+    expect(n).toBeCloseTo(4873817.3334, 3);
+  });
+
+  it('round-trips with the inverse across zones and hemispheres', () => {
+    for (const zone of [10, 11, 12, 13, 17, 19]) {
+      for (const dl of [-3, -1.5, 0, 1.2, 2.9]) {
+        for (const lat of [26, 35.5, 44.2, 48.9]) {
+          const lon = zoneCentralMeridian(zone) + dl;
+          const [e, n] = lonLatToUtm(lon, lat, zone);
+          const [lo, la] = utmToLonLat(e, n, zone);
+          expect(Math.abs(lo - lon)).toBeLessThan(1e-5);
+          expect(Math.abs(la - lat)).toBeLessThan(1e-5);
+        }
+      }
+    }
+    const [e, n] = lonLatToUtm(-170.7, -14.3, 2, false);
+    const [lo, la] = utmToLonLat(e, n, 2, false);
+    expect(lo).toBeCloseTo(-170.7, 5);
+    expect(la).toBeCloseTo(-14.3, 5);
+  });
+
+  it('picks the zone from longitude', () => {
+    expect(utmZoneFor(-115.2)).toBe(11);
+    expect(utmZoneFor(-120)).toBe(11);
+    expect(utmZoneFor(-120.01)).toBe(10);
   });
 });

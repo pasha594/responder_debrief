@@ -7,13 +7,26 @@
  * Online, the network always goes first (fresh data wins; immutable files
  * ride the normal HTTP cache anyway) and the pack is only a fallback on
  * failure. Offline (navigator.onLine === false), the pack is consulted
- * first. MapLibre tile requests go through global fetch, so incident-map
- * tiles need no map-specific plumbing.
+ * first. MapLibre RASTER tile requests go through global fetch, so
+ * incident-map tiles need no map-specific plumbing (vector tiles are fetched
+ * in MapLibre's worker: the trails layer reads its packed PMTiles through
+ * packedFile() instead). Immutable packed files (versioned URLs: routing
+ * bundles, closed hotspot days) are served pack-first even online — dead
+ * field wifi would otherwise cost the 8 s patience per file. Any request
+ * carrying a Range header goes straight to the network: a pack serves whole
+ * files, which a range reader (pmtiles) rejects.
  */
 import { DATA_BASE_URL, FIRE_API } from '../app/config';
 import { dataUrl } from '../api/catalogs';
 import { useStore } from '../state/store';
 import { track } from '../app/analytics';
+import { routingIndexUrl } from '../routing/bundleIndex';
+import {
+  SUPPORTED_RECIPE,
+  type RoutingBundle,
+  type RoutingIndex,
+  type RoutingIndexEntry,
+} from '../routing/types';
 import type {
   HotspotArchiveIndex,
   IncidentManifest,
@@ -33,6 +46,7 @@ import {
   deletePack as opfsDeletePack,
   deletePackFile,
   fileNameForUrl,
+  getPackFile,
   listPackFiles,
   listPackSlugs,
   opfsSupported,
@@ -54,6 +68,10 @@ export interface PackMeta {
   files: Record<string, string>;
   /** Prefix fallbacks for URLs that vary with time (open-meteo). */
   prefixes: { prefix: string; file: string }[];
+  /** URLs of immutable files (served pack-first). Absent on older packs. */
+  immutable?: string[];
+  /** The routing bundle this pack holds, when the fire had one. */
+  routing?: { descriptor: string; bundleId: string; bytes: number };
 }
 
 export { formatBytes, opfsSupported };
@@ -62,18 +80,25 @@ export { formatBytes, opfsSupported };
 
 const urlIndex = new Map<string, { slug: string; file: string }>();
 const prefixIndex: { prefix: string; slug: string; file: string }[] = [];
+const immutableUrls = new Set<string>();
 
 function indexPack(meta: PackMeta): void {
   for (const [url, file] of Object.entries(meta.files)) {
     urlIndex.set(url, { slug: meta.slug, file });
   }
+  for (const url of meta.immutable ?? []) immutableUrls.add(url);
   for (const p of meta.prefixes) {
     prefixIndex.push({ prefix: p.prefix, slug: meta.slug, file: p.file });
   }
 }
 
 function unindexPack(slug: string): void {
-  for (const [url, v] of urlIndex) if (v.slug === slug) urlIndex.delete(url);
+  for (const [url, v] of urlIndex) {
+    if (v.slug === slug) {
+      urlIndex.delete(url);
+      immutableUrls.delete(url);
+    }
+  }
   for (let i = prefixIndex.length - 1; i >= 0; i--) {
     if (prefixIndex[i].slug === slug) prefixIndex.splice(i, 1);
   }
@@ -84,6 +109,8 @@ function contentTypeFor(name: string): string {
   if (name.endsWith('.tif')) return 'image/tiff';
   if (name.endsWith('.tar')) return 'application/x-tar';
   if (name.endsWith('.pdf')) return 'application/pdf';
+  if (name.endsWith('.gz')) return 'application/gzip';
+  if (name.endsWith('.pmtiles')) return 'application/octet-stream';
   return 'application/json';
 }
 
@@ -129,11 +156,11 @@ export function installOfflineFetch(): void {
     const url =
       typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
     const method = init?.method ?? (input instanceof Request ? input.method : 'GET');
-    if (method !== 'GET' || urlIndex.size + prefixIndex.length === 0) {
+    if (method !== 'GET' || urlIndex.size + prefixIndex.length === 0 || hasRange(input, init)) {
       return rawFetch(input, init);
     }
     const packed = urlIndex.has(url) || prefixIndex.some((p) => url.startsWith(p.prefix));
-    if (!navigator.onLine && packed) {
+    if (packed && (!navigator.onLine || immutableUrls.has(url))) {
       const hit = await packResponse(url);
       if (hit) return hit;
     }
@@ -166,10 +193,49 @@ export function installOfflineFetch(): void {
   };
 }
 
+function hasRange(input: RequestInfo | URL, init?: RequestInit): boolean {
+  const h = init?.headers ?? (input instanceof Request ? input.headers : undefined);
+  if (!h) return false;
+  return new Headers(h).has('range');
+}
+
+/** The packed OPFS File for an exact URL, or null (not packed / no OPFS). */
+export async function packedFile(url: string): Promise<File | null> {
+  await packsReady;
+  const hit = urlIndex.get(url);
+  return hit ? getPackFile(hit.slug, hit.file) : null;
+}
+
+/** The routing descriptor URL a fire's pack holds (for a retry when the
+ * live index points at a newer bundle the pack doesn't have). */
+export function packedRoutingDescriptor(corneaId: string): string | null {
+  const packs = useStore.getState().offline.packs;
+  for (const m of Object.values(packs)) {
+    if (m.corneaId === corneaId && m.routing) return m.routing.descriptor;
+  }
+  return null;
+}
+
 // ---------- boot ----------
+
+let resolveReady: () => void = () => undefined;
+/** Resolves once the pack index is hydrated: loaders outside React Query
+ * (the Walk router, the trails source) await it so a request issued offline
+ * right after boot doesn't race the index and fail. */
+export const packsReady: Promise<void> = new Promise((r) => {
+  resolveReady = r;
+});
 
 /** Load every stored pack's metadata; hydrate the index and the store. */
 export async function initOfflinePacks(): Promise<void> {
+  try {
+    await hydratePacks();
+  } finally {
+    resolveReady();
+  }
+}
+
+async function hydratePacks(): Promise<void> {
   if (!opfsSupported()) return;
   const packs: Record<string, PackMeta> = {};
   for (const slug of await listPackSlugs()) {
@@ -285,6 +351,19 @@ async function runDownload(corneaId: string, abort: AbortSignal): Promise<PackMe
     // Exactly the run WeatherSection picks (renderable-first fallback).
     const weatherRun = hrrr?.runs?.find(isRenderableWeatherRun) ?? hrrr?.runs?.[0] ?? null;
     const weatherProducts = hrrr ? Object.keys(hrrr.products ?? {}) : [];
+    // Offline Walk: the fire's routing bundle, when one exists. A missing
+    // index or descriptor never fails the pack (the fire just has no
+    // offline routing yet).
+    let routingEntry: RoutingIndexEntry | null = null;
+    let routingBundle: RoutingBundle | null = null;
+    const routingIndex = await rawJson<RoutingIndex>(routingIndexUrl(), abort).catch(() => null);
+    const re = routingIndex && (routingIndex.recipe ?? 1) <= SUPPORTED_RECIPE
+      ? routingIndex.fires?.[corneaId] : undefined;
+    if (re) {
+      routingEntry = re;
+      routingBundle = await rawJson<RoutingBundle>(dataUrl(re.descriptor), abort)
+        .catch(() => null);
+    }
 
     const inputs: PackInputs = {
       corneaId,
@@ -297,6 +376,8 @@ async function runDownload(corneaId: string, abort: AbortSignal): Promise<PackMe
       spreadRun,
       weatherRun,
       weatherProducts,
+      routingEntry: routingBundle ? routingEntry : null,
+      routingBundle,
       nowMs: Date.now(),
     };
     const plan = buildPackPlan(inputs);
@@ -373,6 +454,11 @@ async function runDownload(corneaId: string, abort: AbortSignal): Promise<PackMe
       fileCount: total,
       files,
       prefixes: weatherPrefix ? [weatherPrefix] : [],
+      immutable: plan.files.filter((f) => f.immutable && files[f.url]).map((f) => f.url),
+      routing: routingEntry && routingBundle
+        ? { descriptor: dataUrl(routingEntry.descriptor), bundleId: routingBundle.bundle_id,
+            bytes: plan.routingBytes }
+        : undefined,
     };
     await writePackFile(slug, 'pack.json', JSON.stringify(meta));
 
@@ -393,6 +479,8 @@ async function runDownload(corneaId: string, abort: AbortSignal): Promise<PackMe
       files: total,
       mb: Math.round(bytes / 1_000_000),
       sheets: plan.mapSheetCount,
+      routing: !!routingBundle,
+      routing_mb: Math.round(plan.routingBytes / 1_000_000),
     });
     void navigator.storage?.persist?.().catch(() => undefined);
     return meta;

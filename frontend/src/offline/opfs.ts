@@ -43,7 +43,7 @@ async function packDir(
 export async function fileNameForUrl(url: string): Promise<string> {
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(url));
   const hex = [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
-  const ext = /\.(png|json|geojson|tif|tar|pdf)(\?|$)/.exec(url)?.[1];
+  const ext = /\.(png|json|geojson|tif|tar|pdf|pmtiles|gz)(\?|$)/.exec(url)?.[1];
   return `${hex.slice(0, 16)}${ext ? `.${ext}` : ''}`;
 }
 
@@ -67,6 +67,19 @@ export async function readPackFile(slug: string, name: string): Promise<ArrayBuf
     const handle = await dir.getFileHandle(name);
     const file = await handle.getFile();
     return await file.arrayBuffer();
+  } catch {
+    return null;
+  }
+}
+
+/** The stored File itself (for slice()-based readers such as the offline
+ * PMTiles source), or null. A File is a snapshot: re-fetch after the pack
+ * is rewritten. */
+export async function getPackFile(slug: string, name: string): Promise<File | null> {
+  const dir = await packDir(slug, false);
+  if (!dir) return null;
+  try {
+    return await (await dir.getFileHandle(name)).getFile();
   } catch {
     return null;
   }

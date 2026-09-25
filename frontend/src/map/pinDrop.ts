@@ -15,6 +15,7 @@ export const FEATURE_LAYERS = [
   'rd-incidents-line',
   'rd-incidents-pt',
   'rd-fire-pins',
+  'rd-trails-hit',
 ];
 
 /**

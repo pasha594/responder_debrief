@@ -20,6 +20,8 @@ function mkState(): AppState {
       incidents: { visible: false },
       incidentMap: { mapId: null, series: null, opacity: 0.75 },
       irFlight: { flightId: null },
+      trails: { mode: 'auto' },
+      vegetation: { visible: false, opacity: 0.55 },
     },
     ui: { basemap: 'topo' }, // DEFAULT_BASEMAP
   } as unknown as AppState;
@@ -156,5 +158,21 @@ describe('historic perimeters url param', () => {
     expect(search).toContain('hist=1');
     expect(decodeSearch(search).historic).toBe(true);
     expect(decodeSearch('?').historic).toBeUndefined();
+  });
+});
+
+describe('trails + vegetation url params', () => {
+  it('auto stays out of the URL; explicit on/off round-trips', () => {
+    expect(buildSearch(mkState())).toBe('');
+    const s = mkState();
+    (s.layers as { trails: { mode: string } }).trails = { mode: 'off' };
+    (s.layers as { vegetation: { visible: boolean; opacity: number } }).vegetation =
+      { visible: true, opacity: 0.5 };
+    const search = buildSearch(s);
+    expect(search).toContain('trl=0');
+    expect(search).toContain('veg=1');
+    expect(decodeSearch(search)).toMatchObject({ trails: 'off', vegetation: true });
+    expect(decodeSearch('?trl=1').trails).toBe('on');
+    expect(decodeSearch('?trl=x').trails).toBeUndefined();
   });
 });

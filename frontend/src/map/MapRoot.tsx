@@ -12,6 +12,7 @@ import 'maplibre-gl/dist/maplibre-gl.css';
 import { mapStyleDef } from '../app/config';
 import { resyncBasemapUnderlay } from './layers/basemapUnderlay';
 import { resyncLabelContrast } from './layers/labelContrast';
+import { resyncTrailsGround } from './layers/trailsLayer';
 import { addNaturalLabels } from './layers/naturalLabels';
 import { resyncRdLabelFonts } from './glyphFonts';
 import { useStore } from '../state/store';
@@ -186,6 +187,7 @@ export function MapRoot({ children }: { children: ReactNode }) {
       resyncBasemapUnderlay(map);
       resyncLabelContrast(map);
       resyncRdLabelFonts(map);
+      resyncTrailsGround(map);
       ensureOrder(map);
     };
     map.once('idle', onIdle);

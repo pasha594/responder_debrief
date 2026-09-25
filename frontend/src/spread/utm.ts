@@ -1,8 +1,10 @@
 /**
- * UTM → WGS84 inverse, hand-rolled (no proj4): standard Snyder series
- * expansion on the WGS84 ellipsoid. Accuracy is sub-meter inside a UTM zone —
- * far below the 30 m pixel size of the archive grids. Used to corner-pin the
- * decoded rasters onto the MapLibre canvas source.
+ * UTM ↔ WGS84, hand-rolled (no proj4). The inverse is the standard Snyder
+ * series on the WGS84 ellipsoid (sub-meter inside a zone — far below the
+ * 30 m pixel size of the archive grids), used to corner-pin decoded rasters
+ * onto MapLibre canvas sources. The forward direction (lonLatToUtm) is the
+ * Krüger n-series, mm-level, mirroring worker/responder_worker/utm.py so a
+ * Walk pin lands in the same routing-grid cell the worker computed.
  */
 
 const A = 6378137; // WGS84 semi-major axis
@@ -108,4 +110,43 @@ export function utmBoundsTo4326(
     corners,
     bounds: [Math.min(...lons), Math.min(...lats), Math.max(...lons), Math.max(...lats)],
   };
+}
+
+// Krüger n-series (4th order) constants for the forward projection.
+const KN = F / (2 - F);
+const KA = (A / (1 + KN)) * (1 + KN ** 2 / 4 + KN ** 4 / 64);
+const ALPHA = [
+  KN / 2 - (2 * KN ** 2) / 3 + (5 * KN ** 3) / 16 + (41 * KN ** 4) / 180,
+  (13 * KN ** 2) / 48 - (3 * KN ** 3) / 5 + (557 * KN ** 4) / 1440,
+  (61 * KN ** 3) / 240 - (103 * KN ** 4) / 140,
+  (49561 * KN ** 4) / 161280,
+];
+const KC = (2 * Math.sqrt(KN)) / (1 + KN);
+
+/** WGS84 UTM zone for a longitude (no Norway/Svalbard exceptions; CONUS). */
+export function utmZoneFor(lon: number): number {
+  return Math.min(60, Math.max(1, Math.floor((lon + 180) / 6) + 1));
+}
+
+/** [lon, lat] degrees (WGS84) → UTM [easting, northing] metres. */
+export function lonLatToUtm(
+  lon: number,
+  lat: number,
+  zone: number,
+  northern = true,
+): [number, number] {
+  const phi = (lat * Math.PI) / 180;
+  const lam = ((lon - zoneCentralMeridian(zone)) * Math.PI) / 180;
+  const sphi = Math.sin(phi);
+  const t = Math.sinh(Math.atanh(sphi) - KC * Math.atanh(KC * sphi));
+  const xiP = Math.atan2(t, Math.cos(lam));
+  const etaP = Math.atanh(Math.sin(lam) / Math.sqrt(1 + t * t));
+  let xi = xiP;
+  let eta = etaP;
+  for (let j = 1; j <= 4; j++) {
+    const a = ALPHA[j - 1];
+    xi += a * Math.sin(2 * j * xiP) * Math.cosh(2 * j * etaP);
+    eta += a * Math.cos(2 * j * xiP) * Math.sinh(2 * j * etaP);
+  }
+  return [E0 + K0 * KA * eta, K0 * KA * xi + (northern ? 0 : N0_SOUTH)];
 }

@@ -11,6 +11,7 @@
  * see the store's selectFire / setSpreadProduct).
  */
 import { useEffect, useMemo } from 'react';
+import { TrailsRow, VegetationRow } from '../layers/TrailsRow';
 import {
   latestRun,
   useFire,
@@ -323,7 +324,7 @@ function FireForecastSection({ corneaId }: { corneaId: string }) {
   );
 }
 
-function MapLayerToggles() {
+function MapLayerToggles({ corneaId }: { corneaId: string }) {
   const hotspots = useStore((s) => s.layers.hotspots.visible);
   const perimeters = useStore((s) => s.layers.perimeters.visible);
   const historic = useStore((s) => s.layers.historicPerimeters.visible);
@@ -368,6 +369,8 @@ function MapLayerToggles() {
           <span className="rd-hist-chip" style={{ background: '#6f675f' }} /> 10 yr
         </div>
       )}
+      <TrailsRow />
+      <VegetationRow corneaId={corneaId} />
     </section>
   );
 }
@@ -375,7 +378,7 @@ function MapLayerToggles() {
 export function ForecastTab({ corneaId }: { corneaId: string }) {
   return (
     <div className="rd-tab-body">
-      <MapLayerToggles />
+      <MapLayerToggles corneaId={corneaId} />
       <section className="rd-section">
         <WeatherSection />
       </section>

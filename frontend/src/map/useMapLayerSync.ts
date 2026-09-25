@@ -60,6 +60,7 @@ import { routeLayer } from './layers/routeLayer';
 import { trafficLayer } from './layers/trafficLayer';
 import { incidentsLayer } from './layers/incidentsLayer';
 import { rangeLayer } from './layers/rangeLayer';
+import { trailsLayer } from './layers/trailsLayer';
 
 // The directory pivot retired nationalPerimetersLayer: the map now only ever
 // shows one incident, so the CONUS perimeter raster has nowhere to render.
@@ -67,6 +68,7 @@ const MANAGERS: LayerManager[] = [
   basemapUnderlay,
   weatherLayers,
   incidentMapLayer,
+  trailsLayer, // self-driven: resolves its PMTiles archive from the store
   spreadForecastLayer,
   windArrowsLayer,
   irHeatLayer,
@@ -300,7 +302,7 @@ export function useMapLayerSync(): boolean {
     if (!map) return;
     const INTERACTIVE = [
       'rd-hotspots', 'rd-hist-perims-fill', 'rd-incidents-line',
-      'rd-incidents-pt', 'rd-ir-heat-fill', 'rd-fire-pins',
+      'rd-incidents-pt', 'rd-ir-heat-fill', 'rd-fire-pins', 'rd-trails-hit',
     ];
     const onClick = (e: {
       lngLat: { lng: number; lat: number };

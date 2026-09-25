@@ -213,3 +213,39 @@ describe('formatBytes', () => {
     expect(formatBytes(4_000)).toBe('4 KB');
   });
 });
+
+describe('buildPackPlan — offline Walk bundle', () => {
+  const entry = {
+    descriptor: '/routing/k/babc/bundle.json', bundle_id: 'abc', built_at: 't',
+    bbox: [-115.1, 44.1, -114.9, 44.3] as [number, number, number, number], cell_m: 30, bytes: 9,
+  };
+  const bundle = {
+    schema: 'rd-routing-bundle/1', recipe: 1, bundle_id: 'abc', cornea_id: 'c-1', fire_key: 'k',
+    built_at: 't', crs: { epsg: 32611, zone: 11, northern: true },
+    grid: { x0: 0, y0: 0, cell_m: 30, width: 10, height: 10 },
+    bounds4326: [0, 0, 1, 1] as [number, number, number, number],
+    files: {
+      grid: { path: '/routing/k/babc/grid.tif', bytes: 2_000_000 },
+      dem: { path: '/routing/k/babc/dem.tif', bytes: 3_000_000 },
+      graph: { path: '/routing/k/babc/graph.bin.gz', bytes: 500_000 },
+      trails: { path: '/routing/k/babc/trails.pmtiles', bytes: 1_000_000, minzoom: 10, maxzoom: 14 },
+    },
+  };
+
+  it('adds the index snapshot (mutable) plus descriptor + 4 files (immutable)', () => {
+    const plan = buildPackPlan(inputs({ routingEntry: entry, routingBundle: bundle }));
+    const idx = plan.files.find((f) => f.url.endsWith('/catalogs/routing.json'));
+    expect(idx?.immutable).toBe(false);
+    const routing = plan.files.filter((f) => f.url.includes('/routing/k/babc/'));
+    expect(routing.map((f) => f.url.split('/').pop())).toEqual([
+      'bundle.json', 'grid.tif', 'dem.tif', 'graph.bin.gz', 'trails.pmtiles']);
+    expect(routing.every((f) => f.immutable && !f.optional)).toBe(true);
+    expect(plan.routingBytes).toBe(6_500_000);
+  });
+
+  it('adds nothing when the fire has no bundle', () => {
+    const plan = buildPackPlan(inputs({ routingEntry: entry, routingBundle: null }));
+    expect(plan.files.some((f) => f.url.includes('routing'))).toBe(false);
+    expect(plan.routingBytes).toBe(0);
+  });
+});
