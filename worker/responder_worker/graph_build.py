@@ -20,6 +20,11 @@ Inputs: OSM nodes/ways (osm_extract.parse_opl) and agency trail lines
    10 m, else onto an OSM segment within 25 m (splitting it), else to another
    agency end within 10 m. Loose ends are fine: every graph vertex is also a
    portal into the cost grid, so the router bridges gaps cross-country.
+   An uncovered run with less than 60 m of it beyond 40 m of a parallel OSM
+   way is the same trail drawn offset, not a trail OSM lacks: agency lines
+   and OSM traces disagree by 10-40 m under canopy (SISI, North Cascades:
+   NPS vs OSM median offsets up to 30 m), and adding those runs braided the
+   network with parallel copies that split route steps.
 
 RDG1 (little-endian; gzip, mtime 0; sections 4-byte aligned) — the byte
 contract with frontend/src/routing/rdg1.ts (FINAL_PLAN.md §2.6):
@@ -68,6 +73,7 @@ SAC = {"hiking": 1, "mountain_hiking": 2, "demanding_mountain_hiking": 3,
 AGENCY_SRC = {"USFS": SRC_USFS, "BLM": SRC_BLM, "NPS": SRC_NPS}
 
 COVER_M, COVER_BEARING, COVER_FRACTION = 20.0, 35.0, 0.80
+SAME_TRAIL_M = 40.0
 NAME_EDGE_FRACTION = 0.60
 MIN_AGENCY_RUN_M = 60.0
 SNAP_VERTEX_M, SNAP_SEGMENT_M, SNAP_AGENCY_M = 10.0, 25.0, 10.0
@@ -408,23 +414,30 @@ def conflate(g: Graph, agency: list[tuple[dict, list]], *, log=print) -> dict:
     P = np.concatenate(pts) if pts else np.zeros((0, 2))
     B = np.concatenate(brg) if brg else np.zeros(0)
     O = np.concatenate(owner) if owner else np.zeros(0, dtype=np.int64)
-    h = _Hash(P, 25.0)
+    h = _Hash(P, SAME_TRAIL_M)
 
     stats = {"agency_features": len(agency), "agency_dropped_covered": 0,
-             "agency_runs_added": 0, "osm_edges_named": 0, "snapped": 0}
+             "agency_runs_added": 0, "agency_runs_parallel": 0, "osm_edges_named": 0,
+             "snapped": 0}
     new_runs: list[tuple[dict, list]] = []
     for props, line in agency:
         ap, ab = densify(line, SAMPLE_M)
         if len(ap) < 2:
             continue
         covered = np.zeros(len(ap), bool)
+        same = np.zeros(len(ap), bool)  # a parallel OSM way within SAME_TRAIL_M
         hit_edges: set[int] = set()
         near_samples: set[int] = set()  # OSM samples within COVER_M of this trail
         for i, (x, y) in enumerate(ap.tolist()):
-            for j in h.near(x, y, COVER_M):
-                if (P[j, 0] - x) ** 2 + (P[j, 1] - y) ** 2 <= COVER_M ** 2:
+            for j in h.near(x, y, SAME_TRAIL_M):
+                d2 = (P[j, 0] - x) ** 2 + (P[j, 1] - y) ** 2
+                if d2 > SAME_TRAIL_M ** 2:
+                    continue
+                parallel = _bdiff(B[j], ab[i]) < COVER_BEARING
+                same[i] |= parallel
+                if d2 <= COVER_M ** 2:
                     near_samples.add(j)
-                    if _bdiff(B[j], ab[i]) < COVER_BEARING:
+                    if parallel:
                         covered[i] = True
                         hit_edges.add(int(O[j]))
         attrs = agency_edge_attrs(props)
@@ -456,7 +469,12 @@ def conflate(g: Graph, agency: list[tuple[dict, list]], *, log=print) -> dict:
             elif not unc and start is not None:
                 run = [tuple(p) for p in ap[max(0, start - 1):min(len(ap), i + 1)].tolist()]
                 if _length(run) >= MIN_AGENCY_RUN_M:
-                    new_runs.append((props, run))
+                    # a new trail strays >= 60 m beyond SAME_TRAIL_M somewhere;
+                    # otherwise it is an offset copy of the OSM way beside it
+                    if (~same[start:i]).sum() * SAMPLE_M < MIN_AGENCY_RUN_M:
+                        stats["agency_runs_parallel"] += 1
+                    else:
+                        new_runs.append((props, run))
                 start = None
 
     # snap run ends onto OSM, splitting edges; then agency-agency clusters.

@@ -284,6 +284,32 @@ class TestGraphBuild:
             e.b for e in g.edges if e.src == gb.SRC_OSM}
         assert added.a in track_nodes
 
+    def test_offset_agency_copy_is_not_braided_in(self, fixtures, monkeypatch):
+        # Real SISI inputs: NPS "Agnes Creek Trail (PCT)" runs 10-50 m off
+        # the OSM PCT for long stretches. Only runs that stray well beyond
+        # that (>= 60 m of them past 40 m) are trails OSM lacks.
+        from responder_worker import routing_bundle as rb
+        doc = json.loads((fixtures / "routing" / "sisi_agnes_conflation.json").read_text())
+        rect = gb.utm.bbox_lonlat_to_utm(tuple(doc["bbox"]), 10, True)
+
+        def run():
+            nodes = {int(k): tuple(v) for k, v in doc["nodes"].items()}
+            g = gb.osm_graph(nodes, doc["ways"], zone=10, northern=True, rect=rect)
+            ag = rb.project_trails([(f["props"], [tuple(c) for c in f["coords"]])
+                                    for f in doc["agency"]], zone=10, northern=True, rect=rect)
+            return g, gb.conflate(g, ag, log=lambda *_: None)
+
+        g, st = run()
+        assert st["agency_runs_added"] == 2 and st["agency_runs_parallel"] == 3
+        osm = np.concatenate([gb.densify(e.xy, 5.0)[0] for e in g.edges if e.src == gb.SRC_OSM])
+        for e in (e for e in g.edges if e.kind == gb.KIND_AGENCY):
+            p, _ = gb.densify(e.xy, 10.0)
+            d = np.array([np.hypot(osm[:, 0] - x, osm[:, 1] - y).min() for x, y in p.tolist()])
+            assert (d > gb.SAME_TRAIL_M).sum() * 10 >= gb.MIN_AGENCY_RUN_M
+        # the old single 20 m tolerance braided all five uncovered runs in
+        monkeypatch.setattr(gb, "SAME_TRAIL_M", gb.COVER_M)
+        assert run()[1]["agency_runs_added"] == 5
+
     def test_snap_splits_segment(self):
         g = gb.Graph()
         a, b = g.add_node(0, 0), g.add_node(1000, 0)
