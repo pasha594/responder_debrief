@@ -21,7 +21,8 @@
  * The perimeter mask (non-zero = blocked) blocks cells AND graph nodes (a
  * trail through the fire is not a way around it). Graph nodes are otherwise
  * allowed on impassable cells: bridges cross rivers, switchbacks climb
- * cliffs.
+ * cliffs. So a start or goal may be a graph node (`node`): a pin on a road
+ * that runs over river cells, where no portal reaches it.
  *
  * h = straight-line distance · H_PACE · weight (admissible at weight 1).
  * `step(budget)` settles up to `budget` states and returns, so the worker
@@ -52,9 +53,10 @@ export interface SearchInput {
   /** Perimeter mask (non-zero = blocked) or null when avoidance is off. */
   mask: Uint8Array | null;
   window: Window;
-  /** Start / goal in grid metres (x east, y south of the origin). */
-  start: { x: number; y: number; cell: number };
-  goal: { x: number; y: number; cell: number };
+  /** Start / goal in grid metres (x east, y south of the origin). With
+   * `node`, the endpoint is that graph node (x, y are its position). */
+  start: { x: number; y: number; cell: number; node?: number };
+  goal: { x: number; y: number; cell: number; node?: number };
   weight: number;
   maxSettled: number;
 }
@@ -95,11 +97,20 @@ export class HybridSearch {
     this.g = new Float32Array(total).fill(Infinity);
     this.parent = new Int32Array(total).fill(-1);
     this.closed = new Uint8Array(total);
-    const s = this.cellState(inp.start.cell);
+    const endState = (p: SearchInput['start']) => (p.node == null ? this.cellState(p.cell)
+      : this.nodeBlocked(p.node) ? -1 : this.wc + p.node);
+    const s = endState(inp.start);
     this.startState = s;
-    this.goalState = this.cellState(inp.goal.cell);
+    this.goalState = endState(inp.goal);
     if (s < 0 || this.goalState < 0) {
       this.status = 'exhausted';
+      return;
+    }
+    if (inp.start.node != null) {
+      // on the network already: stepping off it is a node → cell move,
+      // which charges the leave penalty itself
+      this.g[s] = 0;
+      this.heap.push(this.h(inp.start.x, inp.start.y), s);
       return;
     }
     const span = inp.graph.cellIndex.get(inp.start.cell);
@@ -191,8 +202,8 @@ export class HybridSearch {
       if (u === this.goalState) {
         const [gx, gy] = this.cellCenter(this.inp.goal.cell);
         const pg = PACE_LUT[grid.pace[this.inp.goal.cell]];
-        this.cost = this.g[u] + Math.hypot(this.inp.goal.x - gx, this.inp.goal.y - gy)
-          * (Number.isFinite(pg) ? pg : 0);
+        this.cost = this.inp.goal.node != null ? this.g[u]
+          : this.g[u] + Math.hypot(this.inp.goal.x - gx, this.inp.goal.y - gy) * (Number.isFinite(pg) ? pg : 0);
         this.status = 'found';
         return this.status;
       }

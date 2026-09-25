@@ -555,6 +555,75 @@ describe('legs helpers', () => {
   });
 });
 
+describe('a pin on a road the grid calls river', () => {
+  // 60x40 flat cells. A river on rows 20–21 (y 600–660) is impassable
+  // across the whole grid. River Road leaves the north bank at x=105, runs
+  // ON the river's north row (y=612) to x=1695, and returns to the north
+  // bank: the worker burns rivers under the roads that follow them (SISI:
+  // 178 vertices of Company Creek Road, Stehekin Valley Road, ...), and a
+  // pin there snapped to the nearest walkable cell — sometimes the far bank.
+  const W = 60;
+  const H = 40;
+  const X0 = 500_010;
+  const Y0 = 4_900_020;
+  function riverRoad() {
+    const grid: RoutingGrid = { width: W, height: H, cell: 30, pace: new Uint8Array(W * H).fill(40),
+      veg: new Uint8Array(W * H).fill(1), dem: new Int16Array(W * H).fill(500) };
+    for (let r = 20; r <= 21; r++) {
+      for (let c = 0; c < W; c++) {
+        grid.pace[r * W + c] = 255;
+        grid.veg[r * W + c] = 10;
+      }
+    }
+    const rdg = {
+      epsg: 32611, x0: X0, y0: Y0,
+      nodes: Int32Array.from([1050, 4350, 16950, 4350]),
+      from: Uint32Array.from([0]), to: Uint32Array.from([1]),
+      dstart: Uint32Array.from([0, 3]),
+      deltas: Int16Array.from([0, 1770, 15900, 0, 0, -1770]),
+      name: Uint32Array.from([0]), ref: Uint32Array.from([0xffffffff]), note: Uint32Array.from([0xffffffff]),
+      kind: Uint8Array.from([KIND.unpaved]), src: Uint8Array.from([1]), sac: Uint8Array.from([0]),
+      flags: Uint8Array.from([0]), strings: ['River Road'],
+    } as Rdg1;
+    const b = { ...bundle, warnings: [], crs: { epsg: 32611, zone: 11, northern: true },
+      grid: { x0: X0, y0: Y0, cell_m: 30, width: W, height: H } } as RoutingBundle;
+    const e = new OffroadEngine(b, grid, rdg, buildHybridGraph(rdg, grid));
+    return { e, ll: (x: number, y: number) => e.toLonLat(x, y) };
+  }
+  const water = (r: RouteResult) => r.legs!.reduce((s, l) => s + (l.vegM?.[10] ?? 0), 0);
+
+  it('a pin on the road starts on the road, not wading from it', () => {
+    // both pins on road vertices (densified every 30 m from x=105)
+    const { e, ll } = riverRoad();
+    const r = ok(routeSync(e, ll(915, 612), ll(1515, 612), { avoidPerimeter: false }));
+    expect(r.legs!.map((l) => l.kind)).toEqual(['road']);
+    expect(r.distanceM).toBeCloseTo(600, 0);
+    expect(water(r)).toBe(0);
+    expect(r.steps[0].text).toMatch(/^Continue on River Road 0\.4 mi/);
+    expect(r.notes!.map((n) => n.code)).not.toContain('SNAP_MOVED');
+  });
+
+  it('a pin nearer the far bank than the near one still starts on the road', () => {
+    // 28 m south of the road: the nearest walkable cell centre is on the
+    // SOUTH bank (35 m), which the river cuts off from B on the north bank
+    const { e, ll } = riverRoad();
+    const r = ok(routeSync(e, ll(915, 640), ll(915, 435), { avoidPerimeter: false }));
+    expect(r.legs![0].kind).toBe('road');
+    expect(r.legs![0].name).toBe('River Road');
+    expect(water(r)).toBe(0);
+    expect(r.notes!.find((n) => n.code === 'SNAP_MOVED')?.text)
+      .toBe('A moved 28 m onto River Road (the ground at the pin is water, ice or a cliff).');
+    // it reaches the north bank the only way there is: off the road's end
+    expect(r.legs!.at(-1)!.kind).toBe('xc');
+  });
+
+  it('a pin in the river away from any road still snaps to the nearest bank', () => {
+    const { e, ll } = riverRoad();
+    const r = ok(routeSync(e, ll(45, 640), ll(45, 735), { avoidPerimeter: false }));
+    expect(r.notes!.find((n) => n.code === 'SNAP_MOVED')?.text).toMatch(/^A moved 35 m to the nearest walkable ground/);
+  });
+});
+
 describe('gunzip', () => {
   it('passes through bytes a server already inflated (Content-Encoding: gzip)', async () => {
     const { gunzip, parseRdg1 } = await import('./rdg1');

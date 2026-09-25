@@ -8,8 +8,10 @@
  *   route      A→B: endpoints → search passes → pieces → smoothed legs
  *   veg        RGBA of the vegetation classes for the map layer
  *
- * Endpoint rules: a pin on an impassable cell (open water, > 45°) snaps to
- * the nearest walkable cell within 150 m (SNAP_MOVED). A pin inside the
+ * Endpoint rules: a pin on an impassable cell (open water, > 45°) within
+ * 30 m of a road or trail vertex starts on that vertex (snapToNetwork);
+ * otherwise it snaps to the nearest walkable cell within 150 m. Either
+ * move gets SNAP_MOVED (onto the network, from 5 m). A pin inside the
  * masked perimeter opens only what it needs (rasterize.releaseEndpoint):
  * inside a fire polygon, that polygon (ENDPOINT_IN_PERIM); within the 60 m
  * standoff only, the bit of standoff around it (ENDPOINT_NEAR_PERIM). The
@@ -33,7 +35,7 @@ import { buildHybridGraph, cellOf, type HybridGraph } from './hybridGraph';
 import { buildLegs, fmtMiles, fordsText, stepsFor, totals, type Piece } from './legs';
 import { PACE_LUT } from './pacecode';
 import { perimeterMask, releaseEndpoint, type GridPolygon } from './rasterize';
-import { gunzip, parseRdg1, type Rdg1 } from './rdg1';
+import { gunzip, parseRdg1, str, type Rdg1 } from './rdg1';
 import { pointInRings } from './safety';
 import { smoothRun } from './smooth';
 import type { RoutingBundle } from './types';
@@ -53,11 +55,15 @@ export interface RouteOptions {
 }
 
 export const SNAP_M = 150;
+/** A pin on impassable ground this close to a road/trail vertex is on it. */
+export const NET_SNAP_M = 30;
 export const PERIMETER_STANDOFF_M = 60;
 const PASS1_CAP = 2_500_000;
 const PASS2_CAP = 4_000_000;
 
-type Pt = { x: number; y: number; cell: number };
+/** A route endpoint: a cell, or with `node` that graph node. */
+type Pt = { x: number; y: number; cell: number; node?: number };
+type Snapped = { pt: Pt; movedM: number; onto?: string | null };
 
 export class OffroadEngine {
   /** perimeterMask: MASK_FIRE / MASK_STANDOFF / 0. */
@@ -126,8 +132,47 @@ export class OffroadEngine {
     return cell >= 0 && Number.isFinite(PACE_LUT[this.grid.pace[cell]]) && !(mask && mask[cell]);
   }
 
+  /** The nearest road/trail vertex within NET_SNAP_M that is not masked,
+   * for a pin on a cell the grid calls impassable. The worker burns rivers
+   * under the roads and trails that follow them (SISI: 178 vertices on
+   * river cells, where no portal reaches the network), and the nearest
+   * walkable cell can be the far bank: a pin on Company Creek Road was
+   * drawn wading 25 m of the Stehekin River, then sent 7.5 km round by
+   * Harlequin Bridge. */
+  snapToNetwork(x: number, y: number, mask: Uint8Array | null): Snapped | null {
+    const g = this.graph;
+    const W = this.grid.width;
+    const k = this.grid.cell;
+    const c0 = Math.floor(x / k);
+    const r0 = Math.floor(y / k);
+    const R = Math.ceil(NET_SNAP_M / k);
+    let best = -1;
+    let bd = NET_SNAP_M;
+    for (let r = r0 - R; r <= r0 + R; r++) {
+      for (let c = c0 - R; c <= c0 + R; c++) {
+        if (c < 0 || r < 0 || c >= W || r >= this.grid.height || (mask && mask[r * W + c])) continue;
+        const span = g.cellIndex.get(r * W + c);
+        if (!span) continue;
+        for (let i = span[0]; i < span[1]; i++) {
+          const n = g.cellNodes[i];
+          const d = Math.hypot(g.x[n] - x, g.y[n] - y);
+          if (d <= bd && g.adjStart[n] < g.adjStart[n + 1]) {
+            bd = d;
+            best = n;
+          }
+        }
+      }
+    }
+    if (best < 0) return null;
+    return {
+      pt: { x: g.x[best], y: g.y[best], cell: g.cell[best], node: best },
+      movedM: bd,
+      onto: str(this.rdg, this.rdg.name[g.adjEdge[g.adjStart[best]]]),
+    };
+  }
+
   /** Nearest walkable cell within SNAP_M (ring by ring, true distance). */
-  snap(x: number, y: number, mask: Uint8Array | null): { pt: Pt; movedM: number } | null {
+  snap(x: number, y: number, mask: Uint8Array | null): Snapped | null {
     const g = this.grid;
     const cell = cellOf(g, x, y);
     if (this.walkable(cell, mask)) return { pt: { x, y, cell }, movedM: 0 };
@@ -207,7 +252,11 @@ export class OffroadEngine {
       }
       return best;
     };
-    let cur: Piece | null = { kind: 'xc', pts: [a, s.position(states[0])] };
+    // an endpoint on a graph node (snapToNetwork) IS its state's position:
+    // no cross-country stub to or from it
+    const same = (p: [number, number], q: [number, number]) => p[0] === q[0] && p[1] === q[1];
+    const p0 = s.position(states[0]);
+    let cur: Piece | null = { kind: 'xc', pts: same(a, p0) ? [a] : [a, p0] };
     pieces.push(cur);
     for (let i = 1; i < states.length; i++) {
       const p = states[i - 1];
@@ -229,8 +278,12 @@ export class OffroadEngine {
         pieces.push(cur);
       }
     }
-    if (cur.kind === 'xc') cur.pts.push(b);
-    else pieces.push({ kind: 'xc', pts: [s.position(states[states.length - 1]), b] });
+    const pn = s.position(states[states.length - 1]);
+    if (cur.kind === 'xc') {
+      if (!same(cur.pts[cur.pts.length - 1], b)) cur.pts.push(b);
+    } else if (!same(pn, b)) {
+      pieces.push({ kind: 'xc', pts: [pn, b] });
+    }
     return pieces;
   }
 
@@ -336,29 +389,41 @@ export class OffroadEngine {
     const b = this.toGridM(...bLL);
     const notes: RouteNote[] = [];
     const mask = opts.avoidPerimeter && this.mask ? this.releaseEndpoints(this.mask, a, b, notes) : null;
+    type Found = { s: HybridSearch; weighted: boolean; notes: RouteNote[];
+      a: [number, number]; b: [number, number] };
     const tryRoute = function* (self: OffroadEngine, m: Uint8Array | null)
-      : Generator<number, OffroadResult | { s: HybridSearch; weighted: boolean; notes: RouteNote[] }, void> {
+      : Generator<number, OffroadResult | Found, void> {
       const n2: RouteNote[] = [];
-      const sa = self.snap(a[0], a[1], m);
-      const sb = self.snap(b[0], b[1], m);
+      const place = (p: [number, number]) => (self.walkable(cellOf(self.grid, p[0], p[1]), m) ? null
+        : self.snapToNetwork(p[0], p[1], m)) ?? self.snap(p[0], p[1], m);
+      const sa = place(a);
+      const sb = place(b);
       if (!sa || !sb) {
         return { ok: false, code: 'no-path', message: `No walkable ground within ${SNAP_M} m of ${!sa ? 'A' : 'B'}.` };
       }
       for (const [s, w] of [[sa, 'A'], [sb, 'B']] as const) {
-        if (s.movedM > 0) {
+        if (s.pt.node != null) {
+          // a finger's width off the road: only say so when it shows
+          if (s.movedM >= 5) {
+            n2.push({ level: 'info', code: 'SNAP_MOVED',
+              text: `${w} moved ${Math.round(s.movedM)} m onto ${s.onto ?? 'the nearest road or trail'} (the ground at the pin is water, ice or a cliff).` });
+          }
+        } else if (s.movedM > 0) {
           n2.push({ level: 'info', code: 'SNAP_MOVED',
             text: `${w} moved ${Math.round(s.movedM)} m to the nearest walkable ground (open water, cliff or the perimeter at the pin).` });
         }
       }
+      // a pin moved onto the network starts the drawn line there, not in the river
+      const end = (s: Snapped, p: [number, number]): [number, number] => (s.pt.node != null ? [s.pt.x, s.pt.y] : p);
       const r = yield* self.search(sa.pt, sb.pt, m, slice);
-      if (r.s) return { s: r.s, weighted: r.weighted, notes: n2 };
+      if (r.s) return { s: r.s, weighted: r.weighted, notes: n2, a: end(sa, a), b: end(sb, b) };
       return r.status === 'budget'
         ? { ok: false, code: 'budget', message: 'Route search took too long on this device. Try closer points.' }
         : { ok: false, code: 'no-path', message: 'No walkable route inside the routing area — cliffs, open water, or the fire perimeter block every path.' };
     };
     const first = yield* tryRoute(this, mask);
     if ('s' in first) {
-      return { ok: true, route: this.assemble(first.s, a, b, mask, [...notes, ...first.notes],
+      return { ok: true, route: this.assemble(first.s, first.a, first.b, mask, [...notes, ...first.notes],
         first.weighted, t0, opts, !!mask) };
     }
     if (!first.ok && first.code === 'no-path' && mask) {
@@ -368,7 +433,7 @@ export class OffroadEngine {
           text: 'This route goes THROUGH the latest mapped fire perimeter.' }, ...alt.notes];
         return { ok: false, code: 'blocked_by_perimeter',
           message: 'The fire perimeter blocks every walkable route between these points.',
-          alternative: this.assemble(alt.s, a, b, null, altNotes, alt.weighted, t0, opts, false) };
+          alternative: this.assemble(alt.s, alt.a, alt.b, null, altNotes, alt.weighted, t0, opts, false) };
       }
     }
     return first;
