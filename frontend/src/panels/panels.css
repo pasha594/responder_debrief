@@ -2079,6 +2079,21 @@
   align-items: flex-start;
   gap: 8px;
 }
+/* The toolbar box runs from the left edge to the sidebar and grows as tall
+   as its tallest child (an open Walk card). Its empty area covered the map,
+   so clicks, drags and wheel zoom beside the card did nothing. Only the
+   controls take pointer events. The same goes for the search control's
+   column and top row, which size to their widest and tallest child. */
+.rd-map-toolbar,
+.rd-map-toolbar .rd-sd-control,
+.rd-map-toolbar .rd-sd-toprow {
+  pointer-events: none;
+}
+.rd-map-toolbar > :not(.rd-sd-control),
+.rd-map-toolbar .rd-sd-control > :not(.rd-sd-toprow),
+.rd-map-toolbar .rd-sd-toprow > * {
+  pointer-events: auto;
+}
 /* Collapsed sidebar is a 48px rail: the row has its room back. */
 .rd-app:has(.rd-sidebar--collapsed) .rd-map-toolbar {
   right: 60px;

@@ -1,5 +1,19 @@
 /* Walk route card (kept out of panels.css, which other work edits). */
 .rd-walk { display: flex; flex-direction: column; gap: 6px; font-size: 12px; margin-top: 4px; }
+/* The directions card holding a Walk route stops above the timeline, and the
+   route details scroll inside it: the card is a flex column, and only
+   .rd-walk may shrink below its content. 64px = the toolbar's 12px top, the
+   back/basemap line the search bar wraps under on narrow screens (32 + 8)
+   and a 12px gap. contain: a scroll that hits the end stays in the card. */
+.rd-sd-bar:has(.rd-walk) {
+  max-height: calc(100vh - var(--timeline-h) - 64px);
+  max-height: calc(100dvh - var(--timeline-h) - 64px);
+}
+.rd-walk { min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+@media (max-width: 767px) {
+  /* ...and above the fire panel's peeking sheet (panels.css: 108px) */
+  .rd-sd-bar:has(.rd-walk) { max-height: calc(100dvh - var(--timeline-h) - 64px - 108px); }
+}
 .rd-walk-time strong { font-size: 14px; }
 .rd-walk-muted { color: var(--color-text-muted); }
 .rd-walk-split { display: flex; height: 5px; border-radius: 3px; overflow: hidden; background: var(--color-border, #444); }
@@ -11,7 +25,6 @@
 .rd-walk-sub { display: block; font-weight: 400; color: var(--color-text-muted); }
 .rd-walk-note--warn { color: #e0a24a; }
 .rd-walk-note--info { color: var(--color-text-muted); }
-.rd-walk-prov { font-size: 11px; color: var(--color-text-muted); }
 .rd-walk-avoid { font-size: 12px; }
 .rd-walk-steps { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 4px; }
 .rd-walk-alt { align-self: flex-start; }
