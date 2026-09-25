@@ -1166,11 +1166,27 @@
   fill: var(--color-text-muted);
 }
 
-/* MapLibre's "i" draws a 14.4px black disc on its 24px white button, a
-   4.8px white ring beside the scale bar's 2px lines. Same icon with the
-   viewBox cropped in: the disc grows to 20px and the ring matches at 2px. */
-.rd-map-root .maplibregl-ctrl-attrib-button {
-  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' fill-rule='evenodd' viewBox='2.8 2.8 14.4 14.4'%3E%3Cpath d='M4 10a6 6 0 1 0 12 0 6 6 0 1 0-12 0m5-3a1 1 0 1 0 2 0 1 1 0 1 0-2 0m0 3a1 1 0 1 1 2 0v3a1 1 0 1 1-2 0'/%3E%3C/svg%3E");
+/* MapLibre's "i" is a black disc in a thick white ring. Ours is drawn like
+   the compass and the scale bar beside it: the overlays' translucent ground
+   in a 2px ring (the scale bar's line) with the glyph in the same text
+   color. The white control behind it is cleared while it is just the "i". */
+.rd-map-root .maplibregl-ctrl-attrib.maplibregl-compact:not(.maplibregl-compact-show) {
+  background: none;
+}
+.rd-map-root .maplibregl-ctrl-attrib.maplibregl-compact .maplibregl-ctrl-attrib-button {
+  background: var(--overlay-bg);
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+  border: 2px solid var(--color-text);
+}
+/* MapLibre's glyph, cut to the 20px inside the ring. */
+.rd-map-root .maplibregl-ctrl-attrib-button::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: var(--color-text);
+  -webkit-mask: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='4 4 12 12'%3E%3Cpath d='M9 7a1 1 0 1 0 2 0 1 1 0 1 0-2 0m0 3a1 1 0 1 1 2 0v3a1 1 0 1 1-2 0z'/%3E%3C/svg%3E") center / 100% no-repeat;
+  mask: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='4 4 12 12'%3E%3Cpath d='M9 7a1 1 0 1 0 2 0 1 1 0 1 0-2 0m0 3a1 1 0 1 1 2 0v3a1 1 0 1 1-2 0z'/%3E%3C/svg%3E") center / 100% no-repeat;
 }
 
 /* MapLibre's own bottom-right corner (the attribution) belongs to the
