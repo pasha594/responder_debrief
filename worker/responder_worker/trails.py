@@ -11,7 +11,8 @@ never touches state/state.json or catalog.json). Steps:
 3. fetch  — USFS weekly FGDB zip (atomic, unlike the REST service that was
             caught mid-reload); BLM/NPS via GDAL's ESRIJSON auto-paging, with
             the returned count checked against returnCountOnly.
-4. normalize (trails_normalize, streamed GeoJSONSeq) + a count sanity gate.
+4. normalize (trails_normalize, streamed into a GeoJSON FeatureCollection so
+            GDAL keeps src_date a string) + a count sanity gate.
 5. build  — GPKG with trails_lo/trails_hi, FlatGeobuf, and PMTiles z7-13
             through the GDAL 3.8.4 PMTiles writer with a two-layer CONF.
             CPL_DEBUG=MVT lines count tiles GDAL silently degraded.
@@ -233,7 +234,8 @@ def _first_lon(geom: dict) -> float | None:
     return c[0] if isinstance(c, list) and c else None
 
 
-def normalize_file(kind: str, src: Path, out_fh, *, src_date: str | None) -> dict:
+def normalize_file(kind: str, src: Path, out: gdal_cli.FeatureCollectionWriter, *,
+                   src_date: str | None) -> dict:
     """Stream one source's GeoJSONSeq through its normalizer. -> counts."""
     kept = dropped_geom = dropped_rule = 0
     with open(src, encoding="utf-8") as f:
@@ -262,8 +264,7 @@ def normalize_file(kind: str, src: Path, out_fh, *, src_date: str | None) -> dic
             if rec is None:
                 dropped_rule += 1
                 continue
-            out_fh.write(json.dumps({"type": "Feature", "properties": rec, "geometry": geom},
-                                    ensure_ascii=False, separators=(",", ":")) + "\n")
+            out.write({"type": "Feature", "properties": rec, "geometry": geom})
             kept += 1
     return {"kept": kept, "dropped_null_geometry": dropped_geom, "dropped_rules": dropped_rule}
 
@@ -274,15 +275,17 @@ def normalize_file(kind: str, src: Path, out_fh, *, src_date: str | None) -> dic
 
 def build_outputs(norm: Path, workdir: Path, *, name: str, log=print,
                   minzoom: int = PMTILES_MINZOOM, maxzoom: int = PMTILES_MAXZOOM) -> dict:
-    """norm.geojsonl -> trails.gpkg (trails_hi + trails_lo), trails.fgb,
-    trails.pmtiles; returns paths + the PMTiles summary."""
+    """norm.geojson (a FeatureCollection) -> trails.gpkg (trails_hi +
+    trails_lo), trails.fgb, trails.pmtiles; returns paths + the PMTiles
+    summary. src_date stays a string (gdal_cli.GEOJSON_AS_WRITTEN)."""
     gpkg = workdir / "trails.gpkg"
     fgb = workdir / "trails.fgb"
     pmt = workdir / "trails.pmtiles"
     for p in (gpkg, fgb, pmt):
         p.unlink(missing_ok=True)
-    gdal_cli.run(["ogr2ogr", "-f", "GPKG", str(gpkg), str(norm), "-nln", "trails_hi",
-                  "-nlt", "MULTILINESTRING", "-lco", "SPATIAL_INDEX=YES"], timeout=1800)
+    gdal_cli.run(["ogr2ogr", "-f", "GPKG", str(gpkg), *gdal_cli.GEOJSON_AS_WRITTEN, str(norm),
+                  "-nln", "trails_hi", "-nlt", "MULTILINESTRING", "-lco", "SPATIAL_INDEX=YES"],
+                 timeout=1800)
     gdal_cli.run(["ogr2ogr", "-update", str(gpkg), str(gpkg), "-nln", "trails_lo",
                   "-sql", f"SELECT geom, {', '.join(tn.LO_FIELDS)} FROM trails_hi"], timeout=1800)
     gdal_cli.run(["ogr2ogr", "-f", "FlatGeobuf", str(fgb), str(gpkg), "trails_hi",
@@ -426,9 +429,9 @@ def sync(client: httpx.Client, storage: Storage, *, workdir: Path, force: bool =
                                     where=NPS_WHERE, log=log),
     }
     try:
-        norm = workdir / "norm.geojsonl"
+        norm = workdir / "norm.geojson"
         counts, norm_stats = {}, {}
-        with open(norm, "w", encoding="utf-8") as fh:
+        with gdal_cli.FeatureCollectionWriter(norm) as fh:
             for src in SOURCES:
                 if deadline_passed():
                     raise RuntimeError("deadline passed while fetching")

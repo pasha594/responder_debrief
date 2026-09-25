@@ -127,6 +127,25 @@ class TestGdalRasterIo:
     def test_drivers(self):
         assert {"PMTiles", "GPKG", "FlatGeobuf"} <= gdal_cli.drivers("vector")
 
+    def test_iso_dates_stay_strings(self, tmp_path):
+        # The first real build's src_date came out Date/DateTime ('2026/01/12'
+        # in tiles, DateTime in trails.fgb) because GeoJSONSeq input is typed
+        # by value.
+        fc = tmp_path / "t.geojson"
+        with gdal_cli.FeatureCollectionWriter(fc) as w:
+            for d in ("2026-09-23", "2026-01-12"):
+                w.write({"type": "Feature", "properties": {"src_date": d, "name": "Agnes Gorge"},
+                         "geometry": {"type": "LineString", "coordinates": [[-120.8, 48.3],
+                                                                            [-120.81, 48.31]]}})
+        assert w.count == 2
+        gpkg, fgb = tmp_path / "t.gpkg", tmp_path / "t.fgb"
+        gdal_cli.run(["ogr2ogr", "-f", "GPKG", str(gpkg), *gdal_cli.GEOJSON_AS_WRITTEN, str(fc),
+                      "-nln", "t"])
+        gdal_cli.run(["ogr2ogr", "-f", "FlatGeobuf", str(fgb), str(gpkg), "t"])
+        out = gdal_cli.run(["ogrinfo", "-al", "-q", str(fgb)]).stdout
+        assert "src_date (String) = 2026-09-23" in out
+        assert "src_date (String) = 2026-01-12" in out
+
 
 class TestKeyRules:
     @pytest.mark.parametrize("key,cc", [

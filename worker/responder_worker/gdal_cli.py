@@ -59,6 +59,43 @@ def run(cmd: list[str], *, timeout: float = 600, env: dict | None = None,
         raise GdalError(f"{Path(cmd[0]).name} timed out after {timeout:.0f}s") from exc
 
 
+# GDAL's GeoJSON readers type a string property whose values all look like
+# dates ('2026-09-23') as Date, and the writers then re-format it: the
+# FlatGeobuf column becomes DateTime, MVT writes '2026-09-23' on 3.8.4 but
+# '2026/09/23' on 3.13, and a DateTime read back from the FGB reaches the
+# per-fire tiles as '2026-09-23T00:00:00'. GeoJSONSeq has no switch for that
+# (3.8.4 through 3.13); the GeoJSON driver's DATE_AS_STRING open option
+# (GDAL >= 3.0.3) does. So files we write for ogr2ogr to ingest are
+# FeatureCollections, opened with this.
+GEOJSON_AS_WRITTEN = ["-oo", "DATE_AS_STRING=YES"]
+
+
+class FeatureCollectionWriter:
+    """Stream features into a GeoJSON FeatureCollection, one per line.
+    Read it back with GEOJSON_AS_WRITTEN."""
+
+    def __init__(self, path: Path):
+        self.count = 0
+        self._f = open(path, "w", encoding="utf-8")
+        self._f.write('{"type":"FeatureCollection","features":[\n')
+
+    def write(self, feature: dict) -> None:
+        self._f.write(("," if self.count else "")
+                      + json.dumps(feature, ensure_ascii=False, separators=(",", ":")) + "\n")
+        self.count += 1
+
+    def close(self) -> None:
+        if not self._f.closed:
+            self._f.write("]}\n")
+            self._f.close()
+
+    def __enter__(self) -> "FeatureCollectionWriter":
+        return self
+
+    def __exit__(self, *exc) -> None:
+        self.close()
+
+
 def version() -> str | None:
     if which("gdalinfo") is None:
         return None

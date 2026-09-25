@@ -160,36 +160,35 @@ def _lf_incomplete(paths25: dict) -> bool:
 def write_fire_trails(g: graph_build.Graph, agency_ll, aoi: dict, workdir: Path,
                       name: str) -> Path | None:
     zone, northern = aoi["zone"], aoi["northern"]
-    trails_seq = workdir / "fire_trails.geojsonl"
-    ways_seq = workdir / "fire_ways.geojsonl"
-    n_tr = n_w = 0
-    with open(trails_seq, "w", encoding="utf-8") as f:
+    # FeatureCollections, so src_date stays a string (gdal_cli.GEOJSON_AS_WRITTEN)
+    trails_fc = workdir / "fire_trails.geojson"
+    ways_fc = workdir / "fire_ways.geojson"
+    with gdal_cli.FeatureCollectionWriter(trails_fc) as f:
         for props, ln in agency_ll:
-            f.write(json.dumps({"type": "Feature", "properties": props,
-                                "geometry": {"type": "LineString", "coordinates": ln}}) + "\n")
-            n_tr += 1
-    with open(ways_seq, "w", encoding="utf-8") as f:
+            f.write({"type": "Feature", "properties": props,
+                     "geometry": {"type": "LineString", "coordinates": ln}})
+        n_tr = f.count
+    with gdal_cli.FeatureCollectionWriter(ways_fc) as f:
         for e in g.edges:
             if e.src != graph_build.SRC_OSM:
                 continue
             a = np.asarray(e.xy)
             lon, lat = utm.inv(a[:, 0], a[:, 1], zone, northern)
             coords = [[round(x, 7), round(y, 7)] for x, y in zip(np.atleast_1d(lon), np.atleast_1d(lat))]
-            f.write(json.dumps({"type": "Feature",
-                                "properties": {"cls": WAY_CLASS.get(e.kind, 4), "name": e.name,
-                                               "ref": e.ref},
-                                "geometry": {"type": "LineString", "coordinates": coords}}) + "\n")
-            n_w += 1
+            f.write({"type": "Feature",
+                     "properties": {"cls": WAY_CLASS.get(e.kind, 4), "name": e.name, "ref": e.ref},
+                     "geometry": {"type": "LineString", "coordinates": coords}})
+        n_w = f.count
     if not n_tr and not n_w:
         return None
     gpkg = workdir / "fire_disp.gpkg"
     gpkg.unlink(missing_ok=True)
     layers = []
-    for seq, lname, n in ((trails_seq, "trails", n_tr), (ways_seq, "ways", n_w)):
+    for fc, lname, n in ((trails_fc, "trails", n_tr), (ways_fc, "ways", n_w)):
         if not n:
             continue
-        cmd = ["ogr2ogr", "-f", "GPKG", str(gpkg), str(seq), "-nln", lname,
-               "-nlt", "MULTILINESTRING"]
+        cmd = ["ogr2ogr", "-f", "GPKG", str(gpkg), *gdal_cli.GEOJSON_AS_WRITTEN, str(fc),
+               "-nln", lname, "-nlt", "MULTILINESTRING"]
         if gpkg.exists():
             cmd[1:1] = ["-update"]
         gdal_cli.run(cmd, timeout=600)

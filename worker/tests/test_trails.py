@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 
 import pytest
 
-from responder_worker import config, pmtiles_inspect, trails
+from responder_worker import config, gdal_cli, pmtiles_inspect, trails
 from responder_worker import trails_normalize as tn
 from responder_worker.b2 import DryRunStorage
 
@@ -297,6 +297,8 @@ class TestSyncEndToEnd:
         assert (ptr["minzoom"], ptr["maxzoom"]) == (7, 13)
         s = pmtiles_inspect.summarize(tmp_path / "out" / f"trails/b{bid}/trails.pmtiles")
         assert s["sample_layers"] == ["trails"] and s["header"]["clustered"]
+        fgb = gdal_cli.run(["ogrinfo", "-so", "-al", str(tmp_path / "out" / f"trails/b{bid}/trails.fgb")])
+        assert "src_date: String" in fgb.stdout  # not GDAL's sniffed Date/DateTime
         health = storage.get_json("catalogs/health/trails.json")
         assert health["last_run"]["build_id"] == bid and health["last_failure"] is None
         # second run: unchanged signature, recent build -> no-op
