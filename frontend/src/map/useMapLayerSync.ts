@@ -58,6 +58,7 @@ import { irHeatLayer } from './layers/irHeatLayer';
 import { historicPerimetersLayer } from './layers/historicPerimetersLayer';
 import { routeLayer } from './layers/routeLayer';
 import { trafficLayer } from './layers/trafficLayer';
+import { usgsTrailsLayer } from './layers/usgsTrailsLayer';
 import { incidentsLayer } from './layers/incidentsLayer';
 import { rangeLayer } from './layers/rangeLayer';
 
@@ -71,6 +72,7 @@ const MANAGERS: LayerManager[] = [
   windArrowsLayer,
   irHeatLayer,
   trafficLayer,
+  usgsTrailsLayer,
   historicPerimetersLayer,
   perimeterLayer,
   hotspotLayer,

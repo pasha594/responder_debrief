@@ -44,6 +44,12 @@ describe('RD_LAYER_ORDER', () => {
     expect(idx('rd-weather-smoke-a')).toBeLessThan(idx('rd-national-perimeters'));
     expect(idx('rd-national-perimeters')).toBeLessThan(idx('rd-perimeter-fill'));
   });
+
+  it('puts USGS trails above the weather rasters, still below labels', () => {
+    const idx = (id: string) => RD_LAYER_ORDER.indexOf(id as (typeof RD_LAYER_ORDER)[number]);
+    expect(idx('rd-weather-apcptot-b')).toBeLessThan(idx('rd-usgs-trails'));
+    expect(idx('rd-usgs-trails')).toBeLessThan(idx('rd-national-perimeters'));
+  });
 });
 
 describe('ensureOrder', () => {

@@ -328,6 +328,7 @@ function MapLayerToggles() {
   const perimeters = useStore((s) => s.layers.perimeters.visible);
   const historic = useStore((s) => s.layers.historicPerimeters.visible);
   const traffic = useStore((s) => s.layers.traffic.visible);
+  const trails = useStore((s) => s.layers.trails.visible);
   const incidents = useStore((s) => s.layers.incidents.visible);
   const actions = useStore((s) => s.actions);
   return (
@@ -347,6 +348,11 @@ function MapLayerToggles() {
           onChange={() => actions.toggleHistoricPerimeters()}
         />
         <span>Historic perimeters</span>
+      </label>
+      <label className="rd-field--row">
+        <input type="checkbox" checked={trails} onChange={() => actions.toggleTrails()} />
+        <span>Trails</span>
+        <span className="rd-title-meta">USGS · online</span>
       </label>
       {trafficAvailable && (
         <label className="rd-field--row">

@@ -78,7 +78,7 @@ const SOURCES: Source[] = [
     name: 'USGS — The National Map',
     what:
       'U.S. Geological Survey national mapping services. Provides the topographic and aerial ' +
-      'imagery basemaps.',
+      'imagery basemaps and the trails overlay (National Digital Trails).',
     url: 'https://www.usgs.gov/programs/national-geospatial-program/national-map',
     label: 'usgs.gov',
   },

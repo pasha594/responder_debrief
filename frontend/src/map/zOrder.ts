@@ -26,6 +26,7 @@ export const RD_LAYER_ORDER = [
   'rd-weather-meq-a', 'rd-weather-meq-b',
   'rd-weather-apcp01-a', 'rd-weather-apcp01-b',
   'rd-weather-apcptot-a', 'rd-weather-apcptot-b',
+  'rd-usgs-trails', // thin lines: over the weather wash, under the labels
   'rd-national-perimeters',
   // ── basemap symbol layers sit here ──
   // vectors above labels
