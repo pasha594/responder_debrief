@@ -349,6 +349,13 @@ function MapLayerToggles() {
         />
         <span>Historic perimeters</span>
       </label>
+      {historic && (
+        <div className="rd-hist-legend" aria-hidden="true">
+          <span className="rd-hist-chip" style={{ background: '#e0a24a' }} /> recent
+          <span className="rd-hist-chip" style={{ background: '#a5875a' }} /> ~5 yr
+          <span className="rd-hist-chip" style={{ background: '#6f675f' }} /> 10 yr
+        </div>
+      )}
       <label className="rd-field--row">
         <input type="checkbox" checked={trails} onChange={() => actions.toggleTrails()} />
         <span>Trails</span>
@@ -366,13 +373,6 @@ function MapLayerToggles() {
           <span>Road incidents</span>
           <span className="rd-title-meta">closures, delays</span>
         </label>
-      )}
-      {historic && (
-        <div className="rd-hist-legend" aria-hidden="true">
-          <span className="rd-hist-chip" style={{ background: '#e0a24a' }} /> recent
-          <span className="rd-hist-chip" style={{ background: '#a5875a' }} /> ~5 yr
-          <span className="rd-hist-chip" style={{ background: '#6f675f' }} /> 10 yr
-        </div>
       )}
     </section>
   );
