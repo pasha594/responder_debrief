@@ -76,12 +76,11 @@ export function DrawMapToolbar() {
           <ToolIcon name="pencil" /> Drawing Tools {open ? '▴' : '▾'}
         </button>
       )}
-      {showTools && (
+      {showTools && tool !== 'none' && (
         <button
           type="button"
-          className={`rd-draw-mapbtn${tool !== 'none' ? ' rd-draw-mapbtn--stop' : ''}`}
+          className="rd-draw-mapbtn rd-draw-mapbtn--stop"
           onClick={() => actions.setDrawTool('none')}
-          disabled={tool === 'none'}
         >
           <ToolIcon name="stop" /> Stop drawing
         </button>
