@@ -18,8 +18,11 @@
  * move into the goal cell: a pin on or beside a trail must not tilt the
  * route toward arriving cross-country. Penalties only raise edge costs, so
  * h stays admissible and consistent.
- * The perimeter mask (non-zero = blocked) blocks cells AND graph nodes (a
- * trail through the fire is not a way around it). Graph nodes are otherwise
+ * The perimeter mask (non-zero = masked) blocks cells AND graph nodes (a
+ * trail through the fire is not a way around it). With `maskFactor` (a pin
+ * in the fire or its standoff) it multiplies their costs instead: the route
+ * leaves by the quickest way and otherwise stays out. A factor >= 1 only
+ * raises costs, so h stays admissible. Graph nodes are otherwise
  * allowed on impassable cells: bridges cross rivers, switchbacks climb
  * cliffs. So a start or goal may be a graph node (`node`): a pin on a road
  * that runs over river cells, where no portal reaches it.
@@ -50,8 +53,11 @@ export interface Window {
 export interface SearchInput {
   grid: RoutingGrid;
   graph: HybridGraph;
-  /** Perimeter mask (non-zero = blocked) or null when avoidance is off. */
+  /** Perimeter mask (non-zero = masked) or null when avoidance is off. */
   mask: Uint8Array | null;
+  /** Masked cells and nodes cost this many times more (>= 1) instead of
+   * being blocked. */
+  maskFactor?: number;
   window: Window;
   /** Start / goal in grid metres (x east, y south of the origin). With
    * `node`, the endpoint is that graph node (x, y are its position). */
@@ -87,8 +93,11 @@ export class HybridSearch {
   /** The start cell holds a usable trail/road vertex: the pin is on the
    * network, so stepping straight off it cross-country is leaving it. */
   private readonly startOnNetwork: boolean = false;
+  /** Cost multiplier of a masked cell (Infinity: blocked). */
+  private readonly maskX: number;
 
   constructor(private readonly inp: SearchInput) {
+    this.maskX = inp.maskFactor ?? Infinity;
     const w = inp.window;
     this.ww = w.c1 - w.c0;
     this.wh = w.r1 - w.r0;
@@ -120,7 +129,7 @@ export class HybridSearch {
       }
     }
     const [sx, sy] = this.cellCenter(inp.start.cell);
-    const p0 = PACE_LUT[inp.grid.pace[inp.start.cell]];
+    const p0 = this.pace(inp.start.cell);
     this.g[s] = Math.hypot(inp.start.x - sx, inp.start.y - sy) * (Number.isFinite(p0) ? p0 : 0);
     this.heap.push(this.g[s] + this.h(sx, sy), s);
   }
@@ -160,16 +169,24 @@ export class HybridSearch {
     if (f < this.exitBound) this.exitBound = f;
   }
 
-  private cellBlocked(cell: number): boolean {
+  /** 1, or maskX on a masked cell. */
+  private factor(cell: number): number {
     const m = this.inp.mask;
-    return !Number.isFinite(PACE_LUT[this.inp.grid.pace[cell]]) || (!!m && m[cell] !== 0);
+    return m && m[cell] !== 0 ? this.maskX : 1;
+  }
+
+  /** A cell's pace with the mask applied (Infinity: blocked). */
+  private pace(cell: number): number {
+    return PACE_LUT[this.inp.grid.pace[cell]] * this.factor(cell);
+  }
+
+  private cellBlocked(cell: number): boolean {
+    return !Number.isFinite(this.pace(cell));
   }
 
   private nodeBlocked(node: number): boolean {
     const c = this.inp.graph.cell[node];
-    if (c < 0 || this.cellState(c) < 0) return true;
-    const m = this.inp.mask;
-    return !!m && m[c] !== 0;
+    return c < 0 || this.cellState(c) < 0 || !Number.isFinite(this.factor(c));
   }
 
   private relax(u: number, v: number, cost: number, vx: number, vy: number): void {
@@ -201,7 +218,7 @@ export class HybridSearch {
       n++;
       if (u === this.goalState) {
         const [gx, gy] = this.cellCenter(this.inp.goal.cell);
-        const pg = PACE_LUT[grid.pace[this.inp.goal.cell]];
+        const pg = this.pace(this.inp.goal.cell);
         this.cost = this.inp.goal.node != null ? this.g[u]
           : this.g[u] + Math.hypot(this.inp.goal.x - gx, this.inp.goal.y - gy) * (Number.isFinite(pg) ? pg : 0);
         this.status = 'found';
@@ -215,7 +232,7 @@ export class HybridSearch {
         const cu = this.globalCell(u);
         const lc = u % this.ww;
         const lr = (u - lc) / this.ww;
-        const pu = PACE_LUT[grid.pace[cu]];
+        const pu = this.pace(cu);
         const zu = grid.dem[cu];
         const [ux, uy] = this.cellCenter(cu);
         // A start cell may itself be impassable only if the engine let it be
@@ -241,12 +258,12 @@ export class HybridSearch {
             if (diag && (this.cellBlocked(cu + DC[d]) || this.cellBlocked(cu + DR[d] * W))) continue;
             const zv = grid.dem[cv];
             const dz = zu === -32768 || zv === -32768 ? 0 : zv - zu;
-            const cost = dh * 0.5 * (pu + PACE_LUT[grid.pace[cv]]) * alphaFast(gradeDeg(dz, dh));
+            const cost = dh * 0.5 * (pu + this.pace(cv)) * alphaFast(gradeDeg(dz, dh));
             const v = nr * this.ww + nc;
             this.relax(u, v, v === this.goalState ? cost : cost + leave, ux + DC[d] * k, uy + DR[d] * k);
           }
           const span = graph.cellIndex.get(cu);
-          if (span && !(this.inp.mask && this.inp.mask[cu])) {
+          if (span) {
             for (let i = span[0]; i < span[1]; i++) {
               const node = graph.cellNodes[i];
               if (this.nodeBlocked(node)) continue;
@@ -257,16 +274,19 @@ export class HybridSearch {
         }
       } else {
         const node = u - wc;
+        const fu = this.factor(graph.cell[node]);
         for (let i = graph.adjStart[node]; i < graph.adjStart[node + 1]; i++) {
           const v = graph.adjTo[i];
           if (this.nodeBlocked(v)) {
             const cv = graph.cell[v];
-            if (cv >= 0 && this.cellState(cv) < 0 && !(this.inp.mask && this.inp.mask[cv])) {
+            if (cv >= 0 && this.cellState(cv) < 0 && Number.isFinite(this.factor(cv))) {
               this.noteExit(this.g[u] + graph.adjCost[i], graph.x[v], graph.y[v]);
             }
             continue;
           }
-          this.relax(u, wc + v, graph.adjCost[i], graph.x[v], graph.y[v]);
+          // half the edge in each end's cell, as for cell moves
+          const f = 0.5 * (fu + this.factor(graph.cell[v]));
+          this.relax(u, wc + v, graph.adjCost[i] * f, graph.x[v], graph.y[v]);
         }
         const cn = graph.cell[node];
         if (cn >= 0 && !this.cellBlocked(cn)) {
@@ -275,7 +295,7 @@ export class HybridSearch {
             const [cx, cy] = this.cellCenter(cn);
             const dist = Math.hypot(graph.x[node] - cx, graph.y[node] - cy);
             const leave = s === this.goalState ? 0 : LEAVE_TRAIL_PENALTY_S;
-            this.relax(u, s, dist * PACE_LUT[grid.pace[cn]] + leave, cx, cy);
+            this.relax(u, s, dist * this.pace(cn) + leave, cx, cy);
           }
         }
       }

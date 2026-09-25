@@ -62,11 +62,14 @@ export interface GoldenRoute {
     noNotes?: string[];
     /** Streams no cross-country leg may ford (grid band 3 names). */
     noFords?: string[];
+    /** Metres of line allowed inside the fire. */
+    maxFireM?: number;
   };
 }
 
-/** Standoff a pin may pass through (rasterize.releaseEndpoint opens about
- * standoff + 1.5 cells around it; 150 m covers that at 30 and 60 m). */
+/** Standoff a pin's route may pass through: it leaves a 60 m standoff by
+ * the quickest way (engine.MASKED_PACE_X); 150 m covers that at 30 and 60 m
+ * cells. */
 export const PIN_RELEASE_M = 150;
 /** Slack on a cut's saving: the search costs cell centres, the reported
  * leg the smoothed line, sampled every half cell. */
@@ -118,10 +121,12 @@ export const GOLDEN: Record<string, GoldenRoute[]> = {
     { id: 'd_off', what: 'd with avoidance off: through the fire, and it says so',
       a: [-120.884918, 48.354245], b: [-120.786722, 48.375967], avoid: false,
       expect: { notes: ['CROSSES_PERIM'] } },
-    // 8.7 km, 10 h 05 (4.0 km of steep timber inside the fire)
+    // 25.7 km, ~16 h: out of the fire the quickest way (660 m; the
+    // nearest edge, 316 m, is over a cliff), then round by Harlequin
+    // Bridge. It crossed the fire before (8.7 km, 10 h 05, 4.6 km inside).
     { id: 'e', what: 'Start inside the perimeter to Stehekin Valley Road',
       a: [-120.830681826848, 48.3466728221515], b: [-120.798008, 48.378348], pins: { a: 'fire' },
-      expect: { notes: ['ENDPOINT_IN_PERIM', 'CROSSES_PERIM'] } },
+      expect: { notes: ['ENDPOINT_IN_PERIM', 'CROSSES_PERIM'], maxFireM: 800 } },
     // 6.0 km of road, 1 h 15. It forded 2.9 km from the bridge before; A
     // is on Company Creek Road over river cells (engine.snapToNetwork).
     { id: 'f', what: 'Company Creek Road to Stehekin Valley Road across the Stehekin River',
@@ -191,6 +196,8 @@ export interface RouteMeasure {
   bridges: string[];
   /** Perimeter polygons the drawn line enters (indexes into `polys`). */
   firePolys: number[];
+  /** Metres of line inside the fire. */
+  fireM: number;
   /** Metres of line in masked (fire or standoff) cells farther than
    * PIN_RELEASE_M from both pins. */
   maskedFarM: number;
@@ -355,15 +362,21 @@ export function measureRoute(e: OffroadEngine, r: RouteResult, a: LonLat, b: Lon
   }
 
   const firePolys = new Set<number>();
+  let fireM = 0;
   let maskedFarM = 0;
   const [ax, ay] = e.toGridM(...a);
   const [bx, by] = e.toGridM(...b);
   const k = e.grid.cell;
   for (const s of pts) {
     const ll = e.toLonLat(s.x, s.y);
+    let inFire = false;
     polys.forEach((poly, i) => {
-      if (pointInRings(ll, poly)) firePolys.add(i);
+      if (pointInRings(ll, poly)) {
+        firePolys.add(i);
+        inFire = true;
+      }
     });
+    if (inFire) fireM += s.m;
     if (mask) {
       const c = Math.floor(s.y / k) * e.grid.width + Math.floor(s.x / k);
       if (mask[c] && Math.hypot(s.x - ax, s.y - ay) > PIN_RELEASE_M
@@ -401,6 +414,7 @@ export function measureRoute(e: OffroadEngine, r: RouteResult, a: LonLat, b: Lon
     cuts,
     bridges,
     firePolys: [...firePolys].sort((x, y) => x - y),
+    fireM,
     maskedFarM,
     crosses: firePolys.size > 0,
     nearestPerimM: nearestApproachM(line, polys, 1000),

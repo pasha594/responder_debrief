@@ -11,14 +11,14 @@
  * Endpoint rules: a pin on an impassable cell (open water, > 45°) within
  * 30 m of a road or trail vertex starts on that vertex (snapToNetwork);
  * otherwise it snaps to the nearest walkable cell within 150 m. Either
- * move gets SNAP_MOVED (onto the network, from 5 m). A pin inside the
- * masked perimeter opens only what it needs (rasterize.releaseEndpoint):
- * inside a fire polygon, that polygon (ENDPOINT_IN_PERIM); within the 60 m
- * standoff only, the bit of standoff around it (ENDPOINT_NEAR_PERIM). The
- * rest of the fire stays blocked. When avoidance leaves no path, the search
- * reruns without it and returns `blocked_by_perimeter` with that route
- * attached — shown only if the user asks. The engine never falls back to an
- * online engine: they don't know where the fire is.
+ * move gets SNAP_MOVED (onto the network, from 5 m). A pin on the masked
+ * perimeter — inside a fire polygon (ENDPOINT_IN_PERIM) or within the 60 m
+ * standoff (ENDPOINT_NEAR_PERIM) — stays put, and the search prices the
+ * mask at MASKED_PACE_X instead of blocking it: the route leaves by the
+ * quickest way and otherwise stays out. When avoidance leaves no path, the
+ * search reruns without it and returns `blocked_by_perimeter` with that
+ * route attached — shown only if the user asks. The engine never falls
+ * back to an online engine: they don't know where the fire is.
  *
  * Search passes: (1) window around A–B, weight 1, 2.5M settled; if a
  * route that leaves the window could be cheaper than (1)'s (exitBound),
@@ -34,9 +34,9 @@ import { decodeGrid, type RoutingGrid } from './gridDecode';
 import { buildHybridGraph, cellOf, type HybridGraph } from './hybridGraph';
 import { buildLegs, fmtMiles, fordsText, stepsFor, totals, type Piece } from './legs';
 import { PACE_LUT } from './pacecode';
-import { perimeterMask, releaseEndpoint, type GridPolygon } from './rasterize';
+import { rasterizePolygons, type GridPolygon } from './rasterize';
 import { gunzip, parseRdg1, str, type Rdg1 } from './rdg1';
-import { pointInRings } from './safety';
+import { nearestApproachM, pointInRings, type PolygonRings } from './safety';
 import { smoothRun } from './smooth';
 import type { RoutingBundle } from './types';
 import { buildVegLut } from './vegClasses';
@@ -58,6 +58,8 @@ export const SNAP_M = 150;
 /** A pin on impassable ground this close to a road/trail vertex is on it. */
 export const NET_SNAP_M = 30;
 export const PERIMETER_STANDOFF_M = 60;
+/** Cost multiplier on fire and standoff cells when a pin is on them. */
+export const MASKED_PACE_X = 20;
 const PASS1_CAP = 2_500_000;
 const PASS2_CAP = 4_000_000;
 
@@ -66,12 +68,11 @@ type Pt = { x: number; y: number; cell: number; node?: number };
 type Snapped = { pt: Pt; movedM: number; onto?: string | null };
 
 export class OffroadEngine {
-  /** perimeterMask: MASK_FIRE / MASK_STANDOFF / 0. */
+  /** The perimeter + standoff, rasterized (non-zero = masked). */
   mask: Uint8Array | null = null;
   maskKey: string | null = null;
-  /** The same perimeter in grid cell units, for exact inside tests. */
-  private polys: GridPolygon[] | null = null;
-  private standoffCells = 0;
+  /** The same perimeter (lon/lat), for exact tests on the pins. */
+  private perimeter: PolygonRings[] = [];
 
   constructor(
     readonly bundle: RoutingBundle,
@@ -106,7 +107,7 @@ export class OffroadEngine {
     this.maskKey = key;
     if (!polygons || !polygons.length) {
       this.mask = null;
-      this.polys = null;
+      this.perimeter = [];
       return 0;
     }
     const k = this.grid.cell;
@@ -114,9 +115,8 @@ export class OffroadEngine {
       const [x, y] = this.toGridM(lon, lat);
       return [x / k, y / k] as [number, number];
     })));
-    this.polys = gp;
-    this.standoffCells = marginM / k;
-    this.mask = perimeterMask(gp, this.grid.width, this.grid.height, this.standoffCells);
+    this.perimeter = polygons;
+    this.mask = rasterizePolygons(gp, this.grid.width, this.grid.height, marginM / k);
     let n = 0;
     for (let i = 0; i < this.mask.length; i++) if (this.mask[i]) n++;
     return n;
@@ -199,11 +199,11 @@ export class OffroadEngine {
     };
   }
 
-  private *search(a: Pt, b: Pt, mask: Uint8Array | null, slice: number)
+  private *search(a: Pt, b: Pt, mask: Uint8Array | null, maskFactor: number | undefined, slice: number)
     : Generator<number, { s: HybridSearch | null; status: string; weighted: boolean }, void> {
     const run = function* (win: Window, weight: number, cap: number, self: OffroadEngine) {
       const s = new HybridSearch({
-        grid: self.grid, graph: self.graph, mask, window: win,
+        grid: self.grid, graph: self.graph, mask, maskFactor, window: win,
         start: a, goal: b, weight, maxSettled: cap,
       });
       for (;;) {
@@ -294,7 +294,8 @@ export class OffroadEngine {
     const raw = this.pieces(s, a, b);
     const pieces: Piece[] = raw.map((p) => (p.kind === 'xc'
       ? { kind: 'xc', pts: smoothRun(this.grid, mask, p.pts) } : p));
-    const legs = buildLegs({ grid: this.grid, mask, graph: this.graph, rdg: this.rdg,
+    // times are the ground's alone: a priced mask is crossed near a pin
+    const legs = buildLegs({ grid: this.grid, mask: null, graph: this.graph, rdg: this.rdg,
       toLonLat: this.toLonLat }, pieces);
     const t = totals(legs);
     const coords: [number, number][] = [];
@@ -349,33 +350,34 @@ export class OffroadEngine {
     };
   }
 
-  /** The mask to route on: `mask` itself, or a copy with the part each
-   * masked pin needs opened (rasterize.releaseEndpoint). Adds the notes. */
-  private releaseEndpoints(mask: Uint8Array, a: [number, number], b: [number, number],
-    notes: RouteNote[]): Uint8Array {
-    const k = this.grid.cell;
+  /** Notes for pins on masked cells; true when there is one. */
+  private maskedPins(mask: Uint8Array, pins: [string, [number, number], [number, number]][],
+    notes: RouteNote[]): boolean {
     const inside: string[] = [];
     const near: string[] = [];
-    let out = mask;
-    for (const [p, who] of [[a, 'A'], [b, 'B']] as const) {
-      const cell = cellOf(this.grid, p[0], p[1]);
+    let nearM = 0;
+    for (const [who, ll, [x, y]] of pins) {
+      const cell = cellOf(this.grid, x, y);
       if (cell < 0 || !mask[cell]) continue;
-      const isIn = (this.polys ?? []).some((poly) => pointInRings([p[0] / k, p[1] / k], poly));
-      if (out === mask) out = mask.slice();
-      releaseEndpoint(out, this.grid.width, this.grid.height, cell, isIn, this.standoffCells);
-      (isIn ? inside : near).push(who);
+      if (this.perimeter.some((poly) => pointInRings(ll, poly))) {
+        inside.push(who);
+      } else {
+        near.push(who);
+        nearM = Math.max(nearM, nearestApproachM([ll, ll], this.perimeter, 1000) ?? PERIMETER_STANDOFF_M);
+      }
     }
     const who = (w: string[]) => (w.length > 1 ? 'A and B are' : `${w[0]} is`);
-    const them = (w: string[]) => (w.length > 1 ? 'them' : w[0]);
     if (inside.length) {
+      const how = inside.length > 1 ? 'spends as little time in it as it can'
+        : `${inside[0] === 'A' ? 'leaves' : 'enters'} it by the quickest way`;
       notes.push({ level: 'warn', code: 'ENDPOINT_IN_PERIM',
-        text: `${who(inside)} inside the latest mapped fire perimeter, so the route may cross the fire near ${them(inside)}. The rest of the perimeter is still avoided.` });
+        text: `${who(inside)} inside the latest mapped fire perimeter — the route ${how}.` });
     }
     if (near.length) {
       notes.push({ level: 'warn', code: 'ENDPOINT_NEAR_PERIM',
-        text: `${who(near)} within ${PERIMETER_STANDOFF_M} m of the latest mapped fire perimeter. The route passes through the standoff near ${them(near)} but still avoids the fire.` });
+        text: `${who(near)} within ${Math.max(10, Math.ceil(nearM / 10) * 10)} m of the latest mapped fire perimeter — the route stays out of the fire.` });
     }
-    return out;
+    return inside.length + near.length > 0;
   }
 
   /** Sliced route: yields settled counts; returns the result. */
@@ -389,14 +391,17 @@ export class OffroadEngine {
     const a = this.toGridM(...aLL);
     const b = this.toGridM(...bLL);
     const notes: RouteNote[] = [];
-    const mask = opts.avoidPerimeter && this.mask ? this.releaseEndpoints(this.mask, a, b, notes) : null;
+    const mask = opts.avoidPerimeter ? this.mask : null;
+    // a pin on the mask: price it instead of blocking it
+    const factor = mask && this.maskedPins(mask, [['A', aLL, a], ['B', bLL, b]], notes) ? MASKED_PACE_X : undefined;
     type Found = { s: HybridSearch; weighted: boolean; notes: RouteNote[];
       a: [number, number]; b: [number, number] };
     const tryRoute = function* (self: OffroadEngine, m: Uint8Array | null)
       : Generator<number, OffroadResult | Found, void> {
       const n2: RouteNote[] = [];
-      const place = (p: [number, number]) => (self.walkable(cellOf(self.grid, p[0], p[1]), m) ? null
-        : self.snapToNetwork(p[0], p[1], m)) ?? self.snap(p[0], p[1], m);
+      const sm = factor ? null : m; // a priced mask moves no pin
+      const place = (p: [number, number]) => (self.walkable(cellOf(self.grid, p[0], p[1]), sm) ? null
+        : self.snapToNetwork(p[0], p[1], sm)) ?? self.snap(p[0], p[1], sm);
       const sa = place(a);
       const sb = place(b);
       if (!sa || !sb) {
@@ -411,12 +416,12 @@ export class OffroadEngine {
           }
         } else if (s.movedM > 0) {
           n2.push({ level: 'info', code: 'SNAP_MOVED',
-            text: `${w} moved ${Math.round(s.movedM)} m to the nearest walkable ground (open water, cliff or the perimeter at the pin).` });
+            text: `${w} moved ${Math.round(s.movedM)} m to the nearest walkable ground (open water, ice or a cliff at the pin).` });
         }
       }
       // a pin moved onto the network starts the drawn line there, not in the river
       const end = (s: Snapped, p: [number, number]): [number, number] => (s.pt.node != null ? [s.pt.x, s.pt.y] : p);
-      const r = yield* self.search(sa.pt, sb.pt, m, slice);
+      const r = yield* self.search(sa.pt, sb.pt, m, factor, slice);
       if (r.s) return { s: r.s, weighted: r.weighted, notes: n2, a: end(sa, a), b: end(sb, b) };
       return r.status === 'budget'
         ? { ok: false, code: 'budget', message: 'Route search took too long on this device. Try closer points.' }
@@ -427,7 +432,7 @@ export class OffroadEngine {
       return { ok: true, route: this.assemble(first.s, first.a, first.b, mask, [...notes, ...first.notes],
         first.weighted, t0, opts, !!mask) };
     }
-    if (!first.ok && first.code === 'no-path' && mask) {
+    if (!first.ok && first.code === 'no-path' && mask && !factor) {
       const alt = yield* tryRoute(this, null);
       if ('s' in alt) {
         const altNotes: RouteNote[] = [{ level: 'warn', code: 'CROSSES_PERIM',

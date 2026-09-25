@@ -151,6 +151,7 @@ if (!DIR) {
         for (const c of x.notes ?? []) expect(codes, got).toContain(c);
         for (const c of x.noNotes ?? []) expect(codes, got).not.toContain(c);
         for (const name of x.noFords ?? []) expect(m.fords, got).not.toContain(name);
+        if (x.maxFireM != null) expect(m.fireM, `metres inside the fire: ${got}`).toBeLessThanOrEqual(x.maxFireM);
       });
     }
   });

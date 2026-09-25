@@ -137,11 +137,35 @@ describe('OffroadEngine on the synthetic bundle', () => {
     return Math.abs(x - CX - cx) < half && Math.abs(y - CY - cy) < half;
   });
 
-  it('routes anyway when an endpoint is inside the perimeter', async () => {
+  /** Metres of the drawn line inside the square (5 m samples). */
+  const metresInSquare = (r: RouteResult, cx: number, cy: number, half: number) => {
+    const pts = r.geometry.coordinates.map(([lon, lat]) => lonLatToUtm(lon, lat, 11));
+    let m = 0;
+    for (let i = 0; i + 1 < pts.length; i++) {
+      const [x0, y0] = pts[i];
+      const [x1, y1] = pts[i + 1];
+      const len = Math.hypot(x1 - x0, y1 - y0);
+      const n = Math.max(1, Math.ceil(len / 5));
+      for (let k = 0; k < n; k++) {
+        const x = x0 + ((x1 - x0) * (k + 0.5)) / n - CX - cx;
+        const y = y0 + ((y1 - y0) * (k + 0.5)) / n - CY - cy;
+        if (Math.abs(x) < half && Math.abs(y) < half) m += len / n;
+      }
+    }
+    return m;
+  };
+
+  it('a pin inside the fire leaves it by the quickest way, not across it', async () => {
+    // A is 200 m inside the west edge, B beyond the NE corner. The whole
+    // polygon used to open, and the line cut across the fire toward B.
     const e = await engineP;
     e.setPerimeter('p2', square(0, 0, 1200));
-    const r = ok(routeSync(e, at(100, 100), at(3000, 4000), { avoidPerimeter: true }));
-    expect(r.notes!.find((n) => n.code === 'ENDPOINT_IN_PERIM')?.text).toMatch(/^A is inside/);
+    const r = ok(routeSync(e, at(-1000, 0), at(3000, 4000), { avoidPerimeter: true }));
+    const inFire = metresInSquare(r, 0, 0, 1200);
+    expect(inFire).toBeGreaterThan(190);
+    expect(inFire).toBeLessThan(250);
+    expect(r.notes!.find((n) => n.code === 'ENDPOINT_IN_PERIM')?.text)
+      .toBe('A is inside the latest mapped fire perimeter — the route leaves it by the quickest way.');
     expect(r.provenance!.avoidPerimeter).toBe(true);
     e.setPerimeter(null, null);
   });
@@ -163,17 +187,20 @@ describe('OffroadEngine on the synthetic bundle', () => {
     const codes = r.notes!.map((n) => n.code);
     expect(codes).toContain('ENDPOINT_NEAR_PERIM');
     expect(codes).not.toContain('ENDPOINT_IN_PERIM');
-    expect(r.notes!.find((n) => n.code === 'ENDPOINT_NEAR_PERIM')!.text).toMatch(/^B is within 60 m/);
+    expect(r.notes!.find((n) => n.code === 'ENDPOINT_NEAR_PERIM')!.text)
+      .toBe('B is within 50 m of the latest mapped fire perimeter — the route stays out of the fire.');
     expect(r.provenance!.avoidPerimeter).toBe(true);
     e.setPerimeter(null, null);
   });
 
-  it('a pin inside a spot fire opens that spot only, not the main fire', async () => {
+  it('a pin in a spot fire beside the main fire does not open the main fire', async () => {
+    // review blocker: the spot's cells touch the main fire's, and opening
+    // the spot's polygon ran on into the main fire
     const e = await engineP;
-    e.setPerimeter('p4', [...square(0, 0, 1200), ...square(-3000, -3800, 100)]);
-    const r = ok(routeSync(e, at(-3000, -3800), at(3000, 4000), { avoidPerimeter: true }));
-    expect(entersSquare(r, 0, 0, 1200)).toBe(false);
-    expect(r.notes!.find((n) => n.code === 'ENDPOINT_IN_PERIM')?.text).toMatch(/^A is inside .* near A\./);
+    e.setPerimeter('p4', [...square(0, 0, 1200), ...square(-1245, 0, 30)]);
+    const r = ok(routeSync(e, at(-1245, 0), at(1500, 0), { avoidPerimeter: true }));
+    expect(metresInSquare(r, 0, 0, 1200)).toBe(0);
+    expect(r.notes!.find((n) => n.code === 'ENDPOINT_IN_PERIM')?.text).toMatch(/^A is inside/);
     e.setPerimeter(null, null);
   });
 
@@ -246,8 +273,8 @@ describe('A* is exact at weight 1', () => {
     const goal = { x: gc * 30 + 15, y: gr * 30 + 15, cell: gr * w + gc };
     grid.pace[start.cell] = 10;
     grid.pace[goal.cell] = 10;
-    const run = (weight: number, win: Window) => {
-      const s = new HybridSearch({ grid, graph, mask: null, window: win, start, goal, weight, maxSettled: 1e7 });
+    const run = (weight: number, win: Window, mask: Uint8Array | null = null, maskFactor?: number) => {
+      const s = new HybridSearch({ grid, graph, mask, maskFactor, window: win, start, goal, weight, maxSettled: 1e7 });
       while (s.step(1e6) === 'running');
       return s;
     };
@@ -293,6 +320,21 @@ describe('A* is exact at weight 1', () => {
     // both cases occur (11 and 28 with this seed)
     expect(worse).toBeGreaterThan(5);
     expect(certified).toBeGreaterThan(5);
+  });
+
+  it('stays exact when masked cells and nodes cost maskFactor times more (a pin in the fire)', () => {
+    for (let t = 0; t < 40; t++) {
+      const { run, full } = randomGrid(0.12);
+      // a third of the cells masked, start and goal included at times
+      const mask = Uint8Array.from({ length: w * h }, () => (rnd() < 0.33 ? 1 : 0));
+      const a = run(1, full, mask, 20);
+      const d = run(0, full, mask, 20);
+      expect(a.status).toBe(d.status);
+      if (d.status === 'found') {
+        expect(Math.abs(a.cost - d.cost)).toBeLessThan(1e-6 * d.cost);
+        expect(a.cost).toBeGreaterThan(run(1, full).cost);
+      }
+    }
   });
 });
 
