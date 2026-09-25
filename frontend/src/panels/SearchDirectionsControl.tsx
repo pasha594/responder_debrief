@@ -15,6 +15,7 @@ import {
   fetchRoute,
   type RouteProfile,
 } from '../api/routing';
+import { roadMissesPins } from '../api/offRoad';
 import { RANGE_COLORS } from '../map/layers/rangeLayer';
 import { WalkError, routeWalk } from '../api/walkRouting';
 import { useWalkContext } from './walk/useWalkRouting';
@@ -416,6 +417,23 @@ export function SearchDirectionsControl() {
     }
   };
 
+  // Pins off the road network default to Walk: the drive route stops short
+  // of a pin, or there is none. A mode clicked for these endpoints wins, and
+  // an automatic Walk hands back once the road reaches the pins again.
+  const pickedFor = useRef('');
+  const autoWalkFrom = useRef<RouteProfile | null>(null);
+  const defaultMode = (offRoad: boolean) => {
+    const { profile } = useStore.getState().directions;
+    if (pickedFor.current === endpointsKey) return;
+    if (offRoad && profile !== 'hike') {
+      autoWalkFrom.current = profile;
+      actions.setDirectionsProfile('hike');
+    } else if (!offRoad && autoWalkFrom.current && profile === 'hike') {
+      actions.setDirectionsProfile(autoWalkFrom.current);
+      autoWalkFrom.current = null;
+    }
+  };
+
   useEffect(() => {
     const mySeq = ++routeSeq.current;
     const { a, b } = directions;
@@ -433,17 +451,20 @@ export function SearchDirectionsControl() {
       if (p === 'hike') continue; // the Walk effect owns it
       if (!online) {
         setModes((m) => ({ ...m, [p]: 'offline' }));
+        if (p === 'drive') defaultMode(true);
         continue;
       }
       void fetchRoute(a.coords, b.coords, p)
         .then((result) => {
           if (mySeq !== routeSeq.current) return;
           setModes((m) => ({ ...m, [p]: result }));
+          if (p === 'drive') defaultMode(roadMissesPins(result, a.coords, b.coords));
           if (useStore.getState().directions.profile === p) applyRoute(result);
         })
         .catch(() => {
           if (mySeq !== routeSeq.current) return;
           setModes((m) => ({ ...m, [p]: 'failed' }));
+          if (p === 'drive') defaultMode(true);
           if (useStore.getState().directions.profile === p) {
             setRouteError(
               p === 'apparatus'
@@ -555,11 +576,15 @@ export function SearchDirectionsControl() {
               {MODES.map(({ p, label, Icon }) => {
                 const gated = p === 'apparatus' && !apparatusAvailable;
                 const state = modes[p];
+                const { a, b } = directions;
+                // a road route that stops short of a pin claims no time
+                const noRoad = p !== 'hike' && !!a && !!b && typeof state === 'object'
+                  && !('error' in state) && roadMissesPins(state, a.coords, b.coords);
                 // Every mode shows its typical time (Walk: crew pace).
                 const time =
                   state === 'pending'
                     ? '…'
-                    : state === 'failed' || state === 'offline' || (state && 'error' in state)
+                    : state === 'failed' || state === 'offline' || (state && 'error' in state) || noRoad
                       ? '—'
                       : state
                         ? fmtDurationShort(state.durationS)
@@ -575,14 +600,20 @@ export function SearchDirectionsControl() {
                         ? 'Needs the TomTom key'
                         : state === 'offline'
                           ? 'Needs a connection'
-                          : p === 'apparatus'
-                            ? 'Truck routing with typical engine/tender dimensions'
-                            : p === 'hike'
-                              ? "Walk: trail + cross-country model inside this fire's routing area (works offline); online engine elsewhere"
-                              : label
+                          : noRoad
+                            ? 'No road reaches this pin'
+                            : p === 'apparatus'
+                              ? 'Truck routing with typical engine/tender dimensions'
+                              : p === 'hike'
+                                ? "Walk: trail + cross-country model inside this fire's routing area (works offline); online engine elsewhere"
+                                : label
                     }
                     aria-label={label}
-                    onClick={() => actions.setDirectionsProfile(p)}
+                    onClick={() => {
+                      pickedFor.current = endpointsKey;
+                      autoWalkFrom.current = null;
+                      actions.setDirectionsProfile(p);
+                    }}
                   >
                     <Icon />
                     {time && <span className="rd-mode-time">{time}</span>}
