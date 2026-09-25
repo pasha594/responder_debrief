@@ -12,7 +12,6 @@ import pyrecastLogo from '../assets/pyrecast-logo.svg';
 export function PyrecastCredit() {
   const spreadVisible = useStore((s) => s.layers.spread.visible);
   const view = useStore((s) => s.view);
-  const incidentChip = useStore((s) => !!s.layers.incidentMap.mapId || !!s.layers.incidentMap.series);
   const fireMode = view.mode === 'fire';
   const corneaId = fireMode ? view.corneaId : null;
   const run = useSpreadRunForFire(corneaId);
@@ -21,7 +20,7 @@ export function PyrecastCredit() {
 
   return (
     <a
-      className={`rd-credit${incidentChip ? ' rd-credit--lifted' : ''}`}
+      className="rd-credit"
       href={PYRECAST_URL}
       target="_blank"
       rel="noopener noreferrer"

@@ -6,7 +6,6 @@ import { useStore } from '../state/store';
 import { useIsDesktop } from '../utils/useMediaQuery';
 import { FirePanel } from './FirePanel';
 import { MobileSheet } from './MobileSheet';
-import { IncidentMapChip } from './tabs/IncidentMapsTab';
 import './panels.css';
 
 /** The sidebar only ever mounts in fire mode (the directory has no map). */
@@ -37,34 +36,28 @@ export function Sidebar() {
 
   if (!isDesktop) {
     return (
-      <>
-        <MobileSheet>
-          <PanelContent />
-        </MobileSheet>
-        <IncidentMapChip />
-      </>
+      <MobileSheet>
+        <PanelContent />
+      </MobileSheet>
     );
   }
 
   return (
-    <>
-      <aside className={`rd-sidebar${collapsed ? ' rd-sidebar--collapsed' : ''}`}>
-        <button
-          type="button"
-          className="rd-sidebar-collapse"
-          aria-label={collapsed ? 'Expand panel' : 'Collapse panel'}
-          title={collapsed ? 'Expand panel' : 'Collapse panel'}
-          onClick={() => setSidebarCollapsed(!collapsed)}
-        >
-          <Chevron collapsed={collapsed} />
-        </button>
-        {!collapsed && (
-          <div className="rd-sidebar-content">
-            <PanelContent />
-          </div>
-        )}
-      </aside>
-      <IncidentMapChip />
-    </>
+    <aside className={`rd-sidebar${collapsed ? ' rd-sidebar--collapsed' : ''}`}>
+      <button
+        type="button"
+        className="rd-sidebar-collapse"
+        aria-label={collapsed ? 'Expand panel' : 'Collapse panel'}
+        title={collapsed ? 'Expand panel' : 'Collapse panel'}
+        onClick={() => setSidebarCollapsed(!collapsed)}
+      >
+        <Chevron collapsed={collapsed} />
+      </button>
+      {!collapsed && (
+        <div className="rd-sidebar-content">
+          <PanelContent />
+        </div>
+      )}
+    </aside>
   );
 }

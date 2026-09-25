@@ -1,5 +1,5 @@
 /**
- * Small legend card, bottom-right above the timeline. Mirrors the active
+ * Small legend card, bottom-left above the timeline. Mirrors the active
  * spread product (ui.legendKey = "spread:{product}"), every visible
  * weather layer, and the IR flight shown on the map.
  */
@@ -41,7 +41,6 @@ export function LegendBar() {
   const spreadVisible = useStore((s) => s.layers.spread.visible);
   const toaMode = useStore((s) => s.layers.spread.toaMode);
   const toaWithinHours = useStore((s) => s.layers.spread.toaWithinHours);
-  const sidebarCollapsed = useStore((s) => s.ui.sidebarCollapsed);
   const irFlightId = useStore((s) => s.layers.irFlight.flightId);
   const view = useStore((s) => s.view);
   const corneaId = view.mode === 'fire' ? view.corneaId : null;
@@ -110,7 +109,7 @@ export function LegendBar() {
   if (!showSpread && weatherRows.length === 0 && !irFlight) return null;
 
   return (
-    <div className={`rd-legendbar${sidebarCollapsed ? ' rd-legendbar--rail' : ''}`}>
+    <div className="rd-legendbar">
       {showSpread && spreadProduct && (
         <div className="rd-legendbar-spread">
           <div className="rd-legendbar-caption">{SPREAD_PRODUCT_LABELS[spreadProduct]}</div>

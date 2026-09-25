@@ -944,13 +944,12 @@
   background-color: #fff;
 }
 
-/* PyreCast credit (over the map, bottom-left; +40px clears the attribution,
-   which reaches this far across a tablet-width map until it first collapses) */
+/* PyreCast credit (over the map, bottom-left corner, under the legend) */
 
 .rd-credit {
   position: fixed;
   left: 12px;
-  bottom: calc(var(--timeline-h) + 40px);
+  bottom: calc(var(--timeline-h) + 12px);
   z-index: 26;
   display: inline-flex;
   align-items: center;
@@ -988,54 +987,6 @@
   border-radius: 999px;
   box-sizing: content-box;
 }
-/* Stack above the incident-map chip when both are on screen. */
-.rd-credit--lifted {
-  bottom: calc(var(--timeline-h) + 52px);
-}
-
-/* floating incident-map chip (over the map, bottom-left above legend) */
-
-.rd-map-chip {
-  position: fixed;
-  left: 12px;
-  bottom: calc(var(--timeline-h) + 12px);
-  z-index: 26;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  max-width: 260px;
-  padding: 6px 8px 6px 12px;
-  font-size: 12.5px;
-  background: var(--overlay-bg);
-  -webkit-backdrop-filter: blur(6px);
-  backdrop-filter: blur(6px);
-  border: 1px solid var(--color-border);
-  border-radius: 999px;
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.25);
-}
-
-.rd-map-chip-title {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.rd-map-chip-x {
-  flex-shrink: 0;
-  width: 20px;
-  height: 20px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 11px;
-  color: var(--color-text-muted);
-  border-radius: 50%;
-}
-.rd-map-chip-x:hover {
-  color: var(--color-text);
-  background: var(--color-hover-bg);
-}
-
 /* ---------- Floating back control (single-fire map) ---------- */
 
 .rd-back-control {
@@ -1076,14 +1027,10 @@
 
 .rd-legendbar {
   position: absolute;
-  /* Clear the sidebar: the legend describes the map, so it has to sit over
-     the map. (It out-stacks the sidebar at z-index 25, so without this offset
-     it paints on top of the panel instead.) */
-  right: calc(var(--sidebar-w) + 12px);
-  /* The corner stacks attribution, then the scale bar with the compass dial
-     on top, then this card: the scale bar's 42px + its 28px height + the
-     dial's 6px gap and 44px + 8px gap. */
-  bottom: calc(var(--timeline-h) + 128px);
+  /* Bottom-left corner of the map (the sidebar is on the right), over the
+     PyreCast credit when that shows: its 30px + an 8px gap. */
+  left: 12px;
+  bottom: calc(var(--timeline-h) + 12px);
   z-index: 25;
   max-width: 260px;
   padding: 8px 10px;
@@ -1097,21 +1044,21 @@
   gap: 6px;
 }
 
-/* Collapsed sidebar is a 48px rail. */
-.rd-legendbar--rail {
-  right: 60px;
+.rd-app:has(.rd-credit) .rd-legendbar {
+  bottom: calc(var(--timeline-h) + 50px);
 }
 
 /* ---------- Scale bar ---------- */
 
-/* Bottom-right corner of the visible map, directly above the attribution
-   (12px gutter + its 24px + 6px gap). Two rows share one line — miles (feet
-   up close) above it, kilometers (meters) below — each as wide as the round
-   distance it names, right-aligned into the corner. */
+/* Bottom-right corner of the visible map, on the attribution's line: the
+   scale sits just left of the "i" (its 24px + an 8px gap), the compass dial
+   above the "i" against the map's right edge. Two rows share one line —
+   miles (feet up close) above it, kilometers (meters) below — each as wide
+   as the round distance it names, right-aligned into the corner. */
 .rd-scalebar {
   position: absolute;
   right: calc(var(--sidebar-w) + 12px);
-  bottom: calc(var(--timeline-h) + 42px);
+  bottom: calc(var(--timeline-h) + 12px);
   z-index: 25;
   display: flex;
   flex-direction: column;
@@ -1144,11 +1091,12 @@
   margin-top: -2px; /* one shared line, not two stacked */
 }
 
-/* The two rows, right-aligned like the stack they sit in. */
+/* The two rows, right-aligned like the stack they sit in, beside the "i". */
 .rd-scalebar-rows {
   display: flex;
   flex-direction: column;
   align-items: flex-end;
+  margin-right: 32px;
 }
 
 /* Compass dial above the scale bar, on the overlays' translucent ground.
@@ -1224,6 +1172,25 @@
   }
   .rd-map-root .maplibregl-ctrl-bottom-right .maplibregl-ctrl {
     margin: 0 12px 12px 0;
+  }
+  /* MapLibre opens the attribution as a text strip along the bottom (on load,
+     and when the "i" is tapped) until the map is first moved. While it is
+     open, the corner stacks step up over it — the credit and legend too,
+     since a narrow map's strip reaches the left corner. */
+  .rd-app:has(.maplibregl-compact-show) .rd-scalebar {
+    bottom: calc(var(--timeline-h) + 42px);
+  }
+  .rd-app:has(.maplibregl-compact-show) .rd-scalebar-rows {
+    margin-right: 0;
+  }
+  .rd-app:has(.maplibregl-compact-show) .rd-credit {
+    bottom: calc(var(--timeline-h) + 40px);
+  }
+  .rd-app:has(.maplibregl-compact-show) .rd-legendbar {
+    bottom: calc(var(--timeline-h) + 40px);
+  }
+  .rd-app:has(.maplibregl-compact-show):has(.rd-credit) .rd-legendbar {
+    bottom: calc(var(--timeline-h) + 78px);
   }
 }
 
@@ -1435,14 +1402,8 @@
   .rd-lightbox {
     padding: 10px;
   }
-  .rd-map-chip {
-    bottom: calc(var(--timeline-h) + 108px); /* clear the peeking sheet */
-  }
   .rd-credit {
     bottom: calc(var(--timeline-h) + 108px); /* clear the peeking sheet */
-  }
-  .rd-credit--lifted {
-    bottom: calc(var(--timeline-h) + 148px);
   }
   .rd-legendbar {
     display: none; /* legends live inside the tabs on mobile */
@@ -1453,6 +1414,9 @@
   .rd-scalebar {
     right: 12px;
     transition: bottom 200ms ease;
+  }
+  .rd-scalebar-rows {
+    margin-right: 0; /* the attribution "i" is under the sheet here */
   }
   .rd-scalebar--sheet-peek {
     bottom: calc(var(--timeline-h) + 108px);

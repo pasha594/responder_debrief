@@ -534,12 +534,15 @@ export const useStore = create<AppState>((set, get) => ({
       }));
     },
 
+    // One map overlay at a time: an incident sheet (or series) and an IR
+    // flight replace each other rather than stacking.
     setIncidentMap: (mapId) => {
       if (mapId) track('map_overlay_shown', { kind: 'sheet' });
       set((s) => ({
         layers: {
           ...s.layers,
           incidentMap: { ...s.layers.incidentMap, mapId, series: null },
+          irFlight: mapId ? { flightId: null } : s.layers.irFlight,
         },
       }));
     },
@@ -549,6 +552,7 @@ export const useStore = create<AppState>((set, get) => ({
         layers: {
           ...s.layers,
           incidentMap: { ...s.layers.incidentMap, mapId: null, series },
+          irFlight: series ? { flightId: null } : s.layers.irFlight,
         },
       }));
     },
@@ -558,7 +562,15 @@ export const useStore = create<AppState>((set, get) => ({
       })),
     setIrFlight: (flightId) => {
       if (flightId) track('map_overlay_shown', { kind: 'ir' });
-      set((s) => ({ layers: { ...s.layers, irFlight: { flightId } } }));
+      set((s) => ({
+        layers: {
+          ...s.layers,
+          irFlight: { flightId },
+          incidentMap: flightId
+            ? { ...s.layers.incidentMap, mapId: null, series: null }
+            : s.layers.incidentMap,
+        },
+      }));
     },
 
     toggleTraffic: () => {

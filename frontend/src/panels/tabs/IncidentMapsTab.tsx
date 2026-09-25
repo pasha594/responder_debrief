@@ -13,6 +13,7 @@ import type React from 'react';
 import { useMap } from '../../map/MapRoot';
 import { useStore } from '../../state/store';
 import { formatBytes, formatTime, zoneAbbr } from '../../utils/format';
+import { useIsDesktop } from '../../utils/useMediaQuery';
 import {
   friendlyOpDate,
   groupMapsByDate,
@@ -23,13 +24,6 @@ import {
 } from '../../utils/incidentMaps';
 import { IrHeatLegend } from '../IrHeatLegend';
 import { MapLightbox } from '../MapLightbox';
-
-function entryTitle(m: IncidentMapEntry): string {
-  let t = m.product_label;
-  if (m.op_date) t += ` — ${m.op_date}`;
-  if (m.period) t += ` (${m.period})`;
-  return t;
-}
 
 /** Shared resolution: catalog fire → incident manifest. */
 export function useManifestForFire(corneaId: string | null) {
@@ -267,6 +261,7 @@ const IR_WHEN_TITLE = {
 } as const;
 
 function IrFlightRow({ flight, timezone }: { flight: IrFlight; timezone: string | null }) {
+  const isDesktop = useIsDesktop();
   const activeId = useStore((s) => s.layers.irFlight.flightId);
   const actions = useStore((s) => s.actions);
   // A PDF-only flight has flight_id null — which must not match the store's
@@ -321,7 +316,8 @@ function IrFlightRow({ flight, timezone }: { flight: IrFlight; timezone: string 
           </a>
         )}
       </div>
-      {active && <IrHeatLegend heatTypes={flight.heat_types} />}
+      {/* desktop has the map's legend box; phones have no map legend */}
+      {active && !isDesktop && <IrHeatLegend heatTypes={flight.heat_types} />}
     </div>
   );
 }
@@ -387,42 +383,6 @@ export function IncidentMapsTab({ corneaId }: { corneaId: string }) {
       {viewingEntry && (
         <MapLightbox entry={viewingEntry} onClose={() => setViewing(null)} />
       )}
-    </div>
-  );
-}
-
-/**
- * Floating dismiss chip for the active incident-map overlay. Rendered by the
- * Sidebar (position: fixed over the map, bottom-left above the legend).
- */
-export function IncidentMapChip() {
-  const { mapId, series } = useStore((s) => s.layers.incidentMap);
-  const view = useStore((s) => s.view);
-  const actions = useStore((s) => s.actions);
-  const corneaId = view.mode === 'fire' ? view.corneaId : null;
-  const { data: manifest } = useManifestForFire(corneaId);
-
-  if (!mapId && !series) return null;
-  const entry = mapId
-    ? manifest?.maps.find((m) => m.id === mapId)
-    : manifest?.maps.find((m) => seriesKey(m) === series);
-  const title = entry
-    ? series
-      ? `${entry.product_label} — scrub the timeline`
-      : entryTitle(entry)
-    : 'Incident map';
-
-  return (
-    <div className="rd-map-chip">
-      <span className="rd-map-chip-title">{title}</span>
-      <button
-        type="button"
-        className="rd-map-chip-x"
-        aria-label="Remove incident map overlay"
-        onClick={() => actions.setIncidentMap(null)}
-      >
-        ✕
-      </button>
     </div>
   );
 }

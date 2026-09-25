@@ -39,6 +39,11 @@ export const RELEASE_NOTES: ReleaseDay[] = [
           'Nightly IR heat now shows on the map for fires whose teams publish only a KMZ, like Sisi, drawn with the same symbols and legend as the IR PDF. Flights sit under their day in the Maps tab with when the plane flew.',
       },
       {
+        title: 'Tidier map corners',
+        summary:
+          'The legend moved to the bottom-left. The scale sits beside the info button, with the compass above it. An IR flight and an incident map now replace each other on the map instead of stacking.',
+      },
+      {
         title: 'Share by QR code',
         summary:
           'The QR button beside 3D shows your map view, layers, incident map and drawings as a code. Another phone scans it with Scan code, no signal needed if both phones downloaded the fire.',
