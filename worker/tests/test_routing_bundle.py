@@ -4,6 +4,7 @@ through the real GDAL 3.8.4 + osmium CLIs, plus plan/index logic.
 GDAL/osmium-dependent tests skip when the tools are absent.
 """
 
+import math
 import shutil
 from datetime import datetime, timedelta, timezone
 
@@ -124,6 +125,50 @@ class TestRunShard:
                                     log=lambda m: None)
         assert res["failed"] == [{"cornea_id": "{X}", "slug": "x", "error": "osm region unavailable"}]
         assert storage.get_json(rb.state_key("x"))["failures"] == 1
+
+
+class TestLandfireBox:
+    """bbox_5070 refuses a projected box that cannot be the grid's: the
+    np.float64 bug made gdaltransform return a 26,708 x 172,455 px box for
+    SISI's 729 x 743 grid, caught only by LANDFIRE's size limit."""
+    THIN = rp.aoi_for([-120.0, 44.0], (-120.55, 43.98, -119.45, 44.02))  # ~87 x 16 km
+
+    @staticmethod
+    def _fake(angle_deg: float, scale: float = 1.0, wild: bool = False):
+        th = math.radians(angle_deg)
+
+        def transform(points, src, dst):
+            a = np.asarray(points, dtype=np.float64)
+            c = a - a.mean(axis=0)
+            r = np.column_stack([c[:, 0] * math.cos(th) - c[:, 1] * math.sin(th),
+                                 c[:, 0] * math.sin(th) + c[:, 1] * math.cos(th)])
+            r = r * scale + (-1.8e6, 3.0e6)
+            if wild:
+                r[5] += (4.0e5, -2.0e6)
+            return [tuple(p) for p in r.tolist()]
+        return transform
+
+    @pytest.mark.parametrize("angle, scale", [(0, 1.0), (19, 1.01), (-19, 0.99)])
+    def test_rotated_long_thin_grid_passes(self, monkeypatch, angle, scale):
+        # far from Albers' central meridian the two grids turn ~17-19° apart;
+        # the long thin grid's box is then 2.5x its short side
+        monkeypatch.setattr(gdal_cli, "transform_points", self._fake(angle, scale))
+        b = rb.bbox_5070(self.THIN)
+        assert b[2] - b[0] > 0 and b[3] - b[1] > 0
+
+    @pytest.mark.parametrize("fake", [_fake(0, 30.0), _fake(0, 0.001), _fake(5, 1.0, wild=True)])
+    def test_garbage_is_refused(self, monkeypatch, fake):
+        monkeypatch.setattr(gdal_cli, "transform_points", fake)
+        with pytest.raises(RuntimeError, match="projected LANDFIRE box implausible"):
+            rb.bbox_5070(self.THIN)
+
+    @needs_tools
+    def test_real_projection(self):
+        sisi = rp.aoi_for([-120.83, 48.35], (-120.87, 48.32, -120.79, 48.38))
+        for aoi in (sisi, self.THIN, rp.aoi_for([-124.1, 41.9], None)):
+            b = rb.bbox_5070(aoi)
+            g = aoi["grid"]
+            assert (b[2] - b[0]) / 30 < 1.3 * (g["width"] + g["height"]) * g["cell_m"] / 30
 
 
 class TestCodeVersions:

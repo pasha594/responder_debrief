@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -136,15 +137,33 @@ def project_trails(feats, *, zone, northern, rect) -> list[tuple[dict, list]]:
 
 
 def bbox_5070(aoi: dict) -> tuple[float, float, float, float]:
-    """Densified UTM grid outline -> EPSG:5070 box, snapped to LANDFIRE's grid."""
+    """Densified UTM grid outline -> EPSG:5070 box, snapped to LANDFIRE's grid.
+
+    gdaltransform projects garbage input silently (numpy 2's
+    "np.float64(...)" once gave a 26,708 x 172,455 px box for a 729 x 743
+    grid), so the result is checked before it becomes a LANDFIRE request:
+    both projections keep lengths within ~2 % across CONUS, so the outline's
+    length must match the grid's within 10 %, and each side of the box must
+    lie between the grid's short side and its diagonal (the two grids are
+    rotated up to ~20° apart), with 1.5x slack either way."""
     x0, y0, x1, y1 = grid_bounds(aoi["grid"])
     ts = np.linspace(0, 1, 17)
-    pts = ([(x0 + (x1 - x0) * t, y0) for t in ts] + [(x1, y0 + (y1 - y0) * t) for t in ts]
-           + [(x0 + (x1 - x0) * t, y1) for t in ts] + [(x0, y0 + (y1 - y0) * t) for t in ts])
-    pp = gdal_cli.transform_points(pts, aoi["epsg"], 5070)
-    xs = [p[0] for p in pp]
-    ys = [p[1] for p in pp]
-    return landfire.snap_5070((min(xs), min(ys), max(xs), max(ys)))
+    # one closed loop around the grid, so the outline length is meaningful
+    pts = ([(x0 + (x1 - x0) * t, y0) for t in ts] + [(x1, y0 + (y1 - y0) * t) for t in ts[1:]]
+           + [(x1 - (x1 - x0) * t, y1) for t in ts[1:]]
+           + [(x0, y1 - (y1 - y0) * t) for t in ts[1:]])
+    pp = np.asarray(gdal_cli.transform_points(pts, aoi["epsg"], 5070), dtype=np.float64)
+    box = (float(pp[:, 0].min()), float(pp[:, 1].min()),
+           float(pp[:, 0].max()), float(pp[:, 1].max()))
+    gw, gh = x1 - x0, y1 - y0
+    bw, bh = box[2] - box[0], box[3] - box[1]
+    outline = float(np.hypot(*np.diff(pp, axis=0).T).sum())
+    lo, hi = min(gw, gh) / 1.5, 1.5 * math.hypot(gw, gh)
+    if not (abs(outline / (2 * (gw + gh)) - 1) <= 0.10 and lo <= bw <= hi and lo <= bh <= hi):
+        raise RuntimeError(
+            f"projected LANDFIRE box implausible: {bw:.0f} x {bh:.0f} m (outline {outline:.0f} m) "
+            f"for a {gw:.0f} x {gh:.0f} m EPSG:{aoi['epsg']} grid")
+    return landfire.snap_5070(box)
 
 
 def warp(src: Path, dst: Path, aoi: dict, *, categorical: bool, ot: str) -> np.ndarray:
