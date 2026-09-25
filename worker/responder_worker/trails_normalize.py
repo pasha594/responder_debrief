@@ -88,6 +88,85 @@ def _join(parts) -> str | None:
 
 _USFS_USE = {"1": "H", "2": "P", "3": "B", "4": "M", "5": "A", "6": "4"}
 USE_ORDER = "HPBMA4"
+_CLASSES = ("1", "2", "3", "4", "5")
+
+# The FGDB is one layer whose ATTRIBUTESUBSET says how much each forest
+# publishes. TrailNFS_Centerline rows (4,520 TERRA rows from 16 forests on
+# 2026-09-23, every USFS trail around the SISI fire among them) carry only
+# the name, number, org codes and map symbol: TRAIL_CLASS 'N' and 'N/A' in
+# every use, season and area field. Their TRAIL_CNs appear in no other
+# subset, and their TRAIL_NOs only match other trails (other PCT sections,
+# other forests' numbers), so no join recovers the uses. Two fields survive:
+# TERRA_BASE_SYMBOLOGY, the class band the map symbol is drawn from ('TC3'
+# is class 3 on all 38,725 attributed rows; 'TC1-2' and 'TC4-5' don't say
+# which class, so they stay 0), and ADMIN_ORG (below).
+
+# ADMIN_ORG is RRFFDD (region, forest, ranger district); its first four
+# digits are the administrative forest. Names as the EDW Administrative
+# Forest Boundaries layer (FORESTORGCODE -> FORESTNAME) served them on
+# 2026-09-25; they cover all but 33 of 78,156 TERRA rows (those have no org
+# or a region-only '01').
+USFS_FORESTS = {
+    "0102": "Beaverhead-Deerlodge National Forest", "0103": "Bitterroot National Forest",
+    "0104": "Idaho Panhandle National Forests", "0110": "Flathead National Forest",
+    "0111": "Custer Gallatin National Forest", "0114": "Kootenai National Forest",
+    "0115": "Helena-Lewis and Clark National Forest", "0116": "Lolo National Forest",
+    "0117": "Nez Perce-Clearwater National Forest", "0118": "Dakota Prairie Grasslands",
+    "0202": "Bighorn National Forest", "0203": "Black Hills National Forest",
+    "0204": "Grand Mesa, Uncompahgre and Gunnison National Forests",
+    "0206": "Medicine Bow-Routt National Forest", "0207": "Nebraska National Forest",
+    "0209": "Rio Grande National Forest", "0210": "Arapaho and Roosevelt National Forests",
+    "0212": "Pike and San Isabel National Forests", "0213": "San Juan National Forest",
+    "0214": "Shoshone National Forest", "0215": "White River National Forest",
+    "0301": "Apache-Sitgreaves National Forests", "0302": "Carson National Forest",
+    "0303": "Cibola National Forest", "0304": "Coconino National Forest",
+    "0305": "Coronado National Forest", "0306": "Gila National Forest",
+    "0307": "Kaibab National Forest", "0308": "Lincoln National Forest",
+    "0309": "Prescott National Forest", "0310": "Santa Fe National Forest",
+    "0312": "Tonto National Forest", "0401": "Ashley National Forest",
+    "0402": "Boise National Forest", "0403": "Bridger-Teton National Forest",
+    "0407": "Dixie National Forest", "0408": "Fishlake National Forest",
+    "0410": "Manti-La Sal National Forest", "0412": "Payette National Forest",
+    "0413": "Salmon-Challis National Forest", "0414": "Sawtooth National Forest",
+    "0415": "Caribou-Targhee National Forest", "0417": "Humboldt-Toiyabe National Forest",
+    "0419": "Uinta-Wasatch-Cache National Forest", "0501": "Angeles National Forest",
+    "0502": "Cleveland National Forest", "0503": "Eldorado National Forest",
+    "0504": "Inyo National Forest", "0505": "Klamath National Forest",
+    "0506": "Lassen National Forest", "0507": "Los Padres National Forest",
+    "0508": "Mendocino National Forest", "0509": "Modoc National Forest",
+    "0510": "Six Rivers National Forest", "0511": "Plumas National Forest",
+    "0512": "San Bernardino National Forest", "0513": "Sequoia National Forest",
+    "0514": "Shasta-Trinity National Forest", "0515": "Sierra National Forest",
+    "0516": "Stanislaus National Forest", "0517": "Tahoe National Forest",
+    "0519": "Lake Tahoe Basin Management Unit", "0601": "Deschutes National Forest",
+    "0602": "Fremont-Winema National Forest", "0603": "Gifford Pinchot National Forest",
+    "0604": "Malheur National Forest", "0605": "Mt. Baker-Snoqualmie National Forest",
+    "0606": "Mt. Hood National Forest", "0607": "Ochoco National Forest",
+    "0609": "Olympic National Forest", "0610": "Rogue River-Siskiyou National Forests",
+    "0612": "Siuslaw National Forest", "0614": "Umatilla National Forest",
+    "0615": "Umpqua National Forest", "0616": "Wallowa-Whitman National Forest",
+    "0617": "Okanogan-Wenatchee National Forest", "0618": "Willamette National Forest",
+    "0621": "Colville National Forest", "0622": "Columbia River Gorge National Scenic Area",
+    "0801": "National Forests in Alabama", "0802": "Daniel Boone National Forest",
+    "0803": "Chattahoochee-Oconee National Forests", "0804": "Cherokee National Forest",
+    "0805": "National Forests in Florida", "0806": "Kisatchie National Forest",
+    "0807": "National Forests in Mississippi",
+    "0808": "George Washington and Jefferson National Forest",
+    "0809": "Ouachita National Forest", "0810": "Ozark-St. Francis National Forest",
+    "0811": "National Forests in North Carolina",
+    "0812": "Francis Marion and Sumter National Forests", "0813": "National Forests in Texas",
+    "0816": "El Yunque National Forest", "0836": "Savannah River Site",
+    "0860": "Land Between the Lakes National Recreation Area",
+    "0903": "Chippewa National Forest", "0904": "Huron-Manistee National Forest",
+    "0905": "Mark Twain National Forest", "0907": "Ottawa National Forest",
+    "0908": "Shawnee National Forest", "0909": "Superior National Forest",
+    "0910": "Hiawatha National Forest", "0912": "Hoosier National Forest",
+    "0913": "Chequamegon-Nicolet National Forest", "0914": "Wayne National Forest",
+    "0915": "Midewin National Tallgrass Prairie", "0919": "Allegheny National Forest",
+    "0920": "Green Mountain and Finger Lakes National Forests",
+    "0921": "Monongahela National Forest", "0922": "White Mountain National Forest",
+    "1004": "Chugach National Forest", "1005": "Tongass National Forest",
+}
 
 
 def _ordered(letters) -> str:
@@ -105,6 +184,20 @@ def usfs_uses(code) -> tuple[str, str]:
     return uses, ("yes" if "1" in digits else "no")
 
 
+def usfs_class(trail_class, symbology) -> int:
+    """TRAIL_CLASS '1'..'5', else the TC3 symbol band; 0 = unknown."""
+    cls = _clean(trail_class)
+    if cls in _CLASSES:
+        return int(cls)
+    return 3 if _clean(symbology).upper() == "TC3" else 0
+
+
+def usfs_unit(org) -> str | None:
+    """ADMIN_ORG ('061702') -> 'Okanogan-Wenatchee National Forest'."""
+    s = _clean(org)
+    return USFS_FORESTS.get(s[:4]) if len(s) >= 4 else None
+
+
 def normalize_usfs(p: dict, src_date: str) -> dict | None:
     cn = _clean(p.get("TRAIL_CN"))
     if not cn:
@@ -119,7 +212,6 @@ def normalize_usfs(p: dict, src_date: str) -> dict | None:
         f"Hiker restricted {restricted}" if restricted else None,
         "Hiking not listed as an allowed use" if foot == "no" else None,
     ])
-    cls = _clean(p.get("TRAIL_CLASS"))
     sma = _clean(p.get("SPECIAL_MGMT_AREA")).upper()
     # live SPECIAL_MGMT_AREA holds 'WSA - WILDERNESS STUDY AREA' (not designated
     # Wilderness); NATIONAL_TRAIL_DESIGNATION 3 = PCT/AT/CDT/NCT, 2 = NRTs
@@ -132,16 +224,18 @@ def normalize_usfs(p: dict, src_date: str) -> dict | None:
     return {
         "tid": f"usfs:{cn}:{bmp:.3f}",
         "agency": "USFS",
+        # verbatim apart from case: USFS names PCT sections 'PCT: <section>'
+        # (401 TERRA rows), so the popup reads 'PCT: Glacier Peak Wilderness #2000'
         "name": tidy_name(p.get("TRAIL_NAME")),
         "num": _clean(p.get("TRAIL_NO")) or None,
-        "cls": int(cls) if cls in ("1", "2", "3", "4", "5") else 0,
+        "cls": usfs_class(p.get("TRAIL_CLASS"), p.get("TERRA_BASE_SYMBOLOGY")),
         "uses": uses,
         "foot": foot,
         "restr": restr,
         "season": _window(p.get("HIKER_PEDESTRIAN_MANAGED")),
         "status": "open",
         "mgmt": mgmt,
-        "unit": None,
+        "unit": usfs_unit(p.get("ADMIN_ORG")),
         "src_date": src_date,
     }
 
@@ -152,16 +246,19 @@ def normalize_usfs(p: dict, src_date: str) -> dict | None:
 
 # PLAN_ALLOW_MODE_TRNSPRT, per the layer's coded-value domain (e.g.
 # MTC_ATV_SHARED = 'Shared Motorcycle, ATV, Mountain Bike, Electric Mountain
-# Bike, Equestrian, Hiking'). MTC_SHARED's label is just 'Motorcycle Shared';
-# it follows the other *_SHARED codes (the motor class + hiker/stock/bike).
-# UNK and the over-snow codes publish no summer use.
+# Bike, Equestrian, Hiking'). Only what a label names: MTC_SHARED's is just
+# 'Motorcycle Shared', so it is motorcycle with foot 'unknown' (1,637 live
+# trails), never an inferred hiker. STRT_LGL_VEH ('Licensed Street-Legal
+# Vehicles Only') has no live rows yet. UNK and the over-snow codes publish
+# no summer use.
 _BLM_USE = {
     "HIK_ONLY": "H", "EQU_ONLY": "P", "EQU_HIK_ONLY": "HP", "BIKE_ONLY": "B",
     "BIKE_HIK_ONLY": "HB", "NON_MOTO_SHARED": "HPB",
-    "MTC_ONLY": "M", "TECH_MTC_ONLY": "M", "MTC_SHARED": "HPBM",
+    "MTC_ONLY": "M", "TECH_MTC_ONLY": "M", "MTC_SHARED": "M",
     "MTC_ATV_ONLY": "MA", "MTC_ATV_UTV_ONLY": "MA",
     "MTC_ATV_SHARED": "HPBMA", "MTC_ATV_UTV_SHARED": "HPBMA",
     "ALL_MOTO_VEH": "HPBMA4", "TECH_VEH_SHARED": "HPBMA4", "TECH_HI_CLEAR_VEH_ONLY": "4",
+    "STRT_LGL_VEH": "4",
 }
 _BLM_DESIGNATION = {"NST": "National Scenic Trail", "NHT": "National Historic Trail",
                     "NRT": "National Recreation Trail"}

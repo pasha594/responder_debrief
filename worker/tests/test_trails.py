@@ -152,16 +152,38 @@ class TestLiveRows:
 
     def test_usfs_centerline_na_row(self):
         # the PCT through the SISI fire area: a TrailNFS_Centerline record,
-        # every attribute 'N/A' (4,520 such TERRA rows)
+        # every use/area attribute 'N/A' (4,520 such TERRA rows). The name is
+        # the agency's own section name, not a normalization artifact.
         raw = {"TRAIL_CN": "5064.005511", "BMP": 267.2, "TRAIL_NO": "2000",
                "TRAIL_NAME": "PCT: GLACIER PEAK WILDERNESS", "TRAIL_CLASS": "N",
                "ALLOWED_TERRA_USE": "N/A", "HIKER_PEDESTRIAN_MANAGED": "N/A",
                "HIKER_PEDESTRIAN_RESTRICTED": "N/A", "SPECIAL_MGMT_AREA": "N/A",
-               "NATIONAL_TRAIL_DESIGNATION": 0}
+               "NATIONAL_TRAIL_DESIGNATION": 0, "TERRA_BASE_SYMBOLOGY": "TC3",
+               "ADMIN_ORG": "061702"}
         r = tn.normalize_usfs(raw, "2026-09-23")
         assert r["name"] == "PCT: Glacier Peak Wilderness" and r["num"] == "2000"
-        assert (r["cls"], r["uses"], r["foot"]) == (0, "", "unknown")
+        # class from the TC3 symbol band; uses are not published anywhere
+        assert (r["cls"], r["uses"], r["foot"]) == (3, "", "unknown")
         assert (r["restr"], r["season"], r["mgmt"]) == (None, None, None)
+        assert r["unit"] == "Okanogan-Wenatchee National Forest"
+        # Company Creek #1243, same fire: the TC1-2 band doesn't say which class
+        cc = dict(raw, TRAIL_CN="8334.004574", BMP=0, TRAIL_NO="1243",
+                  TRAIL_NAME="COMPANY CREEK", TERRA_BASE_SYMBOLOGY="TC1-2")
+        assert tn.normalize_usfs(cc, "d")["cls"] == 0
+
+    @pytest.mark.parametrize("cls,sym,want", [
+        ("2", "TC1-2", 2), ("5", "TC4-5", 5), ("N", "TC3", 3), ("N", "TC4-5", 0),
+        ("N", None, 0), (None, "tc3 ", 3),
+    ])
+    def test_usfs_class(self, cls, sym, want):
+        assert tn.usfs_class(cls, sym) == want
+
+    @pytest.mark.parametrize("org,unit", [
+        ("061702", "Okanogan-Wenatchee National Forest"), ("0402", "Boise National Forest"),
+        ("01", None), (None, None), ("", None), ("999901", None),
+    ])
+    def test_usfs_unit(self, org, unit):
+        assert tn.usfs_unit(org) == unit
 
     def test_usfs_wsa_and_nrt(self):
         wsa = {"TRAIL_CN": "3446010337", "BMP": 6.0, "TRAIL_NO": "809.4A",
@@ -195,8 +217,11 @@ class TestLiveRows:
                 "PLAN_ALLOW_MODE_TRNSPRT": "MTC_SHARED", "PLAN_ACCESS_RSTRCT": "None",
                 "PLAN_SEASON_RSTRCT_CODE": "NO", "OBSRVE_ROUTE_USE_CLASS": "Unknown",
                 "ROUTE_SPCL_DSGNTN_TYPE": None}
+        # MTC_SHARED's domain label is just 'Motorcycle Shared': no inferred hiker
         r = tn.normalize_blm(null, "managed", "d")
-        assert (r["name"], r["uses"], r["season"]) == (None, "H,P,B,M", None)
+        assert (r["name"], r["uses"], r["foot"], r["season"]) == (None, "M", "unknown", None)
+        r = tn.normalize_blm(dict(null, PLAN_ALLOW_MODE_TRNSPRT="STRT_LGL_VEH"), "managed", "d")
+        assert (r["uses"], r["foot"]) == ("4", "unknown")
         nst = {"OBJECTID": 5107, "ROUTE_PRMRY_NM": "1591", "ADMIN_ST": "AZ",
                "PLAN_ALLOW_MODE_TRNSPRT": None, "PLAN_ACCESS_RSTRCT": None,
                "PLAN_SEASON_RSTRCT_CODE": None, "OBSRVE_ROUTE_USE_CLASS": "Stock",
@@ -217,10 +242,26 @@ class TestDecide:
     def test_first_and_forced(self):
         assert trails.decide(SIG, None, NOW, False) == (True, "first_build")
         assert trails.decide(SIG, {"build_id": "x", "built_at": "2026-09-24T00:00:00Z",
-                                   "signature": SIG}, NOW, True) == (True, "forced")
+                                   "recipe": config.TRAILS_RECIPE, "signature": SIG},
+                             NOW, True) == (True, "forced")
+
+    def test_recipe_change_rebuilds_now(self, monkeypatch):
+        # same sources, built yesterday: only the recipe says the output is stale
+        prev = {"build_id": "x", "built_at": "2026-09-24T00:00:00Z",
+                "recipe": config.TRAILS_RECIPE, "signature": SIG}
+        assert trails.decide(SIG, prev, NOW, False) == (False, "unchanged")
+        monkeypatch.setattr(config, "TRAILS_RECIPE", config.TRAILS_RECIPE + 1)
+        assert trails.decide(SIG, prev, NOW, False) == (True, "recipe")
+        # state from before the recipe was recorded is recipe 1
+        monkeypatch.setattr(config, "TRAILS_RECIPE", 2)
+        old = {k: v for k, v in prev.items() if k != "recipe"}
+        assert trails.decide(SIG, old, NOW, False) == (True, "recipe")
+        monkeypatch.setattr(config, "TRAILS_RECIPE", 1)
+        assert trails.decide(SIG, old, NOW, False) == (False, "unchanged")
 
     def test_weekly_cadence(self):
         prev = {"build_id": "x", "built_at": "2026-09-22T00:00:00Z",
+                "recipe": config.TRAILS_RECIPE,
                 "signature": dict(SIG, nps={"count": 1, "max_edit": 1})}
         assert trails.decide(SIG, prev, NOW, False) == (False, "deferred_weekly")
         prev["built_at"] = "2026-09-18T00:00:00Z"
@@ -230,10 +271,12 @@ class TestDecide:
         same["built_at"] = "2026-08-20T00:00:00Z"
         assert trails.decide(SIG, same, NOW, False) == (True, "max_age")
 
-    def test_build_id_and_dates(self):
+    def test_build_id_and_dates(self, monkeypatch):
         bid = trails.build_id_for(SIG, NOW)
         assert bid.startswith("20260925-") and len(bid) == 17
         assert bid == trails.build_id_for(json.loads(json.dumps(SIG)), NOW)
+        monkeypatch.setattr(config, "TRAILS_RECIPE", config.TRAILS_RECIPE + 1)
+        assert trails.build_id_for(SIG, NOW) != bid
         d = trails.source_dates(SIG)
         assert d["usfs"] == "2026-09-23" and d["blm_managed"] == "2025-09-21"
 
@@ -280,8 +323,10 @@ class TestSyncEndToEnd:
             (dict(TestNps.ROW, OBJECTID=8, TRLSTATUS="Decommissioned"), line),
             (dict(TestNps.ROW, OBJECTID=9), [[144.8, 13.4], [144.81, 13.41]]),  # Guam
         ])
-        fetchers = {"usfs": lambda: usfs, "blm_managed": lambda: blm,
-                    "blm_not_assessed": lambda: blmn, "nps": lambda: nps}
+        def fetched(p):  # sync deletes each download once normalized
+            return lambda: shutil.copy(p, p.with_suffix(".fetched"))
+        fetchers = {"usfs": fetched(usfs), "blm_managed": fetched(blm),
+                    "blm_not_assessed": fetched(blmn), "nps": fetched(nps)}
         storage = DryRunStorage(tmp_path / "out")
         entry = trails.sync(None, storage, workdir=tmp_path / "work", fetchers=fetchers,
                             sig=SIG, now=NOW, log=lambda *_: None)
@@ -305,6 +350,15 @@ class TestSyncEndToEnd:
         again = trails.sync(None, storage, workdir=tmp_path / "work2", fetchers=fetchers,
                             sig=SIG, now=NOW, log=lambda *_: None)
         assert not again["built"] and again["reason"] == "unchanged"
+        # a normalizer fix (recipe bump) republishes on the next run, same sources
+        assert storage.get_json("state/trails.json")["recipe"] == config.TRAILS_RECIPE
+        monkeypatch.setattr(config, "TRAILS_RECIPE", config.TRAILS_RECIPE + 1)
+        fixed = trails.sync(None, storage, workdir=tmp_path / "work3", fetchers=fetchers,
+                            sig=SIG, now=NOW, log=lambda *_: None)
+        assert fixed["built"] and fixed["reason"] == "recipe" and fixed["build_id"] != bid
+        assert storage.get_json("catalogs/trails.json")["build_id"] == fixed["build_id"]
+        assert storage.get_json(f"trails/b{fixed['build_id']}/build.json")["recipe"] == \
+            config.TRAILS_RECIPE
 
     def test_sanity_failure_keeps_previous_build(self, tmp_path):
         line = [[-115.0, 44.2], [-115.01, 44.21]]

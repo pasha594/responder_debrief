@@ -293,7 +293,11 @@ BLM_NOT_ASSESSED_TRAILS = f"{_BLM_FS}/BLM_Natl_GTLF_Public_Not_Assessed_Trails/F
 NPS_TRAILS = ("https://mapservices.nps.gov/arcgis/rest/services/NationalDatasets/"
               "NPS_Public_Trails/MapServer/0")
 
-TRAILS_RECIPE = 1
+# Bump whenever the same sources would normalize or build differently: it
+# feeds the build id and forces a rebuild on the next run (trails.decide).
+# 2: the first real-data fixes of 2026-09-25 ('N/A' windows, BLM modes and
+# seasons, src_date as a string, USFS class band and forest name).
+TRAILS_RECIPE = 2
 TRAILS_MIN_DAYS = 6       # at most one national build per ~week
 TRAILS_MAX_DAYS = 30      # rebuild anyway after this long (source dates in popups)
 TRAILS_MAX_SECONDS_DEFAULT = 5400

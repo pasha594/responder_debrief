@@ -7,7 +7,8 @@ never touches state/state.json or catalog.json). Steps:
 1. probe  — cheap change signals: USFS zip ETag/Last-Modified (HEAD), BLM
             dataLastEditDate + count, NPS max(EDITDATE) + count.
 2. decide — build when a source changed and the last build is >= 6 days old,
-            when the last build is >= 30 days old, or with --force.
+            when the last build is >= 30 days old, when TRAILS_RECIPE
+            changed since the last build, or with --force.
 3. fetch  — USFS weekly FGDB zip (atomic, unlike the REST service that was
             caught mid-reload); BLM/NPS via GDAL's ESRIJSON auto-paging, with
             the returned count checked against returnCountOnly.
@@ -52,7 +53,7 @@ PMTILES_SPAT = (-179.9, 17.5, -64.0, 71.5)
 
 USFS_SELECT = ("TRAIL_CN,BMP,TRAIL_NO,TRAIL_NAME,TRAIL_CLASS,ALLOWED_TERRA_USE,"
                "HIKER_PEDESTRIAN_MANAGED,HIKER_PEDESTRIAN_RESTRICTED,"
-               "SPECIAL_MGMT_AREA,NATIONAL_TRAIL_DESIGNATION")
+               "SPECIAL_MGMT_AREA,NATIONAL_TRAIL_DESIGNATION,TERRA_BASE_SYMBOLOGY,ADMIN_ORG")
 BLM_FIELDS = ("OBJECTID,ROUTE_PRMRY_NM,ADMIN_ST,PLAN_ALLOW_MODE_TRNSPRT,"
               "PLAN_ACCESS_RSTRCT,PLAN_SEASON_RSTRCT_CODE,OBSRVE_ROUTE_USE_CLASS,"
               "ROUTE_SPCL_DSGNTN_TYPE")
@@ -133,6 +134,12 @@ def decide(sig: dict, prev: dict | None, now: datetime, force: bool) -> tuple[bo
         return True, "forced"
     if not prev or not prev.get("build_id"):
         return True, "first_build"
+    # A recipe bump means the same inputs now normalize or build differently
+    # (a normalizer fix): publish it on the next run, not after a source
+    # change plus TRAILS_MIN_DAYS or at TRAILS_MAX_DAYS. State written before
+    # the recipe was recorded is recipe 1.
+    if prev.get("recipe", 1) != config.TRAILS_RECIPE:
+        return True, "recipe"
     try:
         age_d = (now - datetime.fromisoformat(prev["built_at"].replace("Z", "+00:00"))).total_seconds() / 86400
     except (KeyError, ValueError):
@@ -449,13 +456,13 @@ def sync(client: httpx.Client, storage: Storage, *, workdir: Path, force: bool =
             raise RuntimeError("pmtiles check: " + "; ".join(out["problems"]))
         built_at = _iso(_now())
         pointer = pointer_doc(build_id, built_at, out, counts, dates)
-        build_doc = dict(pointer, signature=sig, normalize=norm_stats,
-                         gdal_version=gdal_cli.version(),
+        build_doc = dict(pointer, recipe=config.TRAILS_RECIPE, signature=sig,
+                         normalize=norm_stats, gdal_version=gdal_cli.version(),
                          sha256={"pmtiles": _sha256(out["pmtiles"]), "fgb": _sha256(out["fgb"])},
                          tiles={"by_zoom": out["summary"]["by_zoom"],
                                 "max_tile_bytes": out["summary"]["max_tile_bytes"]})
-        state = {"schema": 1, "build_id": build_id, "built_at": built_at, "signature": sig,
-                 "counts": counts}
+        state = {"schema": 1, "build_id": build_id, "built_at": built_at,
+                 "recipe": config.TRAILS_RECIPE, "signature": sig, "counts": counts}
         publish(storage, build_id, pointer, build_doc, out, state, log=log)
         entry.update(built=True, build_id=build_id, counts=counts,
                      pmtiles_bytes=pointer["pmtiles_bytes"], fgb_bytes=pointer["fgb_bytes"],
