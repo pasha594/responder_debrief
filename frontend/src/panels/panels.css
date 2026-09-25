@@ -1011,27 +1011,13 @@
   outline: 2px solid var(--color-accent);
   outline-offset: 2px;
 }
-/* phones: just the arrow until tapped (BackControl) */
+/* just the arrow until tapped (BackControl); spelled out, it nudges the
+   rest of the line along */
 .rd-back-control--compact {
   width: 32px;
   padding: 0;
   justify-content: center;
   font-size: 16px;
-}
-/* the arrow holds a 32px slot in the one-line toolbar; spelled out, the pill
-   grows over the basemap pill instead of pushing the line along */
-.rd-back-slot {
-  position: relative;
-  flex: 0 0 auto;
-  width: 32px;
-  height: 32px;
-}
-.rd-back-slot > .rd-back-control {
-  position: absolute;
-  top: 0;
-  left: 0;
-  z-index: 2;
-  white-space: nowrap;
 }
 
 /* ---------- Legend bar ---------- */
@@ -1583,21 +1569,14 @@
   object-fit: contain;
 }
 
-/* Drawing tools in the map's top-right corner, just under the top line of
-   controls, while the Draw tab is open. */
+/* Drawing tools while the Draw tab is open, on the line under the map's top
+   controls (see .rd-map-toolbar): open on desktop, folded behind the Drawing
+   Tools button on phones, tablets and narrow windows. */
 .rd-draw-mapbar {
-  position: absolute;
-  top: 52px;
-  right: calc(var(--sidebar-w) + 12px);
-  z-index: 28;
-  width: 158px;
+  width: 150px;
   display: flex;
   flex-direction: column;
   gap: 6px;
-}
-
-.rd-app:has(.rd-sidebar--collapsed) .rd-draw-mapbar {
-  right: 60px;
 }
 
 .rd-draw-mapbar-pair {
@@ -1651,14 +1630,7 @@
   color: var(--color-accent);
 }
 
-/* phones, tablets and narrow windows: on the line under the map's top
-   controls, folded behind the Drawing Tools button until it's tapped */
-.rd-draw-mapbar--stack {
-  position: static;
-  width: 150px;
-}
-
-.rd-draw-mapbar--stack .rd-draw-mapbtn--toggle {
+.rd-draw-mapbtn--toggle {
   align-self: flex-start;
 }
 
@@ -1698,24 +1670,17 @@
   color: var(--color-accent);
 }
 
-/* folded controls: the chooser opens over its neighbours instead of
-   widening the one-line toolbar */
+/* the pill's chooser drops down under it, so every button on the line stays
+   in view */
 .rd-basemap-fold {
   position: relative;
   flex: 0 0 auto;
 }
 .rd-basemap-control.rd-basemap-menu {
   position: absolute;
-  top: 0;
+  top: calc(100% + 6px);
   left: 0;
   z-index: 2;
-}
-/* whatever an overlay covers (3D, QR and the Search pill under the chooser;
-   the basemap pill under the spelled-out back pill) steps aside meanwhile,
-   so nothing peeks out past its end */
-.rd-map-toolbar:has(.rd-basemap-menu) :is(.rd-3d-btn, .rd-sd-bar),
-.rd-map-toolbar-row:has(.rd-back-slot > .rd-back-control:not(.rd-back-control--compact)) .rd-basemap-fold {
-  visibility: hidden;
 }
 
 /* pills + the 3D tilt button share a row in every layout */
@@ -2069,24 +2034,28 @@
 }
 
 /* ---------- Search + directions control ---------- */
-/* One line across the map's top edge: back, basemap, 3D, QR, then search
-   and the locate button. The search card grows DOWNWARD from the line when
-   the flow expands. */
+/* One line across the map's top edge on every screen: back arrow, basemap
+   pill, 3D, QR, the Search pill and the locate button, with the drawing
+   tools on the line under it. The search card grows DOWNWARD when the flow
+   expands. */
 .rd-map-toolbar {
   position: absolute;
   top: 12px;
   left: 12px;
-  /* Bounded by the sidebar so nothing paints over the panel: when the line
-     no longer fits (narrow desktop) the search bar wraps to a second line
-     under the buttons. */
+  /* bounded by the sidebar so nothing paints over the panel */
   right: calc(var(--sidebar-w) + 12px);
-  /* over the Draw tab's corner tools, so search results and the directions
-     card cover them rather than slide under */
-  z-index: 29;
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-start;
-  gap: 8px;
+  z-index: 28;
+  display: grid;
+  /* the Search pill gives up to 32px when a long basemap name crowds a
+     phone's line; the empty last column keeps the wide search card and the
+     drawing tools, which span it, from stretching the columns above them */
+  grid-template-columns: max-content minmax(72px, max-content) max-content 1fr;
+  grid-template-areas:
+    'row bar loc .'
+    'draw draw draw draw';
+  align-items: start;
+  justify-items: start;
+  gap: 6px;
   /* the box spans the map's top edge; only the controls take clicks */
   pointer-events: none;
 }
@@ -2097,72 +2066,38 @@
 .rd-app:has(.rd-sidebar--collapsed) .rd-map-toolbar {
   right: 60px;
 }
-.rd-sd-control {
-  flex: 0 0 auto;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  align-items: flex-start;
-}
-/* full controls: the search bar gives way (down to 200px, where "Search
-   place or coordinates" still fits) before it wraps under the buttons */
-.rd-map-toolbar:not(.rd-map-toolbar--compact) .rd-sd-control {
-  flex: 1 1 238px; /* 200px bar + 6px + the 32px locate button */
-  min-width: 0; /* the bar's own 200px floor applies, not its 280px width */
-  max-width: 318px;
-}
-.rd-map-toolbar:not(.rd-map-toolbar--compact) .rd-sd-toprow {
-  align-self: stretch;
-}
-.rd-map-toolbar:not(.rd-map-toolbar--compact) .rd-sd-bar {
-  flex: 0 1 auto;
-  min-width: 200px;
-}
-/* an expanded card keeps its full width and wraps whole */
-.rd-map-toolbar:not(.rd-map-toolbar--compact) .rd-sd-control:has(.rd-sd-row + .rd-sd-row),
-.rd-map-toolbar:not(.rd-map-toolbar--compact) .rd-sd-control:has(.rd-sd-result) {
-  flex: 0 0 auto;
-  max-width: none;
-}
-/* Phones, touch tablets and windows under 870px (App sets --compact, see
-   useCompactControls): one line — back arrow, basemap pill, 3D, QR, the
-   Search pill and the locate button — with the drawing tools under it. The
-   Search pill gives up to 32px when a long basemap name crowds the line. */
-.rd-map-toolbar--compact {
-  display: grid;
-  grid-template-columns: max-content minmax(72px, max-content) max-content 1fr;
-  grid-template-areas:
-    'row bar loc .'
-    'draw draw draw draw';
-  align-items: start;
-  justify-items: start;
-  gap: 6px;
-}
-.rd-map-toolbar--compact .rd-map-toolbar-row {
+.rd-map-toolbar .rd-map-toolbar-row {
   grid-area: row;
   gap: 6px;
 }
 /* the bar and the locate button sit in the grid themselves */
-.rd-map-toolbar--compact .rd-sd-control,
-.rd-map-toolbar--compact .rd-sd-toprow {
+.rd-sd-control,
+.rd-sd-toprow {
   display: contents;
 }
-.rd-map-toolbar--compact .rd-sd-bar {
+.rd-map-toolbar .rd-sd-bar {
   grid-area: bar;
   max-width: 100%;
 }
-.rd-map-toolbar--compact .rd-loc-btn {
+.rd-map-toolbar .rd-loc-btn {
   grid-area: loc;
+  margin-right: -6px; /* cancels the gap before the empty last column */
 }
-.rd-map-toolbar--compact .rd-draw-mapbar--stack {
+.rd-map-toolbar .rd-draw-mapbar {
   grid-area: draw;
+}
+/* the back arrow spelled out nudges the line along; on small phones the
+   Search pill narrows further for those two seconds so the locate button
+   stays in view */
+.rd-map-toolbar:has(.rd-back-control:not(.rd-back-control--compact)) {
+  grid-template-columns: max-content minmax(48px, max-content) max-content 1fr;
 }
 /* a search in use (focused, holding a place, or expanded into directions)
    takes its own line under the buttons; the locate button stays up top */
-.rd-map-toolbar--compact:has(.rd-sd-bar:focus-within),
-.rd-map-toolbar--compact:has(.rd-sd-bar .rd-sd-row + .rd-sd-row),
-.rd-map-toolbar--compact:has(.rd-sd-bar .rd-sd-result),
-.rd-map-toolbar--compact:has(.rd-sd-bar input:not(:placeholder-shown)) {
+.rd-map-toolbar:has(.rd-sd-bar:focus-within),
+.rd-map-toolbar:has(.rd-sd-bar .rd-sd-row + .rd-sd-row),
+.rd-map-toolbar:has(.rd-sd-bar .rd-sd-result),
+.rd-map-toolbar:has(.rd-sd-bar input:not(:placeholder-shown)) {
   grid-template-columns: max-content max-content 1fr;
   grid-template-areas:
     'row loc .'
@@ -2178,10 +2113,10 @@
     display: none;
   }
 }
-/* phones under 360px can't fit the Search pill on the line: it always takes
+/* phones under 354px can't fit the Search pill on the line: it always takes
    the line under the buttons */
-@media (max-width: 359px) {
-  .rd-map-toolbar--compact {
+@media (max-width: 353px) {
+  .rd-map-toolbar {
     grid-template-columns: max-content max-content 1fr;
     grid-template-areas:
       'row loc .'
@@ -2348,6 +2283,7 @@
   box-sizing: border-box;
   padding: 0 12px;
   font-size: 13px;
+  text-overflow: ellipsis; /* "Sea…" while the back arrow squeezes the pill */
   border-radius: 999px;
   border-color: transparent;
   background: transparent;
@@ -2358,13 +2294,12 @@
   background: var(--color-bg);
   border-color: var(--color-border);
 }
-/* phones, touch tablets and narrow windows: an idle search is a compact
-   "Search" pill; it widens back to the full bar while focused, holding a
-   place, or expanded into directions */
-.rd-map-toolbar--compact .rd-sd-bar {
+/* an idle search is a compact "Search" pill; it widens back to the full bar
+   while focused, holding a place, or expanded into directions */
+.rd-map-toolbar .rd-sd-bar {
   transition: width 150ms ease;
 }
-.rd-map-toolbar--compact .rd-sd-bar:not(:focus-within):not(:has(.rd-sd-row + .rd-sd-row)):not(:has(.rd-sd-result)):has(input:placeholder-shown) {
+.rd-map-toolbar .rd-sd-bar:not(:focus-within):not(:has(.rd-sd-row + .rd-sd-row)):not(:has(.rd-sd-result)):has(input:placeholder-shown) {
   width: 104px;
 }
 
@@ -2403,7 +2338,6 @@
 .rd-sd-close { flex: 0 0 auto; border: 0; background: none; font-size: 13px; }
 
 /* ---------- Location services ---------- */
-.rd-sd-toprow { display: flex; gap: 6px; align-items: flex-start; }
 .rd-loc-btn,
 .rd-loc-mini {
   display: inline-flex;

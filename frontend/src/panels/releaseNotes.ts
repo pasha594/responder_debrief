@@ -46,11 +46,7 @@ export const RELEASE_NOTES: ReleaseDay[] = [
       {
         title: 'Map buttons on one line',
         summary:
-          "Back, basemap, 3D, QR, search and locate now share one line across the top of the map on phones, iPads and computers. On phones the settings gear moved into the fire panel's top corner.",
-      },
-      {
-        title: 'Compact map buttons on iPads',
-        summary: "iPads now get the phones' smaller map buttons and keep the side panel.",
+          "Back, basemap, 3D, QR, search and locate now share one line of compact buttons across the top of the map on every screen, with the Draw tools under them on the left. On phones the settings gear moved into the fire panel's top corner.",
       },
       {
         title: 'Share by QR code',
