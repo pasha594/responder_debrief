@@ -1,0 +1,101 @@
+name: Trails build
+
+# National USFS/BLM/NPS trails -> trails.fgb (routing input) + trails.pmtiles
+# (map overlay), published under a versioned trails/b{build_id}/ prefix with
+# the catalogs/trails.json pointer written last. Stateless with respect to
+# state/state.json and catalog.json, so it runs in its own concurrency group
+# (never worker-b2-writes). The daily cron is catch-up-safe: the job builds
+# only when a source changed and the last build is >= 6 days old (or >= 30
+# days old), so a skipped or late cron costs nothing.
+on:
+  schedule:
+    - cron: "37 9 * * *"
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "Build even if nothing changed"
+        type: boolean
+        default: false
+      dry_run:
+        description: "Write to worker/out and upload it as an artifact (no B2)"
+        type: boolean
+        default: false
+
+concurrency:
+  group: trails-build
+  cancel-in-progress: false
+
+jobs:
+  trails:
+    # Pinned: GDAL 3.8.4 (noble) is the tested PMTiles writer; a silent
+    # ubuntu-latest flip to 26.04 would jump to GDAL 3.12.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    defaults:
+      run:
+        working-directory: worker
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Runner resources
+        run: df -h / "$RUNNER_TEMP" && free -h && nproc
+
+      - name: Install GDAL CLI tools
+        continue-on-error: true
+        timeout-minutes: 9
+        run: |
+          for attempt in 1 2 3 4; do
+            if [ "$attempt" = "3" ]; then
+              echo "azure mirror still failing — switching to archive.ubuntu.com"
+              sudo sed -i 's|azure.archive.ubuntu.com|archive.ubuntu.com|g' \
+                /etc/apt/sources.list /etc/apt/sources.list.d/* 2>/dev/null || true
+            fi
+            if sudo apt-get update -o Acquire::Retries=3 \
+               && sudo apt-get install -y --no-install-recommends -o Acquire::Retries=3 gdal-bin; then
+              break
+            fi
+            echo "apt attempt $attempt failed — retrying"
+            sleep 5
+          done
+
+      - name: GDAL self-check
+        run: |
+          gdalinfo --version
+          ogrinfo --formats | grep -Ei 'pmtiles|flatgeobuf|gpkg|openfilegdb|esrijson|geojsonseq' || true
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+          enable-cache: true
+          cache-dependency-glob: "worker/uv.lock"
+
+      - name: Install dependencies
+        run: uv sync
+
+      - name: Contract tests (a red test blocks publishing)
+        run: uv run pytest -q tests/test_trails.py tests/test_trails_foundations.py
+
+      - name: Build trails
+        env:
+          B2_KEY_ID: ${{ secrets.B2_KEY_ID }}
+          B2_APP_KEY: ${{ secrets.B2_APP_KEY }}
+          B2_BUCKET: responder-debrief-data
+          B2_S3_ENDPOINT: ${{ vars.B2_S3_ENDPOINT }}
+          TRAILS_MAX_SECONDS: ${{ vars.TRAILS_MAX_SECONDS || '5400' }}
+          GDAL_NUM_THREADS: "4"
+          CPL_TMPDIR: ${{ runner.temp }}
+          INPUT_FORCE: ${{ inputs.force }}
+          INPUT_DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          FLAGS=(--workdir "$RUNNER_TEMP")
+          [ "$INPUT_FORCE" = "true" ] && FLAGS+=(--force)
+          [ "$INPUT_DRY_RUN" = "true" ] && FLAGS+=(--dry-run --out out --force)
+          uv run python -m responder_worker.cli sync-trails "${FLAGS[@]}"
+
+      - name: Upload dry-run output
+        if: ${{ always() && inputs.dry_run }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: trails-dryrun
+          path: worker/out/
+          retention-days: 3

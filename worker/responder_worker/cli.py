@@ -1,5 +1,6 @@
 """CLI: python -m responder_worker.cli
-{sync-catalogs|sync-incidents|backfill|prune|cleanup-spread-frames}
+{sync-catalogs|sync-incidents|tile-worker|backfill|prune|cleanup-spread-frames|
+ sync-trails|routing-plan|routing-build|routing-one|routing-index}
 
 --dry-run everywhere: no B2 needed; outputs land under ./out/ mirroring the B2
 key layout, state at ./out/state/state.json.
@@ -1576,6 +1577,10 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--confirm", action="store_true",
                     help="required flag to actually delete")
     sp.set_defaults(func=cmd_cleanup_spread_frames)
+
+    # Trails overlay + offline routing bundles live in their own modules.
+    from . import trails_cli
+    trails_cli.register(sub, common)
     return p
 
 
