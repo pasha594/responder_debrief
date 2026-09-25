@@ -41,7 +41,7 @@ import { SharedPlayheadSync } from '../share/SharedPlayheadSync';
 import { ShareFormatError } from '../share/bytes';
 import { decodeShareBody } from '../share/shareCodec';
 import { parseShareText } from '../share/transport';
-import { useCompactControls } from '../utils/useMediaQuery';
+import { useIsDesktop } from '../utils/useMediaQuery';
 
 function MapLayerBridge() {
   const perimeterReady = useMapLayerSync();
@@ -272,15 +272,14 @@ function NowSampler() {
  * manager, so a repeat entry starts from a clean map.
  */
 function FireMapView() {
-  // phones, touch tablets and narrow windows stack the folded controls down
-  // the left edge
-  const compact = useCompactControls();
+  // phones carry the settings gear in the bottom sheet instead (see Sidebar)
+  const isDesktop = useIsDesktop();
   return (
     <MapRoot>
       <MapLayerBridge />
       <UrlStateSync />
       <SharedPlayheadSync />
-      <div className={`rd-map-toolbar${compact ? ' rd-map-toolbar--compact' : ''}`}>
+      <div className="rd-map-toolbar">
         <div className="rd-map-toolbar-row">
           <BackControl />
           <BasemapControl />
@@ -290,16 +289,12 @@ function FireMapView() {
         <ErrorBoundary label="Search">
           <SearchDirectionsControl />
         </ErrorBoundary>
-        {/* phones: under the search bar */}
+        {/* on the line under the buttons */}
         <ErrorBoundary label="Drawing tools">
-          <DrawMapToolbar placement="stack" />
+          <DrawMapToolbar />
         </ErrorBoundary>
       </div>
-      <SettingsControl />
-      {/* desktop: the map's top-right corner */}
-      <ErrorBoundary label="Drawing tools">
-        <DrawMapToolbar placement="corner" />
-      </ErrorBoundary>
+      {isDesktop && <SettingsControl />}
       <ErrorBoundary label="Fire panel">
         <Sidebar />
       </ErrorBoundary>

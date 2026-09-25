@@ -59,6 +59,11 @@ export const RELEASE_NOTES: ReleaseDay[] = [
           'The legend moved to the bottom-left. The scale sits beside the info button, with the compass above it, and the map credits fold into that button after five seconds. An IR flight and an incident map now replace each other on the map instead of stacking.',
       },
       {
+        title: 'Map buttons on one line',
+        summary:
+          "Back, basemap, 3D, QR, search and locate now share one line of compact buttons across the top of the map on every screen, with the Draw tools under them on the left. On phones the settings gear moved into the fire panel's top corner.",
+      },
+      {
         title: 'Share by QR code',
         summary:
           'The QR button beside 3D shows your map view, layers, incident map and drawings as a code. Another phone scans it with Scan code, no signal needed if both phones downloaded the fire.',

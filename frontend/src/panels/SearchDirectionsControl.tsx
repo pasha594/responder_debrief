@@ -24,7 +24,6 @@ import { geolocationAvailable, locateOnce, watchLocation } from '../app/geolocat
 import { track } from '../app/analytics';
 import { useStore } from '../state/store';
 import { useMap } from '../map/MapRoot';
-import { useCompactControls } from '../utils/useMediaQuery';
 
 const MY_LOCATION_LABEL = 'My location';
 const DEBOUNCE_MS = 350;
@@ -242,9 +241,6 @@ function endpointEl(which: 'a' | 'b'): HTMLElement {
 
 export function SearchDirectionsControl() {
   const map = useMap();
-  // phones, touch tablets and narrow windows get a compact "Search" pill
-  // that widens while it's in use (CSS)
-  const fullControls = !useCompactControls();
   const directions = useStore((s) => s.directions);
   const range = useStore((s) => s.range);
   const actions = useStore((s) => s.actions);
@@ -638,7 +634,7 @@ export function SearchDirectionsControl() {
             )}
             <PlaceInput
               inputRef={startInput}
-              placeholder={fullControls ? 'Search place or coordinates' : 'Search'}
+              placeholder="Search"
               value={directions.a?.label ?? ''}
               onPick={setPoint('a')}
               onClear={() => actions.setDirectionsPoint('a', null)}

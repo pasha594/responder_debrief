@@ -1,11 +1,14 @@
 /**
  * Right-hand panel shell. Desktop (≥768px): fixed-width sidebar with a
- * collapse rail. Mobile: the same content inside the bottom MobileSheet.
+ * collapse rail. Mobile: the same content inside the bottom MobileSheet,
+ * with the settings gear in the sheet's corner (on phones the map's top edge
+ * is all controls).
  */
 import { useStore } from '../state/store';
 import { useIsDesktop } from '../utils/useMediaQuery';
 import { FirePanel } from './FirePanel';
 import { MobileSheet } from './MobileSheet';
+import { SettingsControl } from './SettingsControl';
 import './panels.css';
 
 /** The sidebar only ever mounts in fire mode (the directory has no map). */
@@ -36,7 +39,7 @@ export function Sidebar() {
 
   if (!isDesktop) {
     return (
-      <MobileSheet>
+      <MobileSheet corner={<SettingsControl />}>
         <PanelContent />
       </MobileSheet>
     );

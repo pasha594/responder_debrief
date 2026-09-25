@@ -1,5 +1,6 @@
 /**
- * Settings gear (top right of both the directory and the fire map): app theme
+ * Settings gear (top right of the directory, and of the fire panel: the
+ * sidebar's corner, or the bottom sheet's on phones): app theme
  * (dark/light — the machinery lived in the store all along, this is its first
  * UI) and the basemap style, three keyless variants per theme (see MAP_STYLES).
  */
@@ -16,11 +17,17 @@ function GearIcon() {
   );
 }
 
+/** Room the popover (~205px) needs under the gear, with the timeline strip
+ *  that sits under the phone's bottom sheet. */
+const PANEL_ROOM = 280;
+
 export function SettingsControl() {
   const theme = useStore((s) => s.ui.theme);
   const mapStyle = useStore((s) => s.ui.mapStyle);
   const actions = useStore((s) => s.actions);
   const [open, setOpen] = useState(false);
+  // low on the screen (the phone's sheet at its peek) it opens upward
+  const [up, setUp] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
   const close = useCallback(() => setOpen(false), []);
   useDismiss(rootRef, open, close);
@@ -33,12 +40,23 @@ export function SettingsControl() {
         title="Settings"
         aria-label="Settings"
         aria-expanded={open}
-        onClick={() => setOpen(!open)}
+        onClick={(e) => {
+          if (!open) {
+            const r = e.currentTarget.getBoundingClientRect();
+            const below = window.innerHeight - r.bottom;
+            setUp(below < PANEL_ROOM && r.top > below);
+          }
+          setOpen(!open);
+        }}
       >
         <GearIcon />
       </button>
       {open && (
-        <div className="rd-settings-panel" role="dialog" aria-label="Settings">
+        <div
+          className={`rd-settings-panel${up ? ' rd-settings-panel--up' : ''}`}
+          role="dialog"
+          aria-label="Settings"
+        >
           <div className="rd-settings-label">Theme</div>
           <div className="rd-settings-segment" role="group" aria-label="App theme">
             {(['dark', 'light'] as const).map((t) => (
