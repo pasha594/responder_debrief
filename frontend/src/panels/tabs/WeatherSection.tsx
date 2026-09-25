@@ -12,7 +12,7 @@ import {
   type WeatherProductMeta,
 } from '../../api/types';
 import { useStore } from '../../state/store';
-import { weatherCoverage } from '../../timeline/framePlan';
+import { weatherCoverage, weatherJumpTarget } from '../../timeline/framePlan';
 import { formatDateTime, formatRelative } from '../../utils/format';
 import { GradientLegend } from '../../utils/GradientLegend';
 
@@ -28,7 +28,7 @@ function WeatherRow({
   product: WeatherProduct;
   meta: WeatherProductMeta;
   legendTemplate: string | undefined;
-  /** The run's rendered-hour span; turning a layer on outside it jumps the playhead to its start. */
+  /** The run's rendered-hour span; turning a layer on may jump the playhead (weatherJumpTarget). */
   coverage: [number, number] | null;
   /** True on wind rows when the run carries U/V grids (arrows will render). */
   arrowNote?: boolean;
@@ -49,10 +49,9 @@ function WeatherRow({
             checked={visible}
             onChange={(e) => {
               const on = e.target.checked;
-              const t = useStore.getState().time.currentTime;
-              if (on && coverage && (t < coverage[0] || t > coverage[1])) {
-                actions.setTime(coverage[0]);
-              }
+              const { currentTime, now } = useStore.getState().time;
+              const target = on ? weatherJumpTarget(coverage, currentTime, now) : null;
+              if (target !== null) actions.setTime(target);
               actions.setWeatherLayer(product, { visible: on });
             }}
           />

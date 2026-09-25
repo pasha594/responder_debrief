@@ -102,6 +102,22 @@ export function weatherCoverage(run: WeatherRun | null): [number, number] | null
 }
 
 /**
+ * Where the playhead should go when a weather layer is turned on: nowhere
+ * (null) when it already sits inside the run's coverage, else now when the
+ * run covers now, else the run's first hour.
+ */
+export function weatherJumpTarget(
+  coverage: [number, number] | null,
+  currentTime: number,
+  now: number,
+): number | null {
+  if (!coverage) return null;
+  const inRun = (t: number) => t >= coverage[0] && t <= coverage[1];
+  if (inRun(currentTime)) return null;
+  return inRun(now) ? now : coverage[0];
+}
+
+/**
  * Nearest rendered hour within tolerance (90 min), else null (layer hides +
  * chip). Weather frames are per-hour image swaps.
  */
