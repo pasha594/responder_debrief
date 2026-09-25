@@ -56,6 +56,22 @@ describe('WalkRouteDetails', () => {
     expect(h).not.toContain('⚠ 1'); // the count only stands in for hidden notes
   });
 
+  it('folds every fire-proximity note into one plain warning', () => {
+    const h = html({
+      ...offroad,
+      notes: [
+        { level: 'warn', code: 'ENDPOINT_IN_PERIM', text: 'B is inside the latest mapped fire perimeter, so the route may cross the fire near B.' },
+        { level: 'warn', code: 'ENDPOINT_NEAR_PERIM', text: 'A is within 60 m of the latest mapped fire perimeter.' },
+        { level: 'warn', code: 'CROSSES_PERIM', text: 'This route crosses the latest mapped fire perimeter.' },
+        { level: 'warn', code: 'XC_STREAM', text: 'Unbridged crossing of Weasel Creek, cross-country.' },
+      ],
+    }, true);
+    expect(h.match(/This route goes near the latest fire perimeter\./g)).toHaveLength(1);
+    expect(h).not.toMatch(/inside the latest mapped|within 60 m|crosses the latest mapped/);
+    expect(h).toContain('Weasel Creek');
+    expect(html({ ...offroad, notes: [{ level: 'warn', code: 'NEAR_PERIM', text: 'x' }] })).toContain('⚠ 1');
+  });
+
   it('an online route is just its time', () => {
     const h = html({ ...offroad, engine: 'valhalla', modeled: false, notes: [], durationRangeS: undefined });
     expect(h).toContain('<strong>2 h 48 min</strong>');

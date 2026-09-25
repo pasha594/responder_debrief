@@ -19,7 +19,8 @@
   padding: 0; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
 .rd-walk-head strong { font-size: 14px; }
 .rd-walk-warncount { color: #e0a24a; font-weight: 600; }
-.rd-walk-chev { margin-left: auto; color: var(--color-text-muted); }
+.rd-walk-chev { margin-left: auto; padding: 0 4px; font-size: 18px; line-height: 1; color: var(--color-text-muted); }
+.rd-walk-head:hover .rd-walk-chev { color: var(--color-text); }
 .rd-walk-muted { color: var(--color-text-muted); }
 .rd-walk-split { display: flex; height: 5px; border-radius: 3px; overflow: hidden; background: var(--color-border, #444); }
 .rd-walk-bar--trail { background: #4aa3ff; }

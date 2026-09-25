@@ -19,6 +19,12 @@ import './walk.css';
 /** Notes the card leaves out (owner call): the weighted-search caveat. */
 const HIDDEN_NOTES = new Set(['WEIGHTED']);
 
+/** Every "the route meets the fire" note — A or B inside or near the
+ * perimeter, the line crossing it or passing close — reads as this one line
+ * (owner call: one plain warning, not one per pin). */
+const PERIM_CODES = new Set(['CROSSES_PERIM', 'NEAR_PERIM', 'ENDPOINT_IN_PERIM', 'ENDPOINT_NEAR_PERIM']);
+const PERIM_NOTE = { level: 'warn' as const, code: 'PERIM', text: 'This route goes near the latest fire perimeter.' };
+
 /** Whole minutes, like the Walk mode button, so the two always agree. */
 function fmtTime(s: number): string {
   const min = Math.max(1, Math.round(s / 60));
@@ -59,7 +65,10 @@ export function WalkRouteDetails({ route, defaultOpen }: { route: RouteResult; d
   const pv = route.provenance;
   const gapM = legs.filter((l) => l.kind === 'gap').reduce((s, l) => s + l.distanceM, 0);
   const trailPct = t.distanceM ? Math.round((100 * t.trailM) / t.distanceM) : 0;
-  const notes = (route.notes ?? []).filter((n) => !HIDDEN_NOTES.has(n.code));
+  const raw = (route.notes ?? []).filter((n) => !HIDDEN_NOTES.has(n.code));
+  const notes = raw.some((n) => PERIM_CODES.has(n.code))
+    ? [PERIM_NOTE, ...raw.filter((n) => !PERIM_CODES.has(n.code))]
+    : raw;
   const warnings = notes.filter((n) => n.level === 'warn').length;
   return (
     <div className="rd-walk">
