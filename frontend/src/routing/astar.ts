@@ -59,7 +59,9 @@ export class HybridSearch {
   settled = 0;
   status: SearchStatus = 'running';
   cost = Infinity;
-  private readonly g: Float64Array;
+  // Float32: seconds to ~0.01 s precision are plenty, and it cuts the
+  // largest (whole-grid fallback) search by a third on a phone.
+  private readonly g: Float32Array;
   private readonly parent: Int32Array;
   private readonly closed: Uint8Array;
   private readonly heap = new MinHeap(4096);
@@ -71,7 +73,7 @@ export class HybridSearch {
     this.wh = w.r1 - w.r0;
     this.wc = this.ww * this.wh;
     const total = this.wc + inp.graph.n;
-    this.g = new Float64Array(total).fill(Infinity);
+    this.g = new Float32Array(total).fill(Infinity);
     this.parent = new Int32Array(total).fill(-1);
     this.closed = new Uint8Array(total);
     const s = this.cellState(inp.start.cell);

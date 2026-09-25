@@ -5,12 +5,16 @@
  *  - catalogs/health.json: the workers' own heartbeat (files, bytes, weather
  *    frames, skipped incidents) — a crashed run's absence shows as staleness.
  *  - The published catalogs' generated_at stamps: end-to-end data freshness.
+ *  - catalogs/health/{trails,routing}.json: the trails build's and routing
+ *    bundles' single-writer heartbeats (their workflows run outside the
+ *    worker-b2-writes group, so they never touch catalogs/health.json).
  */
 import { useQuery } from '@tanstack/react-query';
 import { DisclaimerFooter } from './DisclaimerFooter';
 import { HREF_DIRECTORY } from '../app/router';
 import { useHealth, useImsr, useMasterCatalog, useWeatherRuns } from '../api/queries';
 import { formatBytes, formatRelative } from '../utils/format';
+import { dataUrl } from '../api/catalogs';
 import { recentOutages } from '../utils/health';
 
 const REPO = 'pasha594/responder_debrief';
@@ -36,6 +40,37 @@ async function fetchGhRuns(): Promise<GhRun[]> {
 
 const useGhRuns = () =>
   useQuery({ queryKey: ['gh-runs'], queryFn: fetchGhRuns, staleTime: 120_000, retry: 1 });
+
+/** One workflow's own runs: a daily/weekly workflow scrolls out of the
+ * shared 40-run window above. */
+async function fetchWorkflowRuns(file: string): Promise<GhRun[]> {
+  const res = await fetch(
+    `https://api.github.com/repos/${REPO}/actions/workflows/${file}/runs?per_page=10`,
+    { headers: { Accept: 'application/vnd.github+json' } },
+  );
+  if (!res.ok) throw new Error(`github ${res.status}`);
+  return ((await res.json()) as { workflow_runs: GhRun[] }).workflow_runs;
+}
+
+const useWorkflowRuns = (file: string) =>
+  useQuery({ queryKey: ['gh-runs', file], queryFn: () => fetchWorkflowRuns(file), staleTime: 300_000, retry: 1 });
+
+interface JobHealthDoc {
+  updated_at: string;
+  last_run: ({ finished_at?: string; note?: string | null } & Record<string, unknown>) | null;
+  last_failure: { finished_at?: string; note?: string | null } | null;
+}
+
+const useJobHealth = (job: 'trails' | 'routing') =>
+  useQuery({
+    queryKey: ['job-health', job],
+    queryFn: async () => {
+      const res = await fetch(dataUrl(`/catalogs/health/${job}.json`));
+      return res.ok ? ((await res.json()) as JobHealthDoc) : null;
+    },
+    staleTime: 120_000,
+    retry: 1,
+  });
 
 // ---------- freshness assessment ----------
 
@@ -128,6 +163,10 @@ export function HealthView() {
   const { data: catalog } = useMasterCatalog();
   const { data: weather } = useWeatherRuns();
   const { data: imsr } = useImsr();
+  const { data: trailsRuns } = useWorkflowRuns('trails.yml');
+  const { data: routingRuns } = useWorkflowRuns('routing.yml');
+  const { data: trailsHealth } = useJobHealth('trails');
+  const { data: routingHealth } = useJobHealth('routing');
 
   const byWorkflow = (name: string) => (gh ?? []).filter((r) => r.name === name);
   const newestRendered = weather?.models.hrrr.runs.find(
@@ -166,6 +205,8 @@ export function HealthView() {
         <PipelineRuns runs={byWorkflow('Mirror incidents')} title="FTP mirror (hourly)" />
         <PipelineRuns runs={byWorkflow('Tile worker')} title="Tile workers (event + hourly)" />
         <PipelineRuns runs={byWorkflow('Deploy frontend (GitHub Pages)')} title="Site deploy" />
+        <PipelineRuns runs={trailsRuns ?? []} title="Trails build (daily check, weekly build)" />
+        <PipelineRuns runs={routingRuns ?? []} title="Routing bundles (3-hourly)" />
       </section>
 
       <section className="rd-section">
@@ -201,6 +242,22 @@ export function HealthView() {
           okMs={26 * HOUR}
           warnMs={30 * HOUR}
           detail={imsr ? `${Object.keys(imsr.fires).length} fires matched` : undefined}
+        />
+        <FreshnessRow
+          label="Trails build"
+          iso={trailsHealth?.last_run?.finished_at}
+          okMs={8 * 24 * HOUR}
+          warnMs={15 * 24 * HOUR}
+          detail={trailsHealth?.last_failure
+            ? `latest run failed: ${trailsHealth.last_failure.note ?? ''}`
+            : trailsHealth?.last_run?.note ?? undefined}
+        />
+        <FreshnessRow
+          label="Offline routing bundles"
+          iso={routingHealth?.last_run?.finished_at}
+          okMs={6 * HOUR}
+          warnMs={12 * HOUR}
+          detail={routingHealth?.last_run?.note ?? undefined}
         />
       </section>
 
