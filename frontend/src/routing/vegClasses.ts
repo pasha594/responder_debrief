@@ -2,13 +2,16 @@
  * Vegetation classes of the routing grid's veg band (`veg-v1`; worker
  * responder_worker/cost_grid.py) — one table for the Vegetation layer, the
  * cross-country route-leg colours and the legend (toaBands.ts pattern).
- * Low nibble = class id; bit 0x10 = perennial stream a crew can ford (a
+ * Low nibble = class id; bit 0x10 = perennial creek a crew can ford (a
  * river or large creek is class 10, impassable water, since the worker's
  * COST_GRID_VERSION 2). `impassable` mirrors what the worker bakes into the
  * pace band; the router itself only reads the pace.
  */
 export const STREAM_BIT = 0x10;
 export const STREAM_COLOR = '#2f8fd8';
+/** Legend text for the stream bit: only creeks carry it now; a river
+ * draws as class 10. */
+export const STREAM_LABEL = 'Perennial creek (crossable)';
 
 export interface VegClass {
   id: number;
@@ -32,7 +35,7 @@ export const VEG_CLASSES: VegClass[] = [
   { id: 8, key: 'developed', label: 'Developed / agriculture', short: 'developed ground', color: '#d9b9a3' },
   // impassable since COST_GRID_VERSION 3 (glaciers and permanent snow/ice)
   { id: 9, key: 'snow', label: 'Snow / ice (impassable)', short: 'snow and ice', color: '#e6f2ff', impassable: true },
-  { id: 10, key: 'water', label: 'Open water (impassable)', short: 'water', color: '#3b78c2', impassable: true },
+  { id: 10, key: 'water', label: 'Open water or river (impassable)', short: 'water', color: '#3b78c2', impassable: true },
   { id: 11, key: 'steep', label: 'Too steep > 45° (impassable)', short: 'steep ground', color: '#5b3a29', impassable: true },
 ];
 

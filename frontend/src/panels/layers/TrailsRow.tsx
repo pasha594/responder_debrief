@@ -6,7 +6,7 @@
  */
 import { useStore } from '../../state/store';
 import { useFireBundle } from '../../routing/hooks';
-import { VEG_CLASSES, STREAM_COLOR } from '../../routing/vegClasses';
+import { VEG_CLASSES, STREAM_COLOR, STREAM_LABEL } from '../../routing/vegClasses';
 
 export function TrailsRow() {
   const mode = useStore((s) => s.layers.trails.mode);
@@ -75,7 +75,7 @@ export function VegetationRow({ corneaId }: { corneaId: string }) {
             ))}
             <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
               <span className="rd-hist-chip" style={{ background: STREAM_COLOR }} />
-              Perennial stream
+              {STREAM_LABEL}
             </span>
           </div>
         </>

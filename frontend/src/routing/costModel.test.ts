@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { H_PACE, alpha, alphaFast, getRate, sullivanRate, tertileRatios } from './costModel';
 import { IMPASSABLE, PACE_LUT, paceOf } from './pacecode';
 import { MinHeap } from './heap';
-import { VEG_CLASSES, vegClass } from './vegClasses';
+import { STREAM_LABEL, VEG_CLASSES, vegClass } from './vegClasses';
 
 const minPerKm = (r: number) => 1000 / r / 60;
 
@@ -67,6 +67,13 @@ describe('pace code (logpace-v1, shared with worker cost_grid.py)', () => {
     // COST_GRID_VERSION 3 glaciers and permanent snow/ice
     expect(VEG_CLASSES.filter((c) => c.impassable).map((c) => c.key)).toEqual(['snow', 'water', 'steep']);
     expect(vegClass(9).label).toBe('Snow / ice (impassable)');
+  });
+
+  it('the legend calls a river water and the stream bit a creek (worker 4514759)', () => {
+    // NHD order >= 5, a '... River' name or OSM waterway=river is class 10
+    // with no stream bit; the bit is left only on creeks a crew may ford
+    expect(vegClass(10).label).toBe('Open water or river (impassable)');
+    expect(STREAM_LABEL).toBe('Perennial creek (crossable)');
   });
 });
 
