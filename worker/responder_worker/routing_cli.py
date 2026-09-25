@@ -137,7 +137,8 @@ def make_plan(client, storage, *, fires: list[dict], regions_all: list[dict] | N
                    if regions_all else [])
         entries.append({
             "cornea_id": cid, "fire_key": fk, "name": f.get("name"), "slug": f.get("fire_slug"),
-            "acres": f.get("acres"), "point": point, "aoi": aoi, "action": action,
+            "acres": f.get("acres"), "containment": f.get("containment"),
+            "point": point, "aoi": aoi, "action": action,
             "reason": reason, "regions": regions,
             "perimeter": {k: (per or {}).get(k) for k in ("path", "date", "bbox")},
             "prev_bundle_id": (pointer or {}).get("bundle_id"),

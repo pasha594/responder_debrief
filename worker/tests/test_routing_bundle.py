@@ -102,6 +102,15 @@ class TestShards:
             assert sum(r in rs for rs in regions) == 1  # a region lives on one shard
         assert sorted(e["cornea_id"] for s in shards for e in s) == list("abcde")
 
+    def test_size_containment_ratio_orders_the_backfill(self):
+        es = [dict(self._e("big-mostly-out", "us/idaho", 100_000), containment=95),   # 1,053
+              dict(self._e("mid-open", "us/idaho", 5_000), containment=0),            # 5,000
+              dict(self._e("mid-half", "us/idaho", 20_000), containment=50),          # 400
+              dict(self._e("sisi", "us/washington", 4_275), containment=15)]          # 285
+        order = rp.priority_order(es, ["sisi"])
+        assert [e["cornea_id"] for e in order] == ["sisi", "mid-open", "big-mostly-out", "mid-half"]
+        assert rp.size_containment_ratio({"acres": 1000, "containment": None}) == 1000
+
     def test_big_region_split(self):
         es = [self._e(str(i), "us/california/norcal", 100 - i, side=2000) for i in range(8)]
         shards = rp.assign_shards(es, 4)

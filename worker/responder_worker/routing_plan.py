@@ -130,6 +130,17 @@ def action_for(pointer: dict | None, fstate: dict | None, aoi: dict, now: dateti
     return "skip", "fresh"
 
 
+def size_containment_ratio(entry: dict) -> float:
+    """Acres per percent contained: big, barely contained fires first (owner
+    call). Containment floors at 1 % so an uncontained fire ranks by size."""
+    acres = float(entry.get("acres") or 0)
+    try:
+        contained = float(entry.get("containment") or 0)
+    except (TypeError, ValueError):
+        contained = 0.0
+    return acres / max(contained, 1.0)
+
+
 def priority_order(entries: list[dict], priority_fires: list[str]) -> list[dict]:
     pri = {p.strip().lower() for p in priority_fires if p.strip()}
 
@@ -137,7 +148,7 @@ def priority_order(entries: list[dict], priority_fires: list[str]) -> list[dict]
         named = bool(pri & {str(e.get("slug") or "").lower(), str(e.get("name") or "").lower(),
                             str(e.get("cornea_id") or "").lower()})
         return (0 if named else 1, 0 if e.get("reason") == "new" else 1,
-                -(float(e.get("acres") or 0)), e.get("cornea_id") or "")
+                -size_containment_ratio(e), e.get("cornea_id") or "")
     return sorted(entries, key=key)
 
 
