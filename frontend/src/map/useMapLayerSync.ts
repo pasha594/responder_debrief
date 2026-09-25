@@ -61,6 +61,8 @@ import { trafficLayer } from './layers/trafficLayer';
 import { incidentsLayer } from './layers/incidentsLayer';
 import { rangeLayer } from './layers/rangeLayer';
 import { trailsLayer } from './layers/trailsLayer';
+import { vegetationLayer } from './layers/vegetationLayer';
+import { routingAreaLayer } from './layers/routingAreaLayer';
 
 // The directory pivot retired nationalPerimetersLayer: the map now only ever
 // shows one incident, so the CONUS perimeter raster has nowhere to render.
@@ -69,6 +71,7 @@ const MANAGERS: LayerManager[] = [
   weatherLayers,
   incidentMapLayer,
   trailsLayer, // self-driven: resolves its PMTiles archive from the store
+  vegetationLayer, // self-driven: the routing bundle's veg classes
   spreadForecastLayer,
   windArrowsLayer,
   irHeatLayer,
@@ -83,6 +86,7 @@ const MANAGERS: LayerManager[] = [
   labelContrastLayer, // paints no layers of its own — tunes basemap halos
   incidentsLayer,
   rangeLayer,
+  routingAreaLayer,
   routeLayer,
 ];
 

@@ -14,6 +14,7 @@ import {
   removePack,
 } from '../offline/packs';
 import { formatRelative } from '../utils/format';
+import { useFireBundle } from '../routing/hooks';
 
 export function OfflineCard({ corneaId }: { corneaId: string }) {
   const { data: catalog } = useMasterCatalog();
@@ -22,6 +23,7 @@ export function OfflineCard({ corneaId }: { corneaId: string }) {
   const online = useStore((s) => s.offline.online);
   const showToast = useStore((s) => s.actions.showToast);
   const [busy, setBusy] = useState(false);
+  const bundle = useFireBundle(corneaId);
 
   if (!opfsSupported()) return null;
   const slug = catalog?.fires.find((f) => f.cornea_id === corneaId)?.fire_slug ?? null;
@@ -100,7 +102,7 @@ export function OfflineCard({ corneaId }: { corneaId: string }) {
       <div className="rd-offline-row">
         <span>
           Take this fire offline: perimeters, hotspots, forecast, weather, and the last 2
-          days of incident maps.
+          days of incident maps{bundle.data ? ', plus trails and offline walking routes' : ''}.
         </span>
         <button
           type="button"

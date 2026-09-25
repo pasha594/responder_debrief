@@ -117,7 +117,7 @@ export async function routeOffroad(a: [number, number], b: [number, number], avo
 }
 
 export async function vegImage(maxWidth: number, alpha = 255)
-  : Promise<{ width: number; height: number; rgba: Uint8ClampedArray }> {
+  : Promise<{ width: number; height: number; rgba: Uint8ClampedArray<ArrayBuffer> }> {
   const m = await call({ t: 'veg', maxWidth, alpha });
   if (m.t !== 'veg') throw new Error(m.t === 'error' ? m.message : 'veg failed');
   return { width: m.width, height: m.height, rgba: new Uint8ClampedArray(m.rgba) };
