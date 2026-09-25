@@ -2,6 +2,14 @@
  * Dashed outline of the fire's offline routing area, shown while Walk is
  * the directions mode: inside it Walk works without signal; outside it (or
  * offline) the card says why. Self-driven (bundle-dependent).
+ *
+ * Its source also carries the credit for Walk's route data. The graph is
+ * an ODbL Derivative Database of OSM, so while an offroad route can be on
+ * the map, the attribution control must say so. MapLibre lists a source's
+ * attribution only while one of its layers is visible, so the outline
+ * layer is hidden, not just emptied, when there is no routing area. An
+ * offroad route needs Walk, a pin and this fire's bundle, which is exactly
+ * when the outline shows.
  */
 import type { GeoJSONSource, Map as MlMap } from 'maplibre-gl';
 import { loadFireBundle } from '../../routing/hooks';
@@ -13,6 +21,8 @@ import { beforeIdFor } from '../zOrder';
 const SRC = 'rd-routing-area';
 const LYR = 'rd-routing-area';
 const EMPTY = { type: 'FeatureCollection', features: [] } as GeoJSON.GeoJSON;
+export const WALK_ATTRIBUTION = 'Walk routes: <a href="https://www.openstreetmap.org/copyright" target="_blank" '
+  + 'rel="noopener">© OpenStreetMap contributors</a> (ODbL) · USFS · BLM · NPS · LANDFIRE · USGS NHD';
 
 let unsubscribe: (() => void) | null = null;
 let lastKey = '';
@@ -21,6 +31,11 @@ let seq = 0;
 function dead(map: MlMap): boolean {
   const m = map as unknown as { _removed?: boolean; style?: unknown };
   return !!m._removed || !m.style;
+}
+
+function show(map: MlMap, src: GeoJSONSource, data: GeoJSON.GeoJSON | null): void {
+  src.setData(data ?? EMPTY);
+  if (map.getLayer(LYR)) map.setLayoutProperty(LYR, 'visibility', data ? 'visible' : 'none');
 }
 
 function reconcile(map: MlMap): void {
@@ -35,19 +50,19 @@ function reconcile(map: MlMap): void {
   const mySeq = ++seq;
   const src = map.getSource(SRC) as GeoJSONSource;
   if (!want || !corneaId) {
-    src.setData(EMPTY);
+    show(map, src, null);
     return;
   }
   void loadFireBundle(corneaId).then((b) => {
     if (mySeq !== seq || dead(map)) return;
     if (!b) {
-      src.setData(EMPTY);
+      show(map, src, null);
       return;
     }
     const g = b.grid;
     const { corners } = utmBoundsTo4326(
       [g.x0, g.y0 - g.height * g.cell_m, g.x0 + g.width * g.cell_m, g.y0], b.crs.zone, b.crs.northern);
-    src.setData({ type: 'Feature', properties: {},
+    show(map, src, { type: 'Feature', properties: {},
       geometry: { type: 'LineString', coordinates: [...corners, corners[0]] } } as GeoJSON.GeoJSON);
   }).catch(() => undefined);
 }
@@ -55,10 +70,10 @@ function reconcile(map: MlMap): void {
 export const routingAreaLayer: LayerManager = {
   mount(map) {
     lastKey = '';
-    if (!map.getSource(SRC)) map.addSource(SRC, { type: 'geojson', data: EMPTY });
+    if (!map.getSource(SRC)) map.addSource(SRC, { type: 'geojson', data: EMPTY, attribution: WALK_ATTRIBUTION });
     if (!map.getLayer(LYR)) {
       map.addLayer({
-        id: LYR, type: 'line', source: SRC,
+        id: LYR, type: 'line', source: SRC, layout: { visibility: 'none' },
         paint: { 'line-color': '#d8d2d5', 'line-opacity': 0.6, 'line-width': 1.2, 'line-dasharray': [3, 3] },
       }, beforeIdFor(map, 'rd-routing-area'));
     }

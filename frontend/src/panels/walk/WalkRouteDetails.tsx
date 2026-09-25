@@ -1,12 +1,14 @@
 /**
- * Walk route card: typical and slow crew times, trail vs cross-country
- * split, the cross-country vegetation breakdown, climb, notes, the
- * perimeter toggle, provenance, attribution and steps. The times are
- * Sullivan 2020's hotshot crews with packs: typical = the middle tertile,
- * slow = the low tertile. One in six of those observations was slower still,
- * and other crews are usually slower, so neither is an upper limit.
- * "Cross-country legs are modeled, not scouted." is always shown on a
- * modeled route and cannot be dismissed.
+ * Walk route card: the typical time, trail vs cross-country split, the
+ * cross-country vegetation breakdown, climb, notes, the perimeter toggle and
+ * steps. The time is Sullivan 2020's middle tertile for hotshot crews with
+ * packs, labelled "crew pace". Owner call: no fast or slow bound anywhere in
+ * the UI. The data keeps durationRangeS, but a bound read as a limit ("up to
+ * 4 h") when one in six of those crews was slower still. "Cross-country legs
+ * are modeled, not scouted." is always shown on a modeled route and cannot
+ * be dismissed. The OSM (ODbL) and agency credit is in the map's
+ * attribution control while Walk's routing area is shown
+ * (routingAreaLayer).
  */
 import { useState } from 'react';
 import type { RouteResult } from '../../api/routing';
@@ -20,12 +22,6 @@ function fmtWhen(iso: string | null | undefined): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return '';
   return d.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
-}
-
-function fmtDay(iso: string | null | undefined): string {
-  if (!iso) return '';
-  const d = new Date(iso);
-  return Number.isNaN(d.getTime()) ? '' : d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 }
 
 export function WalkRouteDetails({ route }: { route: RouteResult }) {
@@ -42,21 +38,14 @@ export function WalkRouteDetails({ route }: { route: RouteResult }) {
     streams += l.streamCrossings ?? 0;
   }
   const vegList = Object.entries(vegM).sort((a, b) => b[1] - a[1]).filter(([, m]) => m >= 20);
-  const range = route.durationRangeS;
   const pv = route.provenance;
   const gapM = legs.filter((l) => l.kind === 'gap').reduce((s, l) => s + l.distanceM, 0);
   const trailPct = t.distanceM ? Math.round((100 * t.trailM) / t.distanceM) : 0;
   return (
     <div className="rd-walk">
       <div className="rd-walk-time">
-        {range ? (
-          <>
-            <strong>Crew pace: typical {fmtDur(route.durationS)} · slow {fmtDur(range[1])}</strong>
-            <span className="rd-walk-muted"> (fit hotshot crews with packs; slower crews take longer)</span>
-          </>
-        ) : (
-          <strong>{fmtDur(route.durationS)}</strong>
-        )}
+        <strong>{fmtDur(route.durationS)}</strong>
+        {route.engine === 'offroad' && <span className="rd-walk-muted"> · crew pace</span>}
         <span className="rd-walk-muted"> · {fmtMiles(t.distanceM)}</span>
         {(t.climbM >= 3 || t.descentM >= 3) && (
           <span className="rd-walk-muted"> · ↑ {fmtFeet(t.climbM)} ↓ {fmtFeet(t.descentM)}</span>
@@ -89,7 +78,7 @@ export function WalkRouteDetails({ route }: { route: RouteResult }) {
       {(route.modeled || route.engine === 'offroad') && (
         <div className="rd-walk-label" role="note">
           ⚠ Cross-country legs are modeled, not scouted.
-          <span className="rd-walk-sub"> Times are a fit hotshot crew's pace with packs, in daylight. Trail times come from GPS-tracked crews; cross-country times are modeled, not measured. Scout and time escape routes with your slowest person.</span>
+          <span className="rd-walk-sub"> Crew pace is a fit hotshot crew with packs, in daylight; slower crews take longer. Trail times come from GPS-tracked crews; cross-country times are modeled, not measured. Scout and time escape routes with your slowest person.</span>
         </div>
       )}
       {(route.notes ?? []).map((n) => (
@@ -103,19 +92,6 @@ export function WalkRouteDetails({ route }: { route: RouteResult }) {
             {pv?.perimeterDate ? ` (${fmtWhen(pv.perimeterDate)}, +60 m)` : ''}
           </span>
         </label>
-      )}
-      {pv && (
-        <div className="rd-walk-prov">
-          Terrain & trails built {fmtDay(pv.builtAt)}
-          {pv.landfire ? ` · LANDFIRE ${pv.landfire}` : ''}
-          {pv.osmDate ? ` · OSM ${fmtDay(pv.osmDate)}` : ''} · computed on this device in{' '}
-          {(pv.ms / 1000).toFixed(1)} s
-        </div>
-      )}
-      {route.engine === 'offroad' && (
-        <div className="rd-walk-prov">
-          Route data © OpenStreetMap contributors (ODbL) · USFS · BLM · NPS · LANDFIRE · USGS NHD
-        </div>
       )}
       <button type="button" className="rd-mini-btn" onClick={() => setStepsOpen((v) => !v)}
         aria-expanded={stepsOpen}>

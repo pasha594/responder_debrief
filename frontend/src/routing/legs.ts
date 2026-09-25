@@ -271,10 +271,10 @@ export function fmtDur(s: number): string {
   return mm ? `${h} h ${String(mm).padStart(2, '0')} min` : `${h} h`;
 }
 
-function fmtMinRange(l: RouteLeg): string {
-  if (l.durationS == null) return '';
-  const [a, b] = l.durationRangeS ?? [l.durationS, l.durationS];
-  return ` — about ${fmtDur(l.durationS)} (${Math.round(a / 60)}–${Math.round(b / 60)} min)`;
+/** The typical time only: the UI shows no fast/slow bounds (owner call;
+ * WalkRouteDetails.tsx). */
+function fmtAbout(l: RouteLeg): string {
+  return l.durationS == null ? '' : ` — about ${fmtDur(l.durationS)}`;
 }
 
 const DIRS = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
@@ -342,7 +342,7 @@ export function stepsFor(legs: WalkLeg[]): RouteStep[] {
       const climb = climbText(l);
       steps.push({
         text: `${lead} ${bearing(c[0], c[c.length - 1])} ${fmtMiles(l.distanceM)}`
-          + `${veg ? ` through ${veg}` : ''}${cross}${climb ? `, ${climb}` : ''}${fmtMinRange(l)}`,
+          + `${veg ? ` through ${veg}` : ''}${cross}${climb ? `, ${climb}` : ''}${fmtAbout(l)}`,
         distanceM: l.distanceM,
       });
     } else if (l.kind === 'gap') {
@@ -371,7 +371,7 @@ export function stepsFor(legs: WalkLeg[]): RouteStep[] {
       const cut = cuts ? ` · includes ${cuts === 1 ? 'a short cross-country cut' : `${cuts} short cross-country cuts`}` : '';
       const restr = l.restricted ? ` · Restricted: ${l.restricted}` : '';
       steps.push({
-        text: `${verb} ${label} ${fmtMiles(s.distanceM)}${climb ? `, ${climb}` : ''}${fmtMinRange(s)}${cut}${restr}`,
+        text: `${verb} ${label} ${fmtMiles(s.distanceM)}${climb ? `, ${climb}` : ''}${fmtAbout(s)}${cut}${restr}`,
         distanceM: s.distanceM,
       });
     }

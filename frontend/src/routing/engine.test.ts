@@ -451,9 +451,10 @@ describe('legs helpers', () => {
       leg('xc', 12, { minor: true }), leg('trail', 200, { name: 'Other Trail', restricted: 'Closed' }),
     ]).map((s) => s.text);
     expect(steps).toHaveLength(4);
-    // 5300 + 41 + 800 + 18 + 480 m = 4.1 mi, timed and climbed as drawn
-    expect(steps[0]).toBe('Follow McGregor Mountain Trail 4.1 mi, ↑ 2,180 ft — about 1 h 50 min (89–166 min) · includes 2 short cross-country cuts');
-    expect(steps[1]).toMatch(/^Follow Other Trail 0\.2 mi, ↑ 100 ft — about 5 min \(4–8 min\)$/);
+    // 5300 + 41 + 800 + 18 + 480 m = 4.1 mi, timed and climbed as drawn;
+    // the typical time only (no fast/slow minutes: owner call)
+    expect(steps[0]).toBe('Follow McGregor Mountain Trail 4.1 mi, ↑ 2,180 ft — about 1 h 50 min · includes 2 short cross-country cuts');
+    expect(steps[1]).toBe('Follow Other Trail 0.2 mi, ↑ 100 ft — about 5 min');
     expect(steps[2]).toMatch(/· Restricted: Closed$/);
     expect(steps[3]).toBe('Arrive at B');
   });

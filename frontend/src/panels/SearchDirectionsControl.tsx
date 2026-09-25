@@ -554,17 +554,14 @@ export function SearchDirectionsControl() {
               {MODES.map(({ p, label, Icon }) => {
                 const gated = p === 'apparatus' && !apparatusAvailable;
                 const state = modes[p];
-                // Walk shows its typical (hotshot-crew) time as an estimate;
-                // the card gives the slow end — not an upper limit.
+                // Every mode shows its typical time (Walk: crew pace).
                 const time =
                   state === 'pending'
                     ? '…'
                     : state === 'failed' || state === 'offline' || (state && 'error' in state)
                       ? '—'
                       : state
-                        ? state.durationRangeS
-                          ? `~${fmtDurationShort(state.durationS)}`
-                          : fmtDurationShort(state.durationS)
+                        ? fmtDurationShort(state.durationS)
                         : null;
                 return (
                   <button
