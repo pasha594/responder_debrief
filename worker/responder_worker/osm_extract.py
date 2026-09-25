@@ -9,8 +9,9 @@ Per shard and region:
   2. `osmium tags-filter region.pbf` with TAGS_FILTER: highways for the
      graph, plus the rivers, canals and river areas that bound cross-country
      travel (one pass, much smaller);
-  3. `osmium extract -c extracts.json -s complete_ways` — every fire of the
-     region in one pass, whole ways kept so node ids stay exact;
+  3. `osmium extract -c extracts.json -s complete_ways` — the region's fires
+     in batches of config.OSM_EXTRACT_BATCH, whole ways kept so node ids
+     stay exact;
   4. per fire `osmium cat -f opl` -> parse_opl (node ids + locations);
      graph_build takes the highways, waterways() the water.
 
@@ -165,20 +166,32 @@ def download_region(client: httpx.Client, region: dict, workdir: Path, log=print
 
 
 def extract_fires(pbf: Path, fires: dict[str, tuple], workdir: Path, log=print) -> dict[str, Path]:
-    """{fire_key: bbox4326} -> {fire_key: per-fire .osm.pbf} in two passes."""
+    """{fire_key: bbox4326} -> {fire_key: per-fire .osm.pbf}: one tags-filter
+    pass, then `osmium extract` over the filtered file in batches.
+
+    osmium extract keeps id sets and buffers for every extract of a pass, so
+    its memory grows with the fires in it: 54 Oregon fires in one pass
+    killed a 16 GB runner (2026-09-25). Batches of config.OSM_EXTRACT_BATCH
+    bound it. Each extract depends only on its own box and the input, so the
+    per-fire outputs are the ones a single pass writes: no FILTER_VERSION
+    bump, and bundle ids don't move."""
     workdir.mkdir(parents=True, exist_ok=True)
     hw = workdir / (pbf.stem + "-hw.osm.pbf")
     gdal_cli.run(["osmium", "tags-filter", str(pbf), *TAGS_FILTER, "-o", str(hw),
                   "--overwrite"], timeout=3600)
     outdir = workdir / "osm_extracts"
     outdir.mkdir(exist_ok=True)
-    cfg = {"directory": str(outdir), "extracts": [
-        {"output": f"{k}.osm.pbf", "output_format": "pbf", "bbox": list(b)}
-        for k, b in fires.items()]}
+    items = list(fires.items())
+    n = config.OSM_EXTRACT_BATCH
     cfg_path = workdir / "extracts.json"
-    cfg_path.write_text(json.dumps(cfg))
-    gdal_cli.run(["osmium", "extract", "-c", str(cfg_path), "-s", "complete_ways",
-                  str(hw), "--overwrite"], timeout=3600)
+    for i in range(0, len(items), n):
+        cfg = {"directory": str(outdir), "extracts": [
+            {"output": f"{k}.osm.pbf", "output_format": "pbf", "bbox": list(b)}
+            for k, b in items[i:i + n]]}
+        cfg_path.write_text(json.dumps(cfg))
+        log(f"[osm] extract fires {i + 1}-{i + len(cfg['extracts'])} of {len(items)}")
+        gdal_cli.run(["osmium", "extract", "-c", str(cfg_path), "-s", "complete_ways",
+                      str(hw), "--overwrite"], timeout=3600)
     hw.unlink(missing_ok=True)
     return {k: outdir / f"{k}.osm.pbf" for k in fires}
 

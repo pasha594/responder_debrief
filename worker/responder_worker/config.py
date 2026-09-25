@@ -331,3 +331,5 @@ ROUTING_MIN_SIDE_M = 16_000
 ROUTING_GROWTH_HYSTERESIS_M = 2_000
 ROUTING_CHECK_DAYS = 7             # recompute input hashes after this long
 ROUTING_BACKOFF_FAILURES = 3
+# fires per `osmium extract` pass: RSS grows per extract (Oregon 30 km: 1 -> 2.4 GB, 20 -> 4.8 GB)
+OSM_EXTRACT_BATCH = 4
