@@ -86,6 +86,21 @@ class TestCostGrid:
         assert cg.pace_decode(float(r["pace"][0, 0])) == pytest.approx(5 / cg.r_get(0), rel=0.02)
         assert r["pace"][2, 2] == cg.IMPASSABLE and (r["veg"][2, 2] & 0x0F) == cg.VEG_WATER
 
+    def test_rivers_are_impassable_water(self):
+        # a river line blocks like open water and is no crossable "stream";
+        # a creek beside it keeps GET's x5 and the stream bit
+        streams = np.zeros((3, 4), np.uint8)
+        streams[:, 1] = streams[:, 2] = 1
+        rivers = np.zeros((3, 4), np.uint8)
+        rivers[:, 2] = 1
+        r = cg.compute(**_grid(streams=streams, rivers=rivers))
+        assert (r["pace"][:, 2] == cg.IMPASSABLE).all()
+        assert ((r["veg"][:, 2] & 0x0F) == cg.VEG_WATER).all()
+        assert not (r["veg"][:, 2] & cg.STREAM_BIT).any()
+        assert (r["veg"][:, 1] & cg.STREAM_BIT).all()
+        assert cg.pace_decode(float(r["pace"][0, 1])) == pytest.approx(5 / cg.r_get(0), rel=0.02)
+        assert r["stats"]["river_cells"] == 3 and r["stats"]["stream_cells"] == 3
+
     def test_fbfm_fallback_when_evc_nodata(self):
         evc = np.full((3, 4), -9999)
         fb = np.array([[102, 122, 145, 165], [99, 91, 92, 93], [183, 201, -9999, 102]])
@@ -137,6 +152,139 @@ class TestNhdProducts:
         items = nhd.parse_products(doc)
         assert [i["huc8"] for i in items] == ["17060201", "17060205"]
         assert all(i["url"].endswith("_HU8_GPKG.zip") for i in items)
+
+
+def _connected(cells: set, a, b, n8: bool) -> bool:
+    """Is cell b reachable from a through `cells` (4- or 8-neighbour)?"""
+    steps = [(-1, 0), (1, 0), (0, -1), (0, 1)] + ([(-1, -1), (-1, 1), (1, -1), (1, 1)] if n8 else [])
+    seen, todo = {a}, [a]
+    while todo:
+        r, c = todo.pop()
+        for dr, dc in steps:
+            n = (r + dr, c + dc)
+            if n in cells and n not in seen:
+                seen.add(n)
+                todo.append(n)
+    return b in seen
+
+
+class TestHydro:
+    GRID = {"x0": 0.0, "y0": 3000.0, "cell_m": 30, "width": 100, "height": 100}
+
+    def test_river_by_order_name_or_osm(self):
+        assert nhd.is_river({"name": "Agnes Creek", "order": 5})
+        assert not nhd.is_river({"name": "Company Creek", "order": 4})
+        assert nhd.is_river({"name": "Stehekin River", "order": 4})  # the upper reach
+        assert not nhd.is_river({"name": "Rivers Creek", "order": None})
+        assert not nhd.is_river({"name": None, "order": None})
+
+    def test_lines_burn_4_connected(self):
+        # a 45° line passes cell corners; sampling alone would leave a
+        # diagonal-only chain that 8-neighbour moves could slip through
+        # (A* forbids only moves that cut a blocked corner)
+        xy = np.array([[15.0, 2985.0], [2385.0, 615.0]])
+        r, c = nhd._line_cells(xy, self.GRID)
+        cells = set(zip(r.tolist(), c.tolist()))
+        assert (0, 0) in cells and (79, 79) in cells
+        assert _connected(cells, (0, 0), (79, 79), n8=False)
+
+    def test_names_rivers_first_and_truncated(self, monkeypatch):
+        def line(y, x1):
+            return np.array([[0.0, y], [x1, y]])
+        lines = [({"name": "Long Creek", "river": False}, line(2900, 2900)),
+                 ({"name": "Short River", "river": True}, line(2000, 600)),
+                 ({"name": None, "river": True}, line(1500, 2900)),
+                 ({"name": "Long Creek", "river": False}, line(1000, 300)),
+                 ({"name": "Tiny Creek", "river": False}, line(500, 100))]
+        out = nhd.burn_lines(lines, self.GRID)
+        assert out["names"] == ["Short River", "Long Creek", "Tiny Creek"] and not out["truncated"]
+        assert out["rivers"].sum() == out["rivers"][[33, 50]].sum() > 0  # only the two river rows
+        assert out["streams"][[3, 33, 50, 66, 83]].any(axis=1).all()
+        assert set(np.unique(out["stream_id"][3])) == {0, 2}
+        # a river crossing a creek keeps its own name at the shared cell
+        cross = nhd.burn_lines([({"name": "Long Creek", "river": False}, line(1515, 2900)),
+                                ({"name": "Short River", "river": True},
+                                 np.array([[1515.0, 2900.0], [1515.0, 100.0]]))], self.GRID)
+        assert cross["stream_id"][49, 50] == 1
+        monkeypatch.setattr(nhd, "MAX_NAMES", 2)
+        out = nhd.burn_lines(lines, self.GRID)
+        assert out["names"] == ["Short River", "Long Creek"] and out["truncated"]
+        assert out["stream_id"][83].max() == 0 and out["streams"][83].any()  # nameless, still a creek
+
+    def test_sisi_fords_are_blocked(self, fixtures):
+        # Real SISI inputs around the two fords the first real-data review
+        # found. The Stehekin (order 6; also an OSM river) and Agnes Creek
+        # (order 5; an OSM *stream*, so only NHD's order catches it) must be
+        # walls, and the cross-country leg the router drew across the
+        # Stehekin from Company Creek Road must hit one.
+        doc = json.loads((fixtures / "routing" / "sisi_river_fords.json").read_text())
+        for box in ("stehekin", "agnes"):
+            w, s, e, n = doc["boxes"][box]
+            x0, y1 = gb.utm.fwd(w, s, 10)
+            x1, y0 = gb.utm.fwd(e, n, 10)
+            grid = {"x0": x0 // 30 * 30, "y0": (y0 // 30 + 1) * 30, "cell_m": 30,
+                    "width": int((x1 - x0) // 30) + 2, "height": int((y0 - y1) // 30) + 2}
+            lines = []
+            for f in doc["nhd"] + doc["osm"]:
+                if f["box"] == box:
+                    p = f["props"]
+                    river = nhd.is_river(p) if "order" in p else True
+                    xs, ys = gb.utm.fwd(*np.asarray(f["coords"]).T, 10)
+                    lines.append(({"name": p["name"], "river": river}, np.column_stack([xs, ys])))
+            out = nhd.burn_lines(lines, grid)
+
+            def cell(lon, lat):
+                x, y = gb.utm.fwd(lon, lat, 10)
+                return int((grid["y0"] - y) // 30), int((x - grid["x0"]) // 30)
+
+            if box == "stehekin":
+                assert out["names"][0] == "Stehekin River"
+                leg = np.column_stack(gb.utm.fwd(np.array([-120.747356, -120.743095]),
+                                                 np.array([48.363017, 48.365709]), 10))
+                r, c = nhd._line_cells(leg, grid)
+                hit = out["rivers"][r, c]
+                assert hit.any() and out["stream_id"][r, c][hit].max() == 1
+            else:
+                assert out["names"][0] == "Agnes Creek"
+                # the crossing cell's river runs edge to edge across the box
+                r0, c0 = cell(-120.86918, 48.36366)
+                riv = {(int(r), int(c)) for r, c in zip(*np.nonzero(out["rivers"]))}
+                start = min(riv, key=lambda rc: abs(rc[0] - r0) + abs(rc[1] - c0))
+                assert abs(start[0] - r0) + abs(start[1] - c0) <= 2
+                comp = {rc for rc in riv if _connected(riv, start, rc, n8=True)}
+                h, w = out["rivers"].shape
+                edges = {"n" for r, _ in comp if r == 0} | {"s" for r, _ in comp if r == h - 1} \
+                    | {"w" for _, c in comp if c == 0} | {"e" for _, c in comp if c == w - 1}
+                assert len(edges) >= 2, edges
+            # small perennial creeks stay crossable
+            assert (out["streams"] & ~out["rivers"]).sum() > 0
+
+
+class TestOsmWater:
+    NODES = {i: (-120.0 + 0.001 * i, 48.0) for i in range(1, 12)}
+
+    def test_waterways(self):
+        ways = [
+            {"id": 1, "nodes": [1, 2, 3], "tags": {"waterway": "river", "name": "Stehekin River"}},
+            {"id": 2, "nodes": [3, 4], "tags": {"waterway": "river", "intermittent": "yes"}},
+            {"id": 3, "nodes": [4, 5], "tags": {"waterway": "river", "tunnel": "culvert"}},
+            {"id": 4, "nodes": [5, 6], "tags": {"waterway": "stream", "name": "Agnes Creek"}},
+            {"id": 5, "nodes": [6, 7, 8, 6], "tags": {"natural": "water", "water": "river"}},
+            {"id": 6, "nodes": [8, 9, 10], "tags": {"waterway": "riverbank"}},  # a relation's piece
+            {"id": 7, "nodes": [9, 10], "tags": {"waterway": "canal"}},
+            {"id": 8, "nodes": [1, 11], "tags": {"highway": "path"}},
+        ]
+        lines, areas = osm_extract.waterways(self.NODES, ways)
+        assert [p["id"] for p, _ in lines] == [1, 7] and lines[0][0]["name"] == "Stehekin River"
+        assert [p["id"] for p, _ in areas] == [5] and len(areas[0][1]) == 4
+        h = osm_extract.water_hash(lines, areas)
+        assert h == osm_extract.water_hash(list(reversed(lines)), areas)
+        moved = [(lines[0][0], [(x, y + 1e-4) for x, y in lines[0][1]]), lines[1]]
+        assert h != osm_extract.water_hash(moved, areas)
+
+    def test_filter_keeps_water(self):
+        assert "w/highway" in osm_extract.TAGS_FILTER
+        assert any("waterway=river" in f for f in osm_extract.TAGS_FILTER)
 
 
 class TestGeofabrik:

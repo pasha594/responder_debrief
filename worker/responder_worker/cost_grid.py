@@ -10,10 +10,13 @@ Model (docs/trails-routing/FINAL_PLAN.md §2.5; research/offtrail_travel_science
   round-trip-preserving uphill/downhill factor from the DEM.
 - GET v2 vegetation multipliers M: tree 4; shrub 1 + 3·cover; herb, sparse,
   barren, agriculture, developed 1; x2 for heavy litter (FBFM40 TL4/TL5/TL7);
-  x5 for slash/blowdown (SB1-SB4; GET's table value); x5 on perennial streams.
+  x5 for slash/blowdown (SB1-SB4; GET's table value); x5 on perennial creeks.
   Snow/ice 3 and unknown 4 are our choices (GET is silent; conservative).
 - Impassable: slope > 45°, open water (EVC 11, EVT 7292, FBFM40 NB8=98, NHD
-  perennial waterbody or river polygon), and no data.
+  perennial waterbody or river polygon), rivers and large creeks (nhd.py:
+  NHD stream order >= 5 or a "River" name, OSM river/canal; classed as
+  water), and no data. Road and trail crossings stay open: graph nodes may
+  sit on impassable cells.
 
 Lifeform comes from EVC, which encodes lifeform AND cover in one code
 (110-199 tree %, 210-299 shrub %, 310-399 herb %), so no EVT lookup table is
@@ -27,7 +30,10 @@ so a fire straddling a GeoArea boundary never gets a nodata hole.
 Encodings (shared with frontend/src/routing/pacecode.ts, vegClasses.ts):
 - pace code c in 1..254: P(c) = 0.8 * 1024**((c-1)/253) s/m (0.8..819 s/m,
   2.8 % steps); 0 and 255 impassable.
-- veg byte: low nibble = class (VEG_*), bit 0x10 = perennial stream.
+- veg byte: low nibble = class (VEG_*), bit 0x10 = perennial creek
+  (crossable, x5; a river is VEG_WATER instead).
+- grid.tif band 3 (routing_bundle): stream-name id per cell, names in
+  bundle.json "streams" (nhd.burn_lines).
 """
 
 from __future__ import annotations
@@ -38,7 +44,8 @@ import numpy as np
 # SAME LANDFIRE/NHD/OSM inputs would now give a different grid.tif (classes,
 # multipliers, barriers, the hydro burn in nhd.py), so existing bundles
 # rebuild instead of staying "unchanged" until the monthly LANDFIRE epoch.
-COST_GRID_VERSION = 1
+# 2: rivers and large creeks are impassable (nhd.hydro_grids).
+COST_GRID_VERSION = 2
 
 PACE_MIN = 0.8
 PACE_SPAN = 1024.0
@@ -143,12 +150,13 @@ def _classify(evt, evc, fbfm):
     return cls, m, cover
 
 
-def compute(*, evt, evc, fbfm, slope, elev, streams=None, water=None) -> dict:
+def compute(*, evt, evc, fbfm, slope, elev, streams=None, rivers=None, water=None) -> dict:
     """All inputs are same-shape arrays on the target grid.
 
     slope: degrees (float or int; LF nodata allowed); elev: metres.
-    streams / water: 0/1 NHD rasters (perennial flowlines all-touched;
-    perennial waterbodies + river polygons cell-centre).
+    streams / rivers / water: 0/1 hydro rasters (nhd.hydro_grids): every
+    perennial line, the lines too big to wade (4-connected), and perennial
+    waterbodies + river polygons (cell centre).
     -> {"pace": u8, "veg": u8, "dem": i16, "stats": {...}}"""
     evt = np.asarray(evt)
     evc = np.asarray(evc)
@@ -158,6 +166,7 @@ def compute(*, evt, evc, fbfm, slope, elev, streams=None, water=None) -> dict:
     shape = evc.shape
     streams = np.zeros(shape, bool) if streams is None else np.asarray(streams) > 0
     water_nhd = np.zeros(shape, bool) if water is None else np.asarray(water) > 0
+    rivers = np.zeros(shape, bool) if rivers is None else np.asarray(rivers) > 0
 
     cls, m, _cover = _classify(evt, evc, fbfm)
     litter = np.isin(fbfm, LITTER_FBFM)
@@ -169,7 +178,8 @@ def compute(*, evt, evc, fbfm, slope, elev, streams=None, water=None) -> dict:
 
     topo_nodata = ~np.isfinite(slope) | ~np.isfinite(elev) | np.isin(slope, LF_NODATA) \
         | (slope < 0) | np.isin(elev, LF_NODATA) | (elev < -500)
-    is_water = (evc == 11) | (evt == EVT_WATER) | (fbfm == FBFM_WATER) | water_nhd
+    open_water = (evc == 11) | (evt == EVT_WATER) | (fbfm == FBFM_WATER) | water_nhd
+    is_water = open_water | rivers
     steep = (slope > MAX_SLOPE) & ~topo_nodata
     veg_nodata = ~valid_lf(evc) & ~valid_lf(fbfm) & ~valid_lf(evt)
     impassable = is_water | steep | topo_nodata | veg_nodata
@@ -193,6 +203,7 @@ def compute(*, evt, evc, fbfm, slope, elev, streams=None, water=None) -> dict:
         "nodata_pct": round(100.0 * float((topo_nodata | veg_nodata).mean()), 2),
         "steep_pct": round(100.0 * float(steep.mean()), 2),
         "stream_cells": int((streams & ~is_water).sum()),
+        "river_cells": int((rivers & ~open_water).sum()),
         "class_pct": class_pct,
     }
     return {"pace": pace, "veg": veg.astype(np.uint8), "dem": dem, "stats": stats}

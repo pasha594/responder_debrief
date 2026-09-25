@@ -1,14 +1,18 @@
-"""OpenStreetMap roads/tracks/paths for routing AOIs: Geofabrik extracts +
-apt osmium-tool + a stdlib OPL parser. Never Overpass (its policy caps
-automated use far below one fire's worth of data per day).
+"""OpenStreetMap roads/tracks/paths (and the rivers between them) for
+routing AOIs: Geofabrik extracts + apt osmium-tool + a stdlib OPL parser.
+Never Overpass (its policy caps automated use far below one fire's worth of
+data per day).
 
 Per shard and region:
   1. download the region PBF (US state leaf; California is norcal/socal),
      picked by intersecting the AOI box with index-v1.json polygons;
-  2. `osmium tags-filter region.pbf w/highway` (one pass, much smaller);
+  2. `osmium tags-filter region.pbf` with TAGS_FILTER: highways for the
+     graph, plus the rivers, canals and river areas that bound cross-country
+     travel (one pass, much smaller);
   3. `osmium extract -c extracts.json -s complete_ways` — every fire of the
      region in one pass, whole ways kept so node ids stay exact;
-  4. per fire `osmium cat -f opl` -> parse_opl (node ids + locations).
+  4. per fire `osmium cat -f opl` -> parse_opl (node ids + locations);
+     graph_build takes the highways, waterways() the water.
 
 The dated Geofabrik filename behind the -latest redirect gives the OSM date
 recorded in the bundle.
@@ -16,6 +20,7 @@ recorded in the bundle.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from datetime import datetime
@@ -30,7 +35,10 @@ from .http import download_to, get
 # Part of every bundle id (routing_bundle.bundle_inputs): bump it whenever
 # extract_fires keeps different objects (the tags-filter expressions, the
 # extract strategy), since the per-fire hashes only cover what was kept.
-FILTER_VERSION = 1
+# 2: rivers, canals and river areas (nhd.hydro_grids makes them barriers).
+FILTER_VERSION = 2
+TAGS_FILTER = ["w/highway", "w/waterway=river,canal,riverbank", "w/water=river,canal"]
+RIVER_WATERWAYS = {"river", "canal"}
 
 
 # ---------------------------------------------------------------------------
@@ -160,7 +168,7 @@ def extract_fires(pbf: Path, fires: dict[str, tuple], workdir: Path, log=print) 
     """{fire_key: bbox4326} -> {fire_key: per-fire .osm.pbf} in two passes."""
     workdir.mkdir(parents=True, exist_ok=True)
     hw = workdir / (pbf.stem + "-hw.osm.pbf")
-    gdal_cli.run(["osmium", "tags-filter", str(pbf), "w/highway", "-o", str(hw),
+    gdal_cli.run(["osmium", "tags-filter", str(pbf), *TAGS_FILTER, "-o", str(hw),
                   "--overwrite"], timeout=3600)
     outdir = workdir / "osm_extracts"
     outdir.mkdir(exist_ok=True)
@@ -229,3 +237,47 @@ def parse_opl(lines) -> tuple[dict[int, tuple[float, float]], list[dict]]:
 def read_opl(path: Path):
     with open(path, encoding="utf-8") as f:
         return parse_opl(f)
+
+
+# ---------------------------------------------------------------------------
+# water (pure)
+# ---------------------------------------------------------------------------
+
+def waterways(nodes: dict, ways: list) -> tuple[list, list]:
+    """OSM water that bounds cross-country travel, lon/lat:
+    (lines, areas) = ([(props, [(lon, lat)...])], [(props, closed ring)]).
+
+    Lines are waterway=river|canal centrelines; areas are closed ways tagged
+    waterway=riverbank or water=river|canal. A dry river (intermittent or
+    seasonal) is no barrier, nor is one in a culvert or tunnel (the road over
+    it is the crossing). Multipolygon river areas are not assembled: their
+    centreline already blocks, and NHD StreamRiver polygons cover the wide
+    rivers. props: {"id", "name"}."""
+    lines, areas = [], []
+    for w in ways:
+        t = w["tags"]
+        ww = t.get("waterway")
+        area = ww == "riverbank" or t.get("water") in RIVER_WATERWAYS
+        if not (area or ww in RIVER_WATERWAYS):
+            continue
+        if t.get("intermittent") == "yes" or t.get("seasonal") == "yes" \
+                or t.get("tunnel") not in (None, "no"):
+            continue
+        coords = [nodes[r] for r in w["nodes"] if r in nodes]
+        props = {"id": w["id"], "name": t.get("name")}
+        if area:
+            if len(coords) >= 4 and w["nodes"][0] == w["nodes"][-1]:
+                areas.append((props, coords))
+        elif len(coords) >= 2:
+            lines.append((props, coords))
+    return lines, areas
+
+
+def water_hash(lines: list, areas: list) -> str:
+    h = hashlib.sha256()
+    for kind, feats in (("l", lines), ("a", areas)):
+        for props, coords in sorted(feats, key=lambda f: f[0]["id"]):
+            h.update(json.dumps([kind, props["id"], props.get("name"),
+                                 [(round(x, 6), round(y, 6)) for x, y in coords]],
+                                separators=(",", ":")).encode())
+    return h.hexdigest()[:16]

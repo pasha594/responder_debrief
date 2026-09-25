@@ -1,6 +1,6 @@
 """Build and publish one fire's offline routing bundle.
 
-    routing/{fire_key}/b{bundle_id}/grid.tif        pace code + veg class (Byte x2)
+    routing/{fire_key}/b{bundle_id}/grid.tif        pace code + veg class + stream-name id (Byte x3)
                                      dem.tif         Int16 metres
                                      graph.bin.gz    RDG1 road + trail network
                                      trails.pmtiles  per-fire trails + OSM ways, z10-14
@@ -53,7 +53,7 @@ def bundle_id_for(inputs: dict) -> str:
 
 
 def bundle_inputs(aoi: dict, now: datetime, *, osm_hash: str, trails_hash: str,
-                  huc8: list[str]) -> dict:
+                  huc8: list[str], osm_water_hash: str | None = None) -> dict:
     """What a bundle is built from; its id hashes this. The hashes cover the
     data inside the AOI; the *_VERSION constants stand for the code that
     turns that data into bytes (and for the NHD cache), so a fix there
@@ -65,7 +65,8 @@ def bundle_inputs(aoi: dict, now: datetime, *, osm_hash: str, trails_hash: str,
         "graph_format": GRAPH_FORMAT, "graph_build": graph_build.BUILD_VERSION,
         "epsg": aoi["epsg"], "grid": aoi["grid"],
         "lf": "LF2025-else-LF2024/pixel", "lf_epoch": f"{now:%Y-%m}", "topo": "LF2020",
-        "osm_hash": osm_hash, "trails_hash": trails_hash, "nhd": sorted(huc8),
+        "osm_hash": osm_hash, "osm_water_hash": osm_water_hash, "trails_hash": trails_hash,
+        "nhd": sorted(huc8),
     }
 
 
@@ -250,6 +251,7 @@ def build_fire(client: httpx.Client, storage: Storage, entry: dict, *, workdir: 
     nodes_ll, ways = ({}, [])
     if osm_pbf is not None and osm_pbf.exists():
         nodes_ll, ways = osm_extract.read_opl(osm_extract.to_opl(osm_pbf, workdir / "aoi.opl"))
+    osm_rivers, osm_areas = osm_extract.waterways(nodes_ll, ways)
     agency_ll = []
     try:
         agency_ll = load_agency_trails(trails_src, aoi["bbox4326"], workdir)
@@ -266,6 +268,7 @@ def build_fire(client: httpx.Client, storage: Storage, entry: dict, *, workdir: 
     if not items:
         warnings.append("nhd_unavailable")
     inputs = bundle_inputs(aoi, now, osm_hash=graph_build.osm_hash(nodes_ll, ways),
+                           osm_water_hash=osm_extract.water_hash(osm_rivers, osm_areas),
                            trails_hash=graph_build.trails_hash(agency),
                            huc8=[i["huc8"] for i in (items or [])])
     bid = bundle_id_for(inputs)
@@ -290,22 +293,18 @@ def build_fire(client: httpx.Client, storage: Storage, entry: dict, *, workdir: 
             vers[ver] = {k: warp(lf[ver][p], wd / f"{ver}_{p}.tif", aoi, categorical=True, ot="Int16")
                          for k, p in (("evt", "EVT"), ("evc", "EVC"), ("fbfm", "FBFM40"))}
     veg, lf_label = cost_grid.mosaic_versions(vers.get("LF2025"), vers.get("LF2024"))
-    streams = water = None
-    if items:
-        try:
-            gpk = [(nhd_fetch(i) if nhd_fetch else nhd.ensure_huc8(client, storage, i, workdir, log))
-                   for i in items]
-            st_tif, wa_tif = nhd.rasterize(gpk, epsg=epsg, bounds_utm=rect, cell=g["cell_m"],
-                                           bbox4326=aoi["bbox4326"], workdir=workdir)
-            if st_tif:
-                streams = gdal_cli.read_raster(st_tif, workdir / "envi_nhd")[0][0]
-            if wa_tif:
-                water = gdal_cli.read_raster(wa_tif, workdir / "envi_nhd")[0][0]
-        except Exception as exc:  # noqa: BLE001
-            log(f"[routing] {fk}: NHD failed: {str(exc)[:200]}")
-            warnings.append("nhd_unavailable")
+    osm_water = {"osm_rivers": osm_rivers, "osm_areas": osm_areas}
+    try:
+        gpk = [(nhd_fetch(i) if nhd_fetch else nhd.ensure_huc8(client, storage, i, workdir, log))
+               for i in items or []]
+        hydro = nhd.hydro_grids(gpk, aoi, workdir, **osm_water)
+    except Exception as exc:  # noqa: BLE001
+        log(f"[routing] {fk}: NHD failed: {str(exc)[:200]}")
+        warnings.append("nhd_unavailable")
+        hydro = nhd.hydro_grids([], aoi, workdir, **osm_water)  # OSM rivers still block
     cg = cost_grid.compute(evt=veg["evt"], evc=veg["evc"], fbfm=veg["fbfm"], slope=slope,
-                           elev=elev, streams=streams, water=water)
+                           elev=elev, streams=hydro["streams"], rivers=hydro["rivers"],
+                           water=hydro["water"])
     if cg["stats"]["nodata_pct"] > 5:
         warnings.append("nodata_border")
     if aoi.get("clipped"):
@@ -315,12 +314,15 @@ def build_fire(client: httpx.Client, storage: Storage, entry: dict, *, workdir: 
     geo = gdal_cli.Georef(epsg, g["x0"], g["y0"], g["cell_m"], g["cell_m"], g["width"], g["height"])
     out = workdir / "out"
     out.mkdir(exist_ok=True)
+    # Band 3 is additive: readers of bands 1-2 (pace, veg) are unaffected.
+    # MINISBLACK, or GDAL may call three Byte bands RGB.
     grid_tif = gdal_cli.write_raster(
-        np.stack([cg["pace"], cg["veg"]]), geo, out / "grid.tif", band_names=["pace", "veg"],
+        np.stack([cg["pace"], cg["veg"], hydro["stream_id"]]), geo, out / "grid.tif",
+        band_names=["pace", "veg", "stream"],
         creation=["COMPRESS=DEFLATE", "ZLEVEL=9", "PREDICTOR=1", "TILED=YES", "BLOCKXSIZE=512",
-                  "BLOCKYSIZE=512", "INTERLEAVE=BAND"],
+                  "BLOCKYSIZE=512", "INTERLEAVE=BAND", "PHOTOMETRIC=MINISBLACK"],
         metadata={"RD_RECIPE": str(config.ROUTING_RECIPE), "RD_PACE": "logpace-v1",
-                  "RD_VEG": "veg-v1"})
+                  "RD_VEG": "veg-v1", "RD_STREAM": "stream-names-v1"})
     dem_tif = gdal_cli.write_raster(
         cg["dem"], geo, out / "dem.tif", nodata=-32768,
         creation=["COMPRESS=DEFLATE", "ZLEVEL=9", "PREDICTOR=2", "TILED=YES", "BLOCKXSIZE=512",
@@ -356,6 +358,8 @@ def build_fire(client: httpx.Client, storage: Storage, entry: dict, *, workdir: 
         "aoi": {"source": aoi.get("source"), "perimeter_date": per.get("date"),
                 "buffer_m": config.ROUTING_BUFFER_M, "clipped": bool(aoi.get("clipped"))},
         "files": desc_files,
+        # grid.tif band 3: 0 = no named perennial stream, k = names[k - 1]
+        "streams": {"band": 3, "names": hydro["names"], "truncated": hydro["truncated"]},
         "sources": {"landfire": {"veg": lf_label, "topo": "LF2020",
                                  "via": "wcs" if "wcs" in (lf.get("via") or ()) else "exportImage"},
                     "osm": {"regions": osm_regions, "date": osm_date},

@@ -1,6 +1,8 @@
 """Synthetic routing scene: a ridge, timber west / brush east, a meadow, a
 lake, a slash patch, a cliff band, a perennial creek, an OSM forest road and
 path, and two USFS trails (one duplicating the OSM path, one not in OSM).
+East of everything the frontend tests route: an NHD order-5 river, an OSM
+river with a riverbank area, and an intermittent OSM river (not a barrier).
 
 Used by test_routing_bundle.py (a full bundle build through the real GDAL +
 osmium CLIs) and by scripts/make_routing_fixture.py, which writes the same
@@ -105,12 +107,36 @@ def osm_pbf(aoi: dict, out: Path) -> Path:
         nid += 1
     ways.append(f"w1 v1 Thighway=track,name=FS%20%100,surface=gravel N{','.join(f'n{n}' for n in road)}")
     ways.append(f"w2 v1 Thighway=path,sac_scale=mountain_hiking N{','.join(f'n{n}' for n in path)}")
+    wid = 3
+    for tags, pts in RIVERS_OSM:
+        refs = []
+        for dx, dy in pts:
+            lon, lat = _ll(aoi, dx, dy)
+            nodes.append(f"n{nid} v1 x{lon} y{lat}")
+            refs.append(nid)
+            nid += 1
+        if pts[0] == pts[-1]:
+            refs[-1] = refs[0]  # a closed way
+        ways.append(f"w{wid} v1 T{tags} N{','.join(f'n{n}' for n in refs)}")
+        wid += 1
     out.mkdir(parents=True, exist_ok=True)
     opl = out / "scene.opl"
     opl.write_text("\n".join(nodes + ways) + "\n")
     pbf = out / "scene.osm.pbf"
     gdal_cli.run(["osmium", "cat", str(opl), "-o", str(pbf), "--overwrite"])
     return pbf
+
+
+# OSM water (OPL tags, metres from the centre): a river, its riverbank area,
+# and a dry wash that must not become a barrier.
+RIVERS_OSM = [
+    ("waterway=river,name=Wild%20%River", [(5000, -6600), (6500, -6400), (8000, -6200)]),
+    ("natural=water,water=river", [(5000, -6700), (5600, -6700), (5600, -6500), (5000, -6500),
+                                   (5000, -6700)]),
+    ("waterway=river,intermittent=yes,name=Dry%20%Wash", [(-8000, -6500), (-5000, -6500)]),
+]
+# NHD "Big Creek", a river by its stream order (5), N-S along the east edge
+RIVER_X = 7300
 
 
 def trails_fgb(aoi: dict, out: Path) -> Path:
@@ -139,11 +165,14 @@ def trails_fgb(aoi: dict, out: Path) -> Path:
 
 def nhd_gpkg(aoi: dict, out: Path) -> Path:
     creek = [_ll(aoi, x, 1000 + 150 * np.sin(x / 1500)) for x in range(-8000, 8001, 250)]
+    river = [_ll(aoi, RIVER_X + 40 * np.sin(y / 700), y) for y in range(-9000, 9001, 250)]
     lake = [_ll(aoi, -2000 + 500 * np.cos(a), -2500 + 500 * np.sin(a))
             for a in np.linspace(0, 2 * np.pi, 33)]
     streams = out / "streams.geojsonl"
-    streams.write_text(json.dumps({"type": "Feature", "properties": {"fcode": 46006},
-                                   "geometry": {"type": "LineString", "coordinates": creek}}) + "\n")
+    streams.write_text("".join(json.dumps({"type": "Feature", "properties": p, "geometry": {
+        "type": "LineString", "coordinates": ln}}) + "\n" for p, ln in (
+        ({"fcode": 46006, "gnis_name": "Ridge Creek", "streamorder": 2}, creek),
+        ({"fcode": 46006, "gnis_name": "Big Creek", "streamorder": 5}, river))))
     water = out / "water.geojsonl"
     water.write_text(json.dumps({"type": "Feature", "properties": {"fcode": 39004},
                                  "geometry": {"type": "Polygon", "coordinates": [lake]}}) + "\n")
