@@ -89,6 +89,7 @@ Local GDAL for the mirror job: `brew install gdal` (macOS) / `apt-get install gd
    - Create an **application key scoped to this bucket only** (Read & Write): App Keys → Add a New Application Key → restrict to `responder-debrief-data`. Note the `keyID` and `applicationKey`.
    - Note your bucket's S3 endpoint (shown on the bucket page, e.g. `s3.us-west-004.backblazeb2.com`) and friendly download URL (e.g. `https://f004.backblazeb2.com/file/responder-debrief-data`).
    - Optional: add a 14-day lifecycle rule on the `catalogs/versions/` prefix (the worker snapshots catalogs there).
+   - Recommended for the trails build and routing bundles: a lifecycle rule with `daysFromHidingToDeleting: 1` on `catalogs/` (pointer rewrites leave hidden versions) and `work/` (NHD cache). Old trails builds (`trails/b*/`) and bundles (`routing/*/b*/`) are never deleted automatically; prune them by hand when storage matters (cents per month today).
 
 4. **GitHub secrets** (repo → Settings → Secrets and variables → Actions → *Secrets*):
 
@@ -105,7 +106,9 @@ Local GDAL for the mirror job: `brew install gdal` (macOS) / `apt-get install gd
    | `VITE_DATA_BASE_URL` | `https://f004.backblazeb2.com/file/responder-debrief-data` |
    | `FRAME_BUDGET` (optional) | `3000` — per-sync cap on pre-rendered frame images |
 
-5. **Go live**: push to `main`. `deploy-pages.yml` builds and publishes the frontend; run *Sync catalogs* and *Mirror incidents* once by hand (Actions → workflow → *Run workflow*) to seed B2, after which the crons keep them fresh (catalogs hourly at :07, mirror at 01:25/07:25/13:25/19:25 UTC). The first few catalog runs work through the frame backlog under the `FRAME_BUDGET` cap; runs marked `"complete": false` finish on later ticks.
+5. **Trails + offline Walk** (optional, independent of the rest): run *Trails build* once (Actions → *Run workflow*, `force`), then *Routing bundles* runs after it and every 3 hours. Both have a `dry_run` input that uploads the output as an artifact instead of writing B2 — use it to inspect a real GDAL 3.8.4 build first. Optional variable `PRIORITY_FIRES` (slugs/names/cornea ids) builds those fires' bundles first.
+
+6. **Go live**: push to `main`. `deploy-pages.yml` builds and publishes the frontend; run *Sync catalogs* and *Mirror incidents* once by hand (Actions → workflow → *Run workflow*) to seed B2, after which the crons keep them fresh (catalogs hourly at :07, mirror at 01:25/07:25/13:25/19:25 UTC). The first few catalog runs work through the frame backlog under the `FRAME_BUDGET` cap; runs marked `"complete": false` finish on later ticks.
 
 ## Data sources & attribution
 
@@ -113,6 +116,8 @@ Local GDAL for the mirror job: `brew install gdal` (macOS) / `apt-get install gd
 - **Fire spread & fire-weather forecasts** — WMS services by **Pyrecast LLC** ([pyrecast.org](https://pyrecast.org)). Out of courtesy to their free service, this app never hits their geoservers from users' browsers: the worker pre-renders each frame server-side exactly once per forecast run (low concurrency, retry backoff, per-sync budget) and serves the static images from B2. Forecasts are experimental model output — not operational guidance.
 - **Incident maps & IR products** — incident-team uploads on [ftp.wildfire.gov](https://ftp.wildfire.gov/public/incident_specific_maps/) (NWCG), mirrored 4×/day with conditional requests and a contact-tagged user agent.
 - **Basemap** — [OpenFreeMap](https://openfreemap.org) tiles, © [OpenStreetMap](https://www.openstreetmap.org/copyright) contributors.
+- **Trails** — USDA Forest Service (National Forest System Trails, EDW), BLM (Ground Transportation Linear Features), National Park Service (Public Trails).
+- **Offline Walk routing** — roads and paths © [OpenStreetMap](https://www.openstreetmap.org/copyright) contributors via [Geofabrik](https://download.geofabrik.de) extracts (the published routing graphs are ODbL 1.0 derivative databases); vegetation, fuels, slope and elevation from [LANDFIRE](https://landfire.gov); perennial streams and water from the USGS National Hydrography Dataset; travel rates from Sullivan et al. 2020 and the USFS Ground Evacuation Time v2 model. Cross-country legs are modeled, not scouted.
 - **Design inspiration** — [fires.cornea.is](https://fires.cornea.is).
 
 This is a prototype for gathering user feedback. Verify all operational information through official channels before acting on it.

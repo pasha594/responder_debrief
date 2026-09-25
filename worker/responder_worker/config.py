@@ -194,6 +194,12 @@ CACHE_CONTROL_RULES: list[tuple[str, str]] = [
     ("tiles/", "public, max-age=31536000, immutable"),
     ("previews/", "public, max-age=31536000, immutable"),
     ("vectors/", "public, max-age=31536000, immutable"),
+    # Trails builds and routing bundles live under versioned / content-addressed
+    # prefixes that are never rewritten once their build.json / bundle.json
+    # exists; their mutable pointers are under catalogs/ (docs/trails-routing).
+    ("trails/", "public, max-age=31536000, immutable"),
+    ("routing/", "public, max-age=31536000, immutable"),
+    ("work/", "private, no-store"),                       # worker-only caches
     ("catalogs/versions/", "public, max-age=31536000"),
     ("catalogs/", "public, max-age=60, must-revalidate"),
     ("state/", "private, no-store"),
@@ -222,6 +228,14 @@ CONTENT_TYPES = {
     ".txt": "text/plain",
     ".zip": "application/zip",
     ".html": "text/html",
+    # Never paired with Content-Encoding: PMTiles range reads break on an
+    # encoded object, and graph.bin.gz is gunzipped by the app itself.
+    ".pmtiles": "application/octet-stream",
+    ".fgb": "application/octet-stream",
+    ".tif": "image/tiff",
+    ".tiff": "image/tiff",
+    ".gz": "application/gzip",
+    ".gpkg": "application/geopackage+sqlite3",
 }
 
 
@@ -252,3 +266,68 @@ def b2_settings_from_env() -> dict[str, str]:
             f"Missing B2 env vars: {', '.join(missing)} (use --dry-run for local runs)"
         )
     return {k: os.environ[k] for k in B2_ENV}
+
+
+# ---------------------------------------------------------------------------
+# Trails overlay + offline routing bundles (docs/trails-routing/FINAL_PLAN.md)
+# ---------------------------------------------------------------------------
+
+# Public read base of our own bucket: the routing plan reads the published
+# catalog.json (zero fire-API index traffic) and bundle builds read the
+# national trails FlatGeobuf over /vsicurl/ range requests.
+DATA_BASE_DEFAULT = "https://f005.backblazeb2.com/file/responder-debrief-data"
+
+
+def data_base() -> str:
+    return (os.environ.get("DATA_BASE_URL") or DATA_BASE_DEFAULT).rstrip("/")
+
+
+USFS_TRAILS_ZIP = ("https://data.fs.usda.gov/geodata/edw/edw_resources/fc/"
+                   "Trans_Trail_NFS_Publish.gdb.zip")
+USFS_TRAILS_LAYER = "Trans_Trail_NFS_Publish"
+_BLM_FS = "https://services1.arcgis.com/KbxwQRRfWyEYLgp4/arcgis/rest/services"
+# The hosted FeatureServers, not the MapServer: MapServer layers 2-5 are exact
+# subsets of the managed-trails set and must never be unioned with it.
+BLM_MANAGED_TRAILS = f"{_BLM_FS}/BLM_Natl_GTLF_Public_Managed_Trails/FeatureServer/2"
+BLM_NOT_ASSESSED_TRAILS = f"{_BLM_FS}/BLM_Natl_GTLF_Public_Not_Assessed_Trails/FeatureServer/7"
+NPS_TRAILS = ("https://mapservices.nps.gov/arcgis/rest/services/NationalDatasets/"
+              "NPS_Public_Trails/MapServer/0")
+
+# Bump whenever the same sources would normalize or build differently: it
+# feeds the build id and forces a rebuild on the next run (trails.decide).
+# 2: the first real-data fixes of 2026-09-25 ('N/A' windows, BLM modes and
+# seasons, src_date as a string, USFS class band and forest name).
+TRAILS_RECIPE = 2
+TRAILS_MIN_DAYS = 6       # at most one national build per ~week
+TRAILS_MAX_DAYS = 30      # rebuild anyway after this long (source dates in popups)
+TRAILS_MAX_SECONDS_DEFAULT = 5400
+# Normalized-count floors: a partial source refresh (the USFS EDW service was
+# caught mid-reload on 2026-09-24) must never replace a good build.
+TRAILS_COUNT_FLOORS = {"usfs": 50_000, "blm_managed": 15_000,
+                       "blm_not_assessed": 3_000, "nps": 25_000}
+TRAILS_MAX_DROP = 0.10    # vs the previous build, per source
+
+LANDFIRE_IMAGESERVER = "https://lfps.usgs.gov/arcgis/rest/services"
+LANDFIRE_WCS = "https://edcintl.cr.usgs.gov/geoserver/landfire_wcs"
+# CONUS Albers (EPSG:5070) grid origin shared by every LANDFIRE product.
+LANDFIRE_ORIGIN_X = -2362425.0
+LANDFIRE_ORIGIN_Y = 3267405.0
+TNM_PRODUCTS = "https://tnmaccess.nationalmap.gov/api/v1/products"
+NHD_DATASET = "National Hydrography Dataset (NHD) Best Resolution"
+GEOFABRIK_INDEX = "https://download.geofabrik.de/index-v1.json"
+# The live index had 54 US leaf regions on 2026-09-25 (49 states + DC, PR,
+# USVI, norcal, socal). Fewer than this means its layout changed again, and
+# the routing job fails once instead of backing off every fire.
+ROUTING_MIN_US_REGIONS = 40
+
+ROUTING_RECIPE = 1
+ROUTING_SHARDS_DEFAULT = 4
+ROUTING_MAX_SECONDS_DEFAULT = 7800
+ROUTING_CELL_M = 30
+ROUTING_MAX_CELLS = 6_250_000      # phone-memory cap per grid (2 bytes/cell data + DEM)
+ROUTING_MAX_SIDE_M = 150_000       # clip beyond this even at 60 m cells
+ROUTING_BUFFER_M = 8_000
+ROUTING_MIN_SIDE_M = 16_000
+ROUTING_GROWTH_HYSTERESIS_M = 2_000
+ROUTING_CHECK_DAYS = 7             # recompute input hashes after this long
+ROUTING_BACKOFF_FAILURES = 3
