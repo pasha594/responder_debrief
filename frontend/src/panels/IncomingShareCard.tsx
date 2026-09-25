@@ -21,6 +21,7 @@ import { useStore } from '../state/store';
 import { formatDateTime, formatRelative } from '../utils/format';
 import { seriesKey } from '../utils/incidentMaps';
 import { lightboxTitle } from './MapLightbox';
+import { PROFILE_LABELS, fmtDistance, fmtDuration } from './SearchDirectionsControl';
 import { SPREAD_PRODUCT_LABELS } from './tabs/ForecastTab';
 
 const BASEMAP_LABELS: Record<ShareState['basemap'], string> = {
@@ -47,6 +48,20 @@ function drawingsLine(share: ShareState, yours: number): string {
     : theirs;
 }
 
+const TRAILS_LABELS = { on: 'Trails on', off: 'Trails off' } as const;
+
+/** "Walk: Camp → Drop point · 2 h 10 min · 4.2 mi; Pin at 44.05000, -121.31000" */
+function routingLine(r: NonNullable<ShareState['routing']>, replaces: boolean): string {
+  const parts: string[] = [];
+  if (r.a || r.b) {
+    let s = `${PROFILE_LABELS[r.profile]}: ${r.a?.label ?? '—'} → ${r.b?.label ?? '—'}`;
+    if (r.route) s += ` · ${fmtDuration(r.route.durationS)} · ${fmtDistance(r.route.distanceM)}`;
+    parts.push(s);
+  }
+  if (r.pin) parts.push(`Pin at ${r.pin[1].toFixed(5)}, ${r.pin[0].toFixed(5)}`);
+  return parts.join('; ') + (replaces ? ' — replaces yours' : '');
+}
+
 function IncomingShareDialog({ share }: { share: ShareState }) {
   const { data: fires } = useFires();
   const { data: catalog } = useMasterCatalog();
@@ -55,6 +70,7 @@ function IncomingShareDialog({ share }: { share: ShareState }) {
   const online = useStore((s) => s.offline.online);
   const view = useStore((s) => s.view);
   const liveMarks = useStore((s) => s.draw.features.length);
+  const hasOwnRouting = useStore((s) => !!(s.droppedPin || s.directions.a || s.directions.b));
   const actions = useStore((s) => s.actions);
   const applyRef = useRef<HTMLButtonElement>(null);
 
@@ -117,7 +133,14 @@ function IncomingShareDialog({ share }: { share: ShareState }) {
   const ir = L.irFlight
     ? manifest?.ir_flights.find((f) => f.flight_id === L.irFlight)?.flight_date ?? L.irFlight
     : null;
-  const layers = [forecast, ...weather, ir && `IR heat ${ir}`].filter(Boolean).join(' · ') || 'None';
+  const layers = [
+    forecast,
+    ...weather,
+    ir && `IR heat ${ir}`,
+    L.vegetation.visible && 'Vegetation',
+    L.land && 'Land ownership',
+    L.trails !== 'auto' && TRAILS_LABELS[L.trails],
+  ].filter(Boolean).join(' · ') || 'None';
 
   // --- what this phone is missing ---
   const warnings: string[] = [];
@@ -131,6 +154,7 @@ function IncomingShareDialog({ share }: { share: ShareState }) {
   } else if (sheet && pack && !sheetOffline && !online) {
     warnings.push('That sheet wasn’t saved with your offline copy, so it can’t show until you have signal.');
   }
+  for (const n of share.routing?.route?.notes ?? []) warnings.push(`Shared route: ${n.text}`);
   if (pack && share.packSavedAt != null) {
     const mine = Date.parse(pack.downloadedAt);
     if (Number.isFinite(mine) && Math.abs(mine - share.packSavedAt) > COPY_SKEW_MS) {
@@ -146,9 +170,11 @@ function IncomingShareDialog({ share }: { share: ShareState }) {
     ['Map view', `${BASEMAP_LABELS[share.basemap]} basemap, their position and zoom`],
     ['Timeline', share.time == null ? 'Now' : formatDateTime(share.time, catalogFire?.timezone)],
     ['Incident sheet', sheetLabel],
-    ['Forecast & weather', layers],
+    ['Layers', layers],
     ['Drawings', drawingsLine(share, yours)],
   ];
+  // Directions replace the open fire's; a fire switch starts with none.
+  if (share.routing) rows.push(['Directions', routingLine(share.routing, open && hasOwnRouting)]);
 
   return createPortal(
     <div

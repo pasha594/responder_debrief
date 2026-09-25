@@ -84,6 +84,9 @@ export interface RouteResult {
   durationRangeS?: [number, number];
   /** True when any part is a model (the offline router), not an engine. */
   modeled?: boolean;
+  /** Arrived in a QR share (share/): drawn until this phone routes the same
+   * pins itself, and replaced without moving the shared camera. */
+  shared?: boolean;
   notes?: RouteNote[];
   provenance?: {
     bundleId: string;

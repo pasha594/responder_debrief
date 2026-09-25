@@ -778,6 +778,7 @@ export const useStore = create<AppState>((set, get) => ({
       set((s) => {
         if (s.view.mode !== 'fire' || s.view.corneaId !== share.fire.corneaId) return {};
         const L = share.layers;
+        const R = share.routing;
         // every weather layer the share doesn't name goes off (opacity kept)
         const weather: AppState['layers']['weather'] = {};
         for (const [p, st] of Object.entries(s.layers.weather) as [WeatherProduct, WeatherLayerState][]) {
@@ -798,7 +799,37 @@ export const useStore = create<AppState>((set, get) => ({
             incidents: { visible: L.incidents },
             incidentMap: { ...L.incidentMap },
             irFlight: { flightId: L.irFlight },
+            trails: { mode: L.trails },
+            vegetation: L.vegetation.visible
+              ? { visible: true, opacity: L.vegetation.opacity ?? s.layers.vegetation.opacity }
+              : { ...s.layers.vegetation, visible: false },
+            land: { visible: L.land },
           },
+          // Directions and the pin travel together and replace the
+          // recipient's; the route line stays until this phone routes the
+          // same pins itself (SearchDirectionsControl).
+          ...(R && {
+            directions: {
+              ...s.directions,
+              a: R.a,
+              b: R.b,
+              profile: R.profile,
+              avoidPerimeter: R.avoidPerimeter,
+              armed: false,
+              route: R.route && {
+                geometry: { type: 'LineString' as const, coordinates: R.route.coordinates },
+                distanceM: R.route.distanceM,
+                durationS: R.route.durationS,
+                trafficDelayS: R.route.trafficDelayS,
+                steps: [],
+                engine: R.route.engine,
+                notes: R.route.notes.map((n) => ({ level: 'warn' as const, ...n })),
+                shared: true,
+              },
+            },
+            droppedPin: R.pin,
+            range: { rings: [] },
+          }),
           ui: { ...s.ui, basemap: share.basemap },
           // A "now" share follows the recipient's clock; a scrubbed playhead
           // waits in `pending` for a timeline domain that reaches it.

@@ -3,7 +3,6 @@
  * Rendered as the "Weather" section of the Forecast tab.
  */
 import { LegendImg } from '../../utils/LegendImg';
-import { useState } from 'react';
 import { isRenderableWeatherRun, useWeatherRuns } from '../../api/queries';
 import { weatherLegendUrl } from '../../api/wmsUrls';
 import {
@@ -15,6 +14,8 @@ import { useStore } from '../../state/store';
 import { weatherCoverage, weatherJumpTarget } from '../../timeline/framePlan';
 import { formatDateTime, formatRelative } from '../../utils/format';
 import { GradientLegend } from '../../utils/GradientLegend';
+import { useIsDesktop } from '../../utils/useMediaQuery';
+import { LayerRow } from '../layers/LayerRow';
 
 const STALE_MS = 7 * 3600_000;
 
@@ -36,64 +37,51 @@ function WeatherRow({
   const label = meta.label;
   const state = useStore((s) => s.layers.weather[product]);
   const actions = useStore((s) => s.actions);
-  const [legendOpen, setLegendOpen] = useState(false);
+  const isDesktop = useIsDesktop();
   const visible = state?.visible ?? false;
   const opacity = state?.opacity ?? 0.7;
 
   return (
-    <div className={`rd-weather-row${visible ? ' rd-weather-row--on' : ''}`}>
-      <div className="rd-weather-row-top">
-        <label className="rd-field--row">
-          <input
-            type="checkbox"
-            checked={visible}
-            onChange={(e) => {
-              const on = e.target.checked;
-              const { currentTime, now } = useStore.getState().time;
-              const target = on ? weatherJumpTarget(coverage, currentTime, now) : null;
-              if (target !== null) actions.setTime(target);
-              actions.setWeatherLayer(product, { visible: on });
-            }}
-          />
-          <span>{label}</span>
-        </label>
-        <button
-          type="button"
-          className="rd-mini-btn"
-          aria-expanded={legendOpen}
-          onClick={() => setLegendOpen((v) => !v)}
-          title={legendOpen ? 'Hide legend' : 'Show legend'}
-        >
-          {legendOpen ? 'Legend ▾' : 'Legend ▸'}
-        </button>
-      </div>
-      {visible && arrowNote && (
-        <div style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>
-          arrows show wind direction
-        </div>
-      )}
+    <LayerRow
+      label={label}
+      checked={visible}
+      onChange={(on) => {
+        const { currentTime, now } = useStore.getState().time;
+        const target = on ? weatherJumpTarget(coverage, currentTime, now) : null;
+        if (target !== null) actions.setTime(target);
+        actions.setWeatherLayer(product, { visible: on });
+      }}
+    >
       {visible && (
-        <input
-          type="range"
-          className="rd-slider"
-          min={0}
-          max={1}
-          step={0.05}
-          value={opacity}
-          onChange={(e) => actions.setWeatherLayer(product, { opacity: Number(e.target.value) })}
-          aria-label={`${label} opacity`}
-        />
-      )}
-      {legendOpen && (
-        <div className="rd-mini-legend">
-          {meta.legend_stops ? (
-            <GradientLegend stops={meta.legend_stops} units={meta.units} />
-          ) : (
-            <LegendImg src={weatherLegendUrl(product, legendTemplate)} alt={`${label} legend`} />
+        <>
+          {arrowNote && (
+            <div style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>
+              arrows show wind direction
+            </div>
           )}
-        </div>
+          <input
+            type="range"
+            className="rd-slider"
+            min={0}
+            max={1}
+            step={0.05}
+            value={opacity}
+            onChange={(e) => actions.setWeatherLayer(product, { opacity: Number(e.target.value) })}
+            aria-label={`${label} opacity`}
+          />
+          {/* desktop has the map's legend box; phones have no map legend */}
+          {!isDesktop && (
+            <div className="rd-mini-legend">
+              {meta.legend_stops ? (
+                <GradientLegend stops={meta.legend_stops} units={meta.units} />
+              ) : (
+                <LegendImg src={weatherLegendUrl(product, legendTemplate)} alt={`${label} legend`} />
+              )}
+            </div>
+          )}
+        </>
       )}
-    </div>
+    </LayerRow>
   );
 }
 

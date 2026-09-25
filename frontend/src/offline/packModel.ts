@@ -245,10 +245,13 @@ export function buildPackPlan(inp: PackInputs): PackPlan {
     }
   }
 
-  // IR flights (usually few; geojson is small).
+  // IR flights (usually few; geojson is small), with their card thumbnails.
   for (const f of inp.manifest?.ir_flights ?? []) {
     if (f.geojson_url) {
       files.push({ url: dataUrl(f.geojson_url), immutable: true, estBytes: EST.json });
+    }
+    if (f.preview_url) {
+      files.push({ url: dataUrl(f.preview_url), immutable: true, estBytes: EST.preview });
     }
   }
 

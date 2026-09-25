@@ -6,8 +6,11 @@
  *   - never reorder or remove an entry;
  *   - never append either: a symbol added to the palette later travels as
  *     its string id (the codec's escape), which every version can carry.
- * Changing a list means a new format version.
+ * Changing a list means a new format version. Lists added later ride new
+ * flag bits (see shareCodec), so an app that predates them reports the code
+ * as "from a newer version" instead of misreading it.
  */
+import type { RouteEngine, RouteProfile } from '../api/routing';
 import type { Percentile, SpreadProduct, WeatherProduct } from '../api/types';
 
 /** NWCG PMS 936 point symbols, palette order as of format v1. */
@@ -54,3 +57,14 @@ export const WIRE_SPREAD: readonly SpreadProduct[] = [
 export const WIRE_PERCENTILES: readonly Percentile[] = [10, 30, 50, 70, 90];
 
 export const WIRE_BASEMAPS = ['map', 'satellite', 'topo'] as const;
+
+// ---- added with directions, pins and the trails/vegetation/land layers ----
+
+/** Directions travel modes (store `directions.profile`; 'hike' is Walk). */
+export const WIRE_PROFILES: readonly RouteProfile[] = ['drive', 'hike', 'apparatus'];
+
+/** Routing engines (RouteResult.engine). */
+export const WIRE_ENGINES: readonly RouteEngine[] = ['tomtom', 'osrm', 'ors', 'valhalla', 'offroad'];
+
+/** Trails layer modes (store `layers.trails.mode`). */
+export const WIRE_TRAILS = ['auto', 'on', 'off'] as const;

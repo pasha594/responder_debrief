@@ -135,7 +135,12 @@ describe('buildPackPlan', () => {
         { op_date: '2026-08-20', preview_url: '/previews/incidents/test-fire/old.png', tiles: null },
         { op_date: null, preview_url: null, tiles: null },
       ],
-      ir_flights: [{ geojson_url: '/vectors/ir/test-fire/f1.geojson' }],
+      ir_flights: [
+        {
+          geojson_url: '/vectors/ir/test-fire/f1.geojson',
+          preview_url: '/previews/incidents/test-fire/irpdf.png',
+        },
+      ],
     } as unknown as IncidentManifest;
     const plan = buildPackPlan(inputs({ manifest }));
     expect(plan.mapSheetCount).toBe(1);
@@ -144,6 +149,7 @@ describe('buildPackPlan', () => {
     // previews pack for EVERY sheet (thumbnails); only tiles are windowed
     expect(plan.files.some((f) => f.url.includes('old.png'))).toBe(true);
     expect(plan.files.some((f) => f.url.includes('f1.geojson'))).toBe(true);
+    expect(plan.files.some((f) => f.url.includes('irpdf.png'))).toBe(true);
   });
 
   it('falls back to the newest dated sheet day when nothing is in the 2-day window', () => {

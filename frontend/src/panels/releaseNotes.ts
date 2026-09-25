@@ -56,7 +56,7 @@ export const RELEASE_NOTES: ReleaseDay[] = [
       {
         title: 'Infrared (IR) flights on the map for more fires',
         summary:
-          'Nightly IR heat now shows on the map for fires whose teams publish only a KMZ, like Sisi, drawn with the same symbols and legend as the IR PDF. Flights sit under their day in the Maps tab with when the plane flew.',
+          'Nightly IR heat now shows on the map for fires whose teams publish only a KMZ, like Sisi, drawn with the same symbols and legend as the IR PDF. Flights sit under their day in the Maps tab with a thumbnail of the IR PDF and when the plane flew.',
       },
       {
         title: 'Tidier map corners',
@@ -69,9 +69,14 @@ export const RELEASE_NOTES: ReleaseDay[] = [
           "Back, basemap, 3D, QR, search and locate now share one line of compact buttons across the top of the map on every screen, with the Draw tools under them on the left. On phones the settings gear moved into the fire panel's top corner.",
       },
       {
+        title: 'Bigger layer rows',
+        summary:
+          'Every layer in the Layers tab is now a full-height row you can tap anywhere on to turn it on or off. The HRRR weather layers lost their Legend button: the legend shows on the map, or under the layer on phones.',
+      },
+      {
         title: 'Share by QR code',
         summary:
-          'The QR button beside 3D shows your map view, layers, incident map and drawings as a code. Another phone scans it with Scan code, no signal needed if both phones downloaded the fire.',
+          'The QR button beside 3D shows your map view, layers, incident map, drawings, directions and dropped pin as a code. Another phone scans it with Scan code, no signal needed if both phones downloaded the fire.',
       },
       {
         title: 'Historic perimeter dates',
