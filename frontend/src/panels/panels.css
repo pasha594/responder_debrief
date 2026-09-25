@@ -885,6 +885,7 @@
 /* IR flights */
 
 .rd-ir-row {
+  position: relative; /* corner open-PDF icon anchors here */
   padding: 8px;
   margin-bottom: 6px;
   border: 1px solid var(--color-border);
@@ -894,25 +895,20 @@
   border-color: var(--color-accent);
   background: var(--color-card-bg);
 }
-
-.rd-ir-row-main {
-  display: flex;
-  justify-content: space-between;
-  gap: 10px;
-  font-size: 13px;
+.rd-ir-row--clickable {
+  cursor: pointer;
+}
+.rd-ir-row--clickable:hover {
+  background: var(--color-hover-bg);
 }
 
 .rd-ir-date {
+  font-size: 13px;
   font-weight: 600;
 }
 
 .rd-ir-when {
   margin-top: 2px;
-  color: var(--color-text-muted);
-  font-size: 12.5px;
-}
-
-.rd-ir-acres {
   color: var(--color-text-muted);
   font-size: 12.5px;
 }

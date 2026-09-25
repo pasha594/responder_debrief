@@ -41,7 +41,7 @@ export const RELEASE_NOTES: ReleaseDay[] = [
       {
         title: 'Tidier map corners',
         summary:
-          'The legend moved to the bottom-left. The scale sits beside the info button, with the compass above it. An IR flight and an incident map now replace each other on the map instead of stacking.',
+          'The legend moved to the bottom-left. The scale sits beside the info button, with the compass above it, and the map credits fold into that button after five seconds. An IR flight and an incident map now replace each other on the map instead of stacking.',
       },
       {
         title: 'Share by QR code',

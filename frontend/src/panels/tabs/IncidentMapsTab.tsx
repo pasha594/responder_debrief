@@ -231,26 +231,33 @@ function MapRow({
       </div>
 
       {/* The PDF is always reachable — the sheet of record, corner-anchored. */}
-      <a
-        className="rd-map-open"
-        href={pdfHref}
-        target="_blank"
-        rel="noopener noreferrer"
-        title="Open PDF in a new tab"
-        aria-label="Open PDF in a new tab"
-      >
-        <svg width="13" height="13" viewBox="0 0 13 13" aria-hidden="true">
-          <path
-            d="M5 2H2.5A1.5 1.5 0 0 0 1 3.5v7A1.5 1.5 0 0 0 2.5 12h7A1.5 1.5 0 0 0 11 10.5V8M7.5 1H12v4.5M12 1 6 7"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.4"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-        </svg>
-      </a>
+      <OpenPdfLink href={pdfHref} />
     </div>
+  );
+}
+
+/** Corner "open PDF in a new tab" icon, shared by map and IR flight cards. */
+function OpenPdfLink({ href }: { href: string }) {
+  return (
+    <a
+      className="rd-map-open"
+      href={href}
+      target="_blank"
+      rel="noopener noreferrer"
+      title="Open PDF in a new tab"
+      aria-label="Open PDF in a new tab"
+    >
+      <svg width="13" height="13" viewBox="0 0 13 13" aria-hidden="true">
+        <path
+          d="M5 2H2.5A1.5 1.5 0 0 0 1 3.5v7A1.5 1.5 0 0 0 2.5 12h7A1.5 1.5 0 0 0 11 10.5V8M7.5 1H12v4.5M12 1 6 7"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.4"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      </svg>
+    </a>
   );
 }
 
@@ -270,18 +277,26 @@ function IrFlightRow({ flight, timezone }: { flight: IrFlight; timezone: string 
   const active = flight.flight_id != null && activeId === flight.flight_id;
   const canShow = !!flight.geojson_url && flight.flight_id != null;
   const when = irFlightWhen(flight, timezone);
+  // Like the map cards: a click anywhere that isn't a control shows it.
+  const clickable = canShow && !active;
+  const onRowClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!clickable) return;
+    if ((e.target as HTMLElement).closest('button, a, input, label')) return;
+    actions.setIrFlight(flight.flight_id);
+  };
   return (
-    <div className={`rd-ir-row${active ? ' rd-ir-row--active' : ''}`}>
-      <div className="rd-ir-row-main">
-        <span className="rd-ir-date">IR flight</span>
-        <span className="rd-ir-acres">
-          {flight.estimated_acres != null
-            ? `${Math.round(flight.estimated_acres).toLocaleString('en-US')} ac est.`
-            : flight.no_flight_reason ?? '—'}
-        </span>
-      </div>
+    <div
+      className={`rd-ir-row${active ? ' rd-ir-row--active' : ''}${
+        clickable ? ' rd-ir-row--clickable' : ''
+      }`}
+      onClick={onRowClick}
+      title={clickable ? 'Show this IR flight on the map' : undefined}
+    >
+      <div className="rd-ir-date">IR flight</div>
       <div className="rd-ir-when" title={when.source ? IR_WHEN_TITLE[when.source] : undefined}>
         {when.source === 'folder' ? `${when.label} (folder date)` : `Flown ${when.label}`}
+        {flight.estimated_acres != null &&
+          ` · ${Math.round(flight.estimated_acres).toLocaleString('en-US')} ac est.`}
       </div>
       <div className="rd-ir-row-actions">
         <button
@@ -295,16 +310,6 @@ function IrFlightRow({ flight, timezone }: { flight: IrFlight; timezone: string 
           <span className="rd-radio-dot" aria-hidden="true" />
           {active ? 'Shown on map' : 'Show on map'}
         </button>
-        {flight.pdf_url && (
-          <a
-            className="rd-pdf-pill"
-            href={dataUrl(flight.pdf_url)}
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            PDF
-          </a>
-        )}
         {flight.kmz_url && (
           <a
             className="rd-pdf-pill"
@@ -318,6 +323,7 @@ function IrFlightRow({ flight, timezone }: { flight: IrFlight; timezone: string 
       </div>
       {/* desktop has the map's legend box; phones have no map legend */}
       {active && !isDesktop && <IrHeatLegend heatTypes={flight.heat_types} />}
+      {flight.pdf_url && <OpenPdfLink href={dataUrl(flight.pdf_url)} />}
     </div>
   );
 }

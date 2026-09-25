@@ -113,6 +113,24 @@ export function MapRoot({ children }: { children: ReactNode }) {
     requestAnimationFrame(() => requestAnimationFrame(() => {
       if (mapRef.current === map) map.resize();
     }));
+    // MapLibre opens the compact attribution as a text strip over the bottom
+    // corners (once the basemap's credits arrive) and keeps it open until the
+    // map is first moved. OpenStreetMap's attribution guidelines also allow it
+    // to collapse "automatically after five seconds" (the "i" still opens it),
+    // so it doesn't sit over the scale and legend on a map nobody has touched.
+    // Only that first, automatic opening is timed; a tapped "i" stays open.
+    const SHOW = 'maplibregl-compact-show';
+    const attrib = map.getContainer().querySelector('.maplibregl-ctrl-attrib');
+    let attribTimer: number | undefined;
+    const collapseSoon = () => {
+      attribObserver.disconnect();
+      attribTimer = window.setTimeout(() => attrib?.classList.remove(SHOW), 5000);
+    };
+    const attribObserver = new MutationObserver(() => {
+      if (attrib?.classList.contains(SHOW)) collapseSoon();
+    });
+    if (attrib?.classList.contains(SHOW)) collapseSoon();
+    else if (attrib) attribObserver.observe(attrib, { attributes: true, attributeFilter: ['class'] });
     map.once('load', () => {
       const st = useStore.getState().ui;
       applyOverrides(map, mapStyleDef(st.theme, st.mapStyle[st.theme]).id);
@@ -137,6 +155,8 @@ export function MapRoot({ children }: { children: ReactNode }) {
       map.triggerRepaint(); // the next frame re-reads the ground elevation
     });
     return () => {
+      window.clearTimeout(attribTimer);
+      attribObserver.disconnect();
       ro.disconnect();
       mapRef.current = null;
       setReady(null);
