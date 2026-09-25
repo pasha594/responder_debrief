@@ -49,6 +49,12 @@ import numpy as np
 
 from . import utm
 
+# Part of every bundle id (routing_bundle.build_fire): bump it whenever the
+# SAME inputs would now give a different graph (classification, conflation,
+# snapping), so existing bundles rebuild instead of staying "unchanged".
+# 2: offset agency copies are no longer braided in (SAME_TRAIL_M).
+BUILD_VERSION = 2
+
 KIND_PAVED, KIND_UNPAVED, KIND_TRACK, KIND_PATH, KIND_STEPS, KIND_AGENCY = 1, 2, 3, 4, 5, 6
 SRC_OSM, SRC_USFS, SRC_BLM, SRC_NPS = 1, 2, 3, 4
 F_RESTRICTED, F_SEASONAL, F_BRIDGE, F_TUNNEL = 1, 2, 4, 8

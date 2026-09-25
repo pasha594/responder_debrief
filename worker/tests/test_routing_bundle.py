@@ -209,6 +209,22 @@ class TestBundleBuild:
         res = routing_scene.build(root / "out", tmp_path / "w2", storage)
         assert res["unchanged"] == ["{SYNTH-0001}"] and not res["built"]
 
+    def test_graph_builder_change_rebuilds(self, built, tmp_path, monkeypatch):
+        # the SISI conflation fix first came back "unchanged": the bundle id
+        # hashed the inputs but not the code that turns them into a graph
+        root, _, _ = built
+        storage = DryRunStorage(tmp_path / "out")
+        for p in (root / "out").rglob("*"):
+            if p.is_file():
+                dest = tmp_path / "out" / p.relative_to(root / "out")
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(p, dest)
+        old = storage.get_json(rb.pointer_key("synth-0001"))["bundle_id"]
+        monkeypatch.setattr(graph_build, "BUILD_VERSION", graph_build.BUILD_VERSION + 1)
+        res = routing_scene.build(tmp_path / "out", tmp_path / "w3", storage)
+        assert res["built"] == ["{SYNTH-0001}"]
+        assert storage.get_json(rb.pointer_key("synth-0001"))["bundle_id"] != old
+
 
 @needs_tools
 def test_nhd_trim_keeps_perennial_only(tmp_path):

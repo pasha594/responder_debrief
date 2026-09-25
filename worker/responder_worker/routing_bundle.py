@@ -249,7 +249,8 @@ def build_fire(client: httpx.Client, storage: Storage, entry: dict, *, workdir: 
         warnings.append("nhd_unavailable")
     inputs = {
         "recipe": config.ROUTING_RECIPE, "cost_model": "getv2-evc+sullivan2020/1",
-        "graph_format": GRAPH_FORMAT, "epsg": epsg, "grid": g,
+        "graph_format": GRAPH_FORMAT, "graph_build": graph_build.BUILD_VERSION,
+        "epsg": epsg, "grid": g,
         "lf": "LF2025-else-LF2024/pixel", "lf_epoch": f"{now:%Y-%m}", "topo": "LF2020",
         "osm_hash": graph_build.osm_hash(nodes_ll, ways),
         "trails_hash": graph_build.trails_hash(agency),
