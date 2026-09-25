@@ -10,13 +10,13 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { lonLatToUtm, utmToLonLat } from '../spread/utm';
-import type { RouteResult } from '../api/routing';
+import type { RouteLeg, RouteResult } from '../api/routing';
 import { HybridSearch, searchWindow } from './astar';
 import { LEAVE_TRAIL_PENALTY_S, sullivanRate } from './costModel';
 import { OffroadEngine, routeSync } from './engine';
 import type { RoutingGrid } from './gridDecode';
 import { buildHybridGraph } from './hybridGraph';
-import { buildLegs, climbOf, fmtDur } from './legs';
+import { buildLegs, climbOf, fmtDur, stepsFor } from './legs';
 import { PACE_LUT } from './pacecode';
 import type { Rdg1 } from './rdg1';
 import type { RoutingBundle } from './types';
@@ -353,6 +353,29 @@ describe('legs helpers', () => {
     expect(one[0].distanceM).toBeCloseTo(90, 5);
     const split = legsOf(mk([0xffffffff, 2, 0xffffffff]));
     expect(split.map((l) => l.restricted ?? null)).toEqual([null, 'Closed for repairs', null]);
+    // OSM access=no on the middle edge only (no note): its own leg, so the
+    // restriction isn't lost behind the first edge's flags
+    const osm = mk([0xffffffff, 0xffffffff, 0xffffffff]);
+    osm.flags = Uint8Array.from([0, 1, 0]);
+    expect(legsOf(osm).map((l) => l.restricted ?? null)).toEqual([null, 'Access restricted (OSM)', null]);
+  });
+
+  it('reads one way around short cross-country cuts as one step', () => {
+    const leg = (kind: RouteLeg['kind'], m: number, extra: Partial<RouteLeg> = {}): RouteLeg => ({
+      kind, coordinates: [[-120.8, 48.4], [-120.79, 48.41]], distanceM: m, climbM: m / 10, descentM: 0,
+      durationS: m, durationRangeS: [0.8 * m, 1.5 * m], ...extra });
+    const mcg = { name: 'McGregor Mountain Trail' };
+    const steps = stepsFor([
+      leg('trail', 5300, mcg), leg('xc', 41, { minor: true }), leg('trail', 800, mcg),
+      leg('xc', 18, { minor: true }), leg('trail', 480, mcg), leg('trail', 300, { name: 'Other Trail' }),
+      leg('xc', 12, { minor: true }), leg('trail', 200, { name: 'Other Trail', restricted: 'Closed' }),
+    ]).map((s) => s.text);
+    expect(steps).toHaveLength(4);
+    // 5300 + 41 + 800 + 18 + 480 m = 4.1 mi, timed and climbed as drawn
+    expect(steps[0]).toBe('Follow McGregor Mountain Trail 4.1 mi, ↑ 2,180 ft — about 1 h 50 min (89–166 min) · includes 2 short cross-country cuts');
+    expect(steps[1]).toMatch(/^Follow Other Trail 0\.2 mi, ↑ 100 ft — about 5 min \(4–8 min\)$/);
+    expect(steps[2]).toMatch(/· Restricted: Closed$/);
+    expect(steps[3]).toBe('Arrive at B');
   });
 
   it('formats durations', () => {

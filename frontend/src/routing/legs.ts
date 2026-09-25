@@ -3,12 +3,15 @@
  *
  * Pieces come from the engine: graph runs (node + RDG1 edge sequences) and
  * cross-country runs (already smoothed grid-metre polylines). Graph runs
- * split into legs where the way's name/kind changes; a cross-country run
- * under 50 m between two graph legs is `minor` (drawn and counted, but no
- * step and no join marker). Times: graph legs by Sullivan tertiles on the
- * smoothed node elevations; cross-country legs by the sampler (GET pace ×
- * α, scaled by the tertile ratios). Legs are treated as fully correlated —
- * the range totals are sums of the per-leg fast and slow ends.
+ * split into legs where the way's name/kind/restriction changes; a
+ * cross-country run under 50 m between two graph legs is `minor` (drawn and
+ * counted, but no step and no join marker — the same way's legs around it
+ * read as one step that mentions the cut). Times: graph legs by Sullivan
+ * tertiles on the smoothed node elevations; cross-country legs by the
+ * sampler (GET pace × α, scaled by the tertile ratios). Legs are treated as
+ * fully correlated — the range totals are sums of the per-leg fast and slow
+ * ends. Nothing here sees the search cost, so the search-only
+ * LEAVE_TRAIL_PENALTY_S never reaches a reported time.
  */
 import type { RouteLeg, RouteStep } from '../api/routing';
 import { SAC_FACTOR, gradeDeg, sullivanRate } from './costModel';
@@ -149,15 +152,17 @@ function xcLeg(ctx: LegContext, pts: [number, number][]): RouteLeg {
 }
 
 /** Graph runs split into legs where the step LABEL changes (wayLabel: the
- * name, else the ref) or the restriction note does. A ref alone must not
- * split a named way: conflation donates an agency number to only some of an
- * OSM way's edges, and on SISI that turned one walk up Agnes Gorge Trail
- * into two identical "Follow Agnes Gorge Trail" steps. */
+ * name, else the ref) or the restriction does (note, or OSM's restricted
+ * flag — graphLeg reads both from a leg's first edge, so an access=no
+ * stretch must start its own leg). A ref alone must not split a named way:
+ * conflation donates an agency number to only some of an OSM way's edges,
+ * and on SISI that turned one walk up Agnes Gorge Trail into two identical
+ * "Follow Agnes Gorge Trail" steps. */
 function wayKey(rdg: Rdg1, e: number): string {
   const k = rdg.kind[e];
   const road = k === KIND.paved || k === KIND.unpaved || k === KIND.track;
   const label = rdg.name[e] !== NONE ? `n${rdg.name[e]}` : `r${rdg.ref[e]}`;
-  return `${label}|${rdg.note[e]}|${road ? 'r' : 't'}`;
+  return `${label}|${rdg.note[e]}|${rdg.flags[e] & FLAG.restricted}|${road ? 'r' : 't'}`;
 }
 
 export function buildLegs(ctx: LegContext, pieces: Piece[]): RouteLeg[] {
@@ -270,6 +275,26 @@ function dominantVeg(l: RouteLeg): string {
   return top.map(([id]) => vegClass(Number(id)).short).join(' and ');
 }
 
+const isWay = (l: RouteLeg) => l.kind === 'road' || l.kind === 'trail';
+
+/** Same step text: kind, label and restriction. */
+const sameWay = (p: RouteLeg, q: RouteLeg) => p.kind === q.kind && wayLabel(p) === wayLabel(q)
+  && (p.restricted ?? null) === (q.restricted ?? null);
+
+/** Consecutive legs as one step's numbers. */
+function sumLegs(legs: RouteLeg[]): RouteLeg {
+  const out: RouteLeg = { ...legs[0], distanceM: 0, climbM: 0, descentM: 0, durationS: 0, durationRangeS: [0, 0] };
+  for (const l of legs) {
+    out.distanceM += l.distanceM;
+    out.climbM += l.climbM;
+    out.descentM += l.descentM;
+    out.durationS = (out.durationS ?? 0) + (l.durationS ?? 0);
+    out.durationRangeS![0] += l.durationRangeS?.[0] ?? l.durationS ?? 0;
+    out.durationRangeS![1] += l.durationRangeS?.[1] ?? l.durationS ?? 0;
+  }
+  return out;
+}
+
 export function stepsFor(legs: RouteLeg[]): RouteStep[] {
   const steps: RouteStep[] = [];
   let first = true;
@@ -294,12 +319,28 @@ export function stepsFor(legs: RouteLeg[]): RouteStep[] {
       const prev = legs.slice(0, i).reverse().find((p) => !p.minor);
       const label = wayLabel(l);
       if (prev?.kind === 'xc') steps.push({ text: `Join ${label} at ${ll(c[0])}`, distanceM: 0 });
+      // One step per way: fold in the same way after minor (< 50 m)
+      // cross-country hops, which get no step of their own — otherwise the
+      // list read "Follow McGregor Mountain Trail" four times while the
+      // drawn line left the trail between them.
+      const run = [l];
+      let cuts = 0;
+      for (;;) {
+        let k = i + 1;
+        while (k < legs.length && legs[k].minor) k++;
+        if (k >= legs.length || !isWay(legs[k]) || !sameWay(l, legs[k])) break;
+        cuts += k - i - 1;
+        run.push(...legs.slice(i + 1, k + 1));
+        i = k;
+      }
+      const s = run.length > 1 ? sumLegs(run) : l;
       const verb = l.kind === 'road' ? (l.name || l.ref ? 'Continue on' : 'Follow') : 'Follow';
-      const climb = climbText(l);
+      const climb = climbText(s);
+      const cut = cuts ? ` · includes ${cuts === 1 ? 'a short cross-country cut' : `${cuts} short cross-country cuts`}` : '';
       const restr = l.restricted ? ` · Restricted: ${l.restricted}` : '';
       steps.push({
-        text: `${verb} ${label} ${fmtMiles(l.distanceM)}${climb ? `, ${climb}` : ''}${fmtMinRange(l)}${restr}`,
-        distanceM: l.distanceM,
+        text: `${verb} ${label} ${fmtMiles(s.distanceM)}${climb ? `, ${climb}` : ''}${fmtMinRange(s)}${cut}${restr}`,
+        distanceM: s.distanceM,
       });
     }
     first = false;
