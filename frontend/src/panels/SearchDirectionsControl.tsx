@@ -25,7 +25,7 @@ import { track } from '../app/analytics';
 import { useStore } from '../state/store';
 import { useMap } from '../map/MapRoot';
 
-const MY_LOCATION_LABEL = 'My location';
+export const MY_LOCATION_LABEL = 'My location';
 const DEBOUNCE_MS = 350;
 const MIN_CHARS = 3;
 
@@ -40,12 +40,12 @@ export function focusRouteStart(): void {
   startInput.current?.focus();
 }
 
-function fmtDistance(m: number): string {
+export function fmtDistance(m: number): string {
   const mi = m / 1609.344;
   return mi >= 10 ? `${Math.round(mi)} mi` : `${mi.toFixed(1)} mi`;
 }
 
-function fmtDuration(s: number): string {
+export function fmtDuration(s: number): string {
   const min = Math.round(s / 60);
   if (min < 60) return `${min} min`;
   return `${Math.floor(min / 60)} h ${min % 60} min`;
@@ -230,6 +230,10 @@ const MODES: { p: RouteProfile; label: string; Icon: () => JSX.Element }[] = [
   { p: 'hike', label: 'Walk', Icon: WalkIcon },
 ];
 
+export const PROFILE_LABELS = Object.fromEntries(
+  MODES.map((m) => [m.p, m.label]),
+) as Record<RouteProfile, string>;
+
 function endpointEl(which: 'a' | 'b'): HTMLElement {
   const el = document.createElement('div');
   const inner = document.createElement('div');
@@ -394,10 +398,16 @@ export function SearchDirectionsControl() {
     return null;
   };
 
+  // A route from a QR share (share/) stays on screen until this phone routes
+  // the same pins itself — offline Drive can't, a Walk that fails falls back
+  // to it — and whatever replaces it keeps the shared camera.
+  const sharedOnScreen = () => !!useStore.getState().directions.route?.shared;
+
   const applyRoute = (result: import('../api/routing').RouteResult) => {
     setRouteError(null);
+    const fit = !sharedOnScreen();
     actions.setDirectionsRoute(result);
-    if (map) {
+    if (map && fit) {
       let w = Infinity, sMin = Infinity, e = -Infinity, n = -Infinity;
       for (const [x, y] of result.geometry.coordinates) {
         if (x < w) w = x;
@@ -447,7 +457,7 @@ export function SearchDirectionsControl() {
       if (p === 'hike') continue; // the Walk effect owns it
       if (!online) {
         setModes((m) => ({ ...m, [p]: 'offline' }));
-        if (p === 'drive') defaultMode(true);
+        if (p === 'drive' && !sharedOnScreen()) defaultMode(true);
         continue;
       }
       void fetchRoute(a.coords, b.coords, p)
@@ -460,6 +470,7 @@ export function SearchDirectionsControl() {
         .catch(() => {
           if (mySeq !== routeSeq.current) return;
           setModes((m) => ({ ...m, [p]: 'failed' }));
+          if (sharedOnScreen()) return;
           if (p === 'drive') defaultMode(true);
           if (useStore.getState().directions.profile === p) {
             setRouteError(
@@ -481,7 +492,7 @@ export function SearchDirectionsControl() {
     if (!a || !b) return;
     hikeStale.current = true;
     setModes((m) => ({ ...m, hike: 'pending' }));
-    if (useStore.getState().directions.profile === 'hike') {
+    if (useStore.getState().directions.profile === 'hike' && !sharedOnScreen()) {
       // never leave a route computed for other inputs on screen
       actions.setDirectionsRoute(null);
       setRouteError(null);
@@ -511,7 +522,9 @@ export function SearchDirectionsControl() {
           : 'failed';
         setModes((m) => ({ ...m, hike: state }));
         if (err instanceof WalkError) track('walk_route_failed', { code: err.code });
-        if (useStore.getState().directions.profile === 'hike') setRouteError(modeError('hike', state));
+        if (useStore.getState().directions.profile === 'hike' && !sharedOnScreen()) {
+          setRouteError(modeError('hike', state));
+        }
       });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [endpointsKey, walk.key]);
@@ -694,6 +707,12 @@ export function SearchDirectionsControl() {
               {route?.legs && <WalkRouteDetails route={route} />}
               {route && !route.legs && (
                 <div className="rd-sd-result">
+                  {route.shared && (
+                    <div className="rd-sd-note">Shared route, from the phone that shared this view</div>
+                  )}
+                  {route.shared && route.notes?.map((n) => (
+                    <div key={n.code} className="rd-sd-note rd-sd-warn">⚠ {n.text}</div>
+                  ))}
                   <div className="rd-sd-summary">
                     <strong>{fmtDuration(route.durationS)}</strong> · {fmtDistance(route.distanceM)}
                     {route.trafficDelayS != null && route.trafficDelayS > 60 && (

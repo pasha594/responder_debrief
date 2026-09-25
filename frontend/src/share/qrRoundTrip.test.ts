@@ -92,8 +92,12 @@ function share(markers: number, lines: number): ShareState {
       incidents: false,
       incidentMap: { mapId: '0123456789abcdef', series: null, opacity: 0.75 },
       irFlight: null,
+      trails: 'auto',
+      vegetation: { visible: false, opacity: null },
+      land: false,
     },
     drawings,
+    routing: null,
   };
 }
 

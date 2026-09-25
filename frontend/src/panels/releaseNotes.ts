@@ -71,7 +71,7 @@ export const RELEASE_NOTES: ReleaseDay[] = [
       {
         title: 'Share by QR code',
         summary:
-          'The QR button beside 3D shows your map view, layers, incident map and drawings as a code. Another phone scans it with Scan code, no signal needed if both phones downloaded the fire.',
+          'The QR button beside 3D shows your map view, layers, incident map, drawings, directions and dropped pin as a code. Another phone scans it with Scan code, no signal needed if both phones downloaded the fire.',
       },
       {
         title: 'Historic perimeter dates',

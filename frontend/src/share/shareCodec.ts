@@ -16,6 +16,12 @@
  *   u8 forecast product | percentile<<4 · u8 forecast opacity % · arrival hours
  *   weather mask (WIRE_WEATHER bits) + u8 opacity % per set bit
  *   [sheet id] [series key] · u8 sheet opacity % · [IR flight id] · [drawings]
+ *   [more layers: u8 trails mode | vegetation<<2 | land<<3, u8 vegetation %]
+ *   [directions and pin, see writeRouting]
+ *
+ * The last two sections came later, on new flag bits: a code carries them
+ * only when they say something (a route, a pin, a non-default layer), so an
+ * app that predates them still reads every code without them.
  *
  * Drawings: a count, then per mark a head byte — kind in the top 2 bits
  * (marker, turned marker, line), the WIRE_* table index below (63: the id
@@ -24,15 +30,19 @@
  * simplified first (see simplify.ts).
  */
 import type { DrawFeature, ToaMode } from '../state/store';
+import type { RouteEngine, RouteProfile } from '../api/routing';
 import type { Percentile, SpreadProduct, WeatherProduct } from '../api/types';
 import { ByteReader, ByteWriter, ShareFormatError, truncateUtf8 } from './bytes';
-import { simplifyLine, toleranceFor } from './simplify';
+import { routeToleranceFor, simplifyLine, toleranceFor } from './simplify';
 import {
   WIRE_BASEMAPS,
+  WIRE_ENGINES,
   WIRE_LINES,
   WIRE_PERCENTILES,
   WIRE_POINTS,
+  WIRE_PROFILES,
   WIRE_SPREAD,
+  WIRE_TRAILS,
   WIRE_WEATHER,
 } from './wireTables';
 
@@ -63,6 +73,37 @@ export interface ShareLayers {
   incidents: boolean;
   incidentMap: { mapId: string | null; series: string | null; opacity: number };
   irFlight: string | null;
+  trails: (typeof WIRE_TRAILS)[number];
+  /** Opacity is null when the code doesn't say (vegetation off). */
+  vegetation: { visible: boolean; opacity: number | null };
+  land: boolean;
+}
+
+export interface SharePoint {
+  coords: [number, number];
+  label: string;
+}
+
+/** The sender's drawn route: its line and summary, and the warnings it
+ * carried (a Walk route near the fire perimeter). */
+export interface ShareRoute {
+  coordinates: [number, number][];
+  distanceM: number;
+  durationS: number;
+  trafficDelayS: number | null;
+  engine: RouteEngine;
+  notes: { code: string; text: string }[];
+}
+
+/** Directions (both ends, mode, Walk's perimeter setting, the route) and the
+ * dropped pin — replaced together on the recipient's phone. */
+export interface ShareRouting {
+  profile: RouteProfile;
+  avoidPerimeter: boolean;
+  a: SharePoint | null;
+  b: SharePoint | null;
+  route: ShareRoute | null;
+  pin: [number, number] | null;
 }
 
 export interface ShareState {
@@ -78,6 +119,8 @@ export interface ShareState {
   layers: ShareLayers;
   /** Null: not included, so the recipient's drawings stay as they are. */
   drawings: DrawFeature[] | null;
+  /** Null: not included, so the recipient's directions and pin stay. */
+  routing: ShareRouting | null;
 }
 
 const F_TIME = 1 << 0;
@@ -93,12 +136,18 @@ const F_PERIMETERS = 1 << 9;
 const F_HISTORIC = 1 << 10;
 const F_TRAFFIC = 1 << 11;
 const F_INCIDENTS = 1 << 12;
-const KNOWN_FLAGS = (1 << 13) - 1;
+// Later sections — set only when they carry something (see the header).
+const F_MORE_LAYERS = 1 << 13;
+const F_ROUTING = 1 << 14;
+const KNOWN_FLAGS = (1 << 15) - 1;
 
 /** 1e-5° ≈ 1.1 m of latitude: finer than a fingertip at any zoom the app allows. */
 const COORD_SCALE = 1e5;
 const MINUTE = 60_000;
 const NAME_MAX_BYTES = 60;
+const LABEL_MAX_BYTES = 60;
+const NOTE_MAX_BYTES = 160;
+const NOTES_MAX = 8;
 const ESCAPE = 63;
 const KIND_MARKER = 0;
 const KIND_TURNED_MARKER = 1;
@@ -261,10 +310,103 @@ function readDrawings(r: ByteReader, origin: Q): DrawFeature[] {
   return out;
 }
 
+// ---------- directions and pin ----------
+
+const R_PIN = 1;
+const R_A = 2;
+const R_B = 4;
+const R_ROUTE = 8;
+const R_AVOID = 16;
+
+/**
+ * u8 parts (the bits above), u8 travel mode, then what is there: the pin, A
+ * and B (with their labels) as zigzag offsets from the camera center; the
+ * route as u8 engine, metres, seconds, traffic delay + 1 (0: none), its
+ * simplified line as chained deltas, and its warnings (code, text).
+ */
+function writeRouting(w: ByteWriter, r: ShareRouting, origin: Q): void {
+  const route = r.route && r.route.coordinates.length > 1 && r.route.coordinates.every(finite)
+    ? r.route
+    : null;
+  w.u8((r.pin ? R_PIN : 0) | (r.a ? R_A : 0) | (r.b ? R_B : 0)
+    | (route ? R_ROUTE : 0) | (r.avoidPerimeter ? R_AVOID : 0));
+  w.u8(Math.max(0, WIRE_PROFILES.indexOf(r.profile)));
+  const put = ([qx, qy]: Q, [fx, fy]: Q) => {
+    w.zigzag(qx - fx);
+    w.zigzag(qy - fy);
+  };
+  if (r.pin) put(quantize(r.pin), origin);
+  for (const p of [r.a, r.b]) {
+    if (!p) continue;
+    put(quantize(p.coords), origin);
+    w.str(truncateUtf8(p.label, LABEL_MAX_BYTES));
+  }
+  if (!route) return;
+  w.u8(Math.max(0, WIRE_ENGINES.indexOf(route.engine)));
+  w.varint(Math.max(0, Math.round(route.distanceM)));
+  w.varint(Math.max(0, Math.round(route.durationS)));
+  w.varint(route.trafficDelayS == null ? 0 : Math.max(0, Math.round(route.trafficDelayS)) + 1);
+  const pts: Q[] = [];
+  for (const c of simplifyLine(route.coordinates, routeToleranceFor(route.coordinates))) {
+    const q = quantize(c);
+    const last = pts[pts.length - 1];
+    if (!last || last[0] !== q[0] || last[1] !== q[1]) pts.push(q);
+  }
+  if (pts.length === 1) pts.push(pts[0]);
+  w.varint(pts.length);
+  let prev = origin;
+  for (const q of pts) {
+    put(q, prev);
+    prev = q;
+  }
+  const notes = route.notes.slice(0, NOTES_MAX);
+  w.varint(notes.length);
+  for (const n of notes) {
+    w.str(truncateUtf8(n.code, 24));
+    w.str(truncateUtf8(n.text, NOTE_MAX_BYTES));
+  }
+}
+
+function readRouting(r: ByteReader, origin: Q): ShareRouting {
+  const parts = r.u8();
+  if (parts & ~(R_PIN | R_A | R_B | R_ROUTE | R_AVOID)) throw new ShareFormatError('bad directions');
+  const profile = WIRE_PROFILES[r.u8()];
+  if (!profile) throw new ShareFormatError('bad travel mode');
+  const take = ([fx, fy]: Q): Q => [fx + r.zigzag(), fy + r.zigzag()];
+  const deg = ([x, y]: Q): [number, number] => [x / COORD_SCALE, y / COORD_SCALE];
+  const pin = parts & R_PIN ? deg(take(origin)) : null;
+  const point = (): SharePoint => ({ coords: deg(take(origin)), label: r.str() });
+  const a = parts & R_A ? point() : null;
+  const b = parts & R_B ? point() : null;
+  let route: ShareRoute | null = null;
+  if (parts & R_ROUTE) {
+    const engine = WIRE_ENGINES[r.u8()];
+    if (!engine) throw new ShareFormatError('bad route engine');
+    const distanceM = r.varint();
+    const durationS = r.varint();
+    const delay = r.varint();
+    const n = r.varint();
+    if (n < 2 || n * 2 > r.remaining) throw new ShareFormatError('bad route');
+    const coordinates: [number, number][] = [];
+    let prev = origin;
+    for (let i = 0; i < n; i++) {
+      prev = take(prev);
+      coordinates.push(deg(prev));
+    }
+    const count = r.varint();
+    if (count > NOTES_MAX) throw new ShareFormatError('bad route notes');
+    const notes: ShareRoute['notes'] = [];
+    for (let i = 0; i < count; i++) notes.push({ code: r.str(), text: r.str() });
+    route = { coordinates, distanceM, durationS, trafficDelayS: delay ? delay - 1 : null, engine, notes };
+  }
+  return { profile, avoidPerimeter: !!(parts & R_AVOID), a, b, route, pin };
+}
+
 // ---------- body ----------
 
 export function encodeShareBody(s: ShareState): Uint8Array {
   const L = s.layers;
+  const moreLayers = L.trails !== 'auto' || L.vegetation.visible || L.land;
   const w = new ByteWriter();
   let flags = 0;
   if (s.time != null) flags |= F_TIME;
@@ -280,6 +422,8 @@ export function encodeShareBody(s: ShareState): Uint8Array {
   if (L.historic) flags |= F_HISTORIC;
   if (L.traffic) flags |= F_TRAFFIC;
   if (L.incidents) flags |= F_INCIDENTS;
+  if (moreLayers) flags |= F_MORE_LAYERS;
+  if (s.routing) flags |= F_ROUTING;
 
   w.u8(SHARE_FORMAT_VERSION);
   w.varint(flags);
@@ -329,6 +473,12 @@ export function encodeShareBody(s: ShareState): Uint8Array {
   if (L.irFlight) w.str(L.irFlight);
 
   if (s.drawings) writeDrawings(w, s.drawings, center);
+  if (moreLayers) {
+    w.u8(Math.max(0, WIRE_TRAILS.indexOf(L.trails))
+      | (L.vegetation.visible ? 4 : 0) | (L.land ? 8 : 0));
+    w.u8(pct(L.vegetation.opacity ?? 0));
+  }
+  if (s.routing) writeRouting(w, s.routing, center);
   return w.finish();
 }
 
@@ -383,6 +533,20 @@ export function decodeShareBody(b: Uint8Array): ShareState {
   const irFlight = has(F_IR) ? r.str() : null;
 
   const drawings = has(F_DRAWINGS) ? readDrawings(r, center) : null;
+  // absent: the sender had these layers at their defaults
+  let trails: ShareLayers['trails'] = 'auto';
+  let vegetation: ShareLayers['vegetation'] = { visible: false, opacity: null };
+  let land = false;
+  if (has(F_MORE_LAYERS)) {
+    const bits = r.u8();
+    const mode = WIRE_TRAILS[bits & 3];
+    if (!mode || bits & ~15) throw new ShareFormatError('bad layers');
+    const opacity = fromPct(r.u8());
+    trails = mode;
+    vegetation = bits & 4 ? { visible: true, opacity } : { visible: false, opacity: null };
+    land = !!(bits & 8);
+  }
+  const routing = has(F_ROUTING) ? readRouting(r, center) : null;
   if (r.remaining !== 0) throw new ShareFormatError('trailing bytes');
 
   return {
@@ -414,7 +578,11 @@ export function decodeShareBody(b: Uint8Array): ShareState {
       incidents: has(F_INCIDENTS),
       incidentMap: { mapId, series, opacity: sheetOpacity },
       irFlight,
+      trails,
+      vegetation,
+      land,
     },
     drawings,
+    routing,
   };
 }

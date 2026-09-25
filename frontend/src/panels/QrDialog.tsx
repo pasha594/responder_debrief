@@ -22,7 +22,7 @@ import { useFire } from '../api/queries';
 import { track } from '../app/analytics';
 import { useMap } from '../map/MapRoot';
 import { useStore } from '../state/store';
-import { captureShare } from '../share/captureShare';
+import { captureShare, hasRoutingToShare } from '../share/captureShare';
 import { ShareFormatError } from '../share/bytes';
 import { FountainDecoder } from '../share/fountain';
 import { paintQr } from '../share/paintQr';
@@ -100,27 +100,37 @@ function ShowPanel() {
   const corneaId = view.mode === 'fire' ? view.corneaId : null;
   const { data: fire } = useFire(corneaId);
   const markCount = useStore((s) => s.draw.features.length);
+  const hasRouting = useStore(hasRoutingToShare);
   const [withDrawings, setWithDrawings] = useState(markCount > 0);
+  const [withRouting, setWithRouting] = useState(true);
   const fireName = fire?.post_title ?? '';
+  const drawings = withDrawings && markCount > 0;
+  const routing = withRouting && hasRouting;
 
   // Snapshot of the view as the dialog opened: the modal covers the map, so
   // nothing changes under a scanner halfway through an animated run.
   const built = useMemo(() => {
     if (!map) return null;
-    const share = captureShare(map, fireName, withDrawings && markCount > 0);
+    const share = captureShare(map, fireName, { drawings, routing });
     if (!share) return null;
     const body = encodeShareBody(share);
     return { plan: planShareCodes(body, shareLinkPrefix()), bytes: body.length };
-  }, [map, fireName, withDrawings, markCount]);
+  }, [map, fireName, drawings, routing]);
 
   useEffect(() => {
     if (!built) return;
     track('share_code_shown', {
       parts: built.plan.kind === 'single' ? 1 : built.plan.frames,
       bytes: built.bytes,
-      drawings: withDrawings ? markCount : null,
+      drawings: drawings ? markCount : null,
+      directions: routing,
     });
-  }, [built, withDrawings, markCount]);
+  }, [built, drawings, routing, markCount]);
+
+  const contents = ['map view', 'layers', 'incident sheet'];
+  if (drawings) contents.push('drawings');
+  if (routing) contents.push('directions');
+  const listed = `${contents.slice(0, -1).join(', ')} and ${contents[contents.length - 1]}`;
 
   return (
     <div className="rd-qr-show">
@@ -137,14 +147,23 @@ function ShowPanel() {
             : 'No drawings on this fire to include'}
         </span>
       </label>
+      {hasRouting && (
+        <label className="rd-qr-check">
+          <input
+            type="checkbox"
+            checked={withRouting}
+            onChange={(e) => setWithRouting(e.target.checked)}
+          />
+          <span>Include directions and dropped pin — replaces theirs</span>
+        </label>
+      )}
       <div className="rd-qr-frame">
         {built ? <CodeView plan={built.plan} /> : <div className="rd-qr-wait">Preparing code…</div>}
       </div>
       {built && (
         <div className="rd-qr-caption">
           {built.plan.kind === 'single'
-            ? 'One code: map view, layers, incident sheet'
-              + (withDrawings && markCount ? ' and drawings' : '')
+            ? `One code: ${listed}`
             : `Animated code · ${built.plan.frames} parts — keep it on screen until the other phone finishes`}
         </div>
       )}

@@ -2261,6 +2261,7 @@
 .rd-go-btn:disabled { opacity: 0.45; cursor: default; }
 .rd-sd-note { color: var(--color-text-muted); font-size: 11px; line-height: 1.4; }
 .rd-sd-error { color: #ff6467; }
+.rd-sd-warn { color: #e0a24a; } /* the Walk card's warning amber */
 .rd-sd-summary { font-size: 14px; }
 .rd-sd-traffic { color: #ff9f43; }
 .rd-sd-steps summary { cursor: pointer; font-size: 12px; color: var(--color-text-muted); }

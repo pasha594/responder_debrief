@@ -9,9 +9,8 @@ type Pt = [number, number];
 
 const M_PER_DEG = 111_320;
 
-/** Tolerance for one line: 1/200 of its extent, between 0.5 m and 2 m, so a
- * small sketch keeps its detail and a long line sheds the most points. */
-export function toleranceFor(pts: readonly Pt[]): number {
+/** A line's extent: its bounding box diagonal, in metres. */
+function extentM(pts: readonly Pt[]): number {
   let w = Infinity, s = Infinity, e = -Infinity, n = -Infinity;
   for (const [x, y] of pts) {
     if (x < w) w = x;
@@ -20,8 +19,20 @@ export function toleranceFor(pts: readonly Pt[]): number {
     if (y > n) n = y;
   }
   const kx = M_PER_DEG * Math.cos((((s + n) / 2) * Math.PI) / 180);
-  const diag = Math.hypot((e - w) * kx, (n - s) * M_PER_DEG);
-  return Math.min(2, Math.max(0.5, diag / 200));
+  return Math.hypot((e - w) * kx, (n - s) * M_PER_DEG);
+}
+
+/** Tolerance for a drawn line: 1/200 of its extent, between 0.5 m and 2 m,
+ * so a small sketch keeps its detail and a long line sheds the most points. */
+export function toleranceFor(pts: readonly Pt[]): number {
+  return Math.min(2, Math.max(0.5, extentM(pts) / 200));
+}
+
+/** Tolerance for a directions route: 1/1000 of its extent, between 1 m and
+ * 5 m — engines log a point every few metres of road, and a shared route is
+ * a stand-in until the recipient's phone routes the same pins itself. */
+export function routeToleranceFor(pts: readonly Pt[]): number {
+  return Math.min(5, Math.max(1, extentM(pts) / 1000));
 }
 
 export function simplifyLine(pts: readonly Pt[], tolM: number): Pt[] {
