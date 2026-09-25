@@ -9,12 +9,14 @@
  *   veg        RGBA of the vegetation classes for the map layer
  *
  * Endpoint rules: a pin on an impassable cell (open water, > 45°) snaps to
- * the nearest walkable cell within 150 m (SNAP_MOVED); a pin inside the
- * masked perimeter turns avoidance OFF for this route (ENDPOINT_IN_PERIM)
- * rather than failing. When avoidance leaves no path, the search reruns
- * without it and returns `blocked_by_perimeter` with that route attached —
- * shown only if the user asks. The engine never falls back to an online
- * engine: they don't know where the fire is.
+ * the nearest walkable cell within 150 m (SNAP_MOVED). A pin inside the
+ * masked perimeter opens only what it needs (rasterize.releaseEndpoint):
+ * inside a fire polygon, that polygon (ENDPOINT_IN_PERIM); within the 60 m
+ * standoff only, the bit of standoff around it (ENDPOINT_NEAR_PERIM). The
+ * rest of the fire stays blocked. When avoidance leaves no path, the search
+ * reruns without it and returns `blocked_by_perimeter` with that route
+ * attached — shown only if the user asks. The engine never falls back to an
+ * online engine: they don't know where the fire is.
  *
  * Search passes: (1) window around A–B, weight 1, 2.5M settled; if the
  * window has no path, (2) the whole grid, weight 1.2, 4M; if (1) ran out
@@ -27,8 +29,9 @@ import { decodeGrid, type RoutingGrid } from './gridDecode';
 import { buildHybridGraph, cellOf, type HybridGraph } from './hybridGraph';
 import { buildLegs, fmtMiles, stepsFor, totals, type Piece } from './legs';
 import { PACE_LUT } from './pacecode';
-import { rasterizePolygons, type GridPolygon } from './rasterize';
+import { perimeterMask, releaseEndpoint, type GridPolygon } from './rasterize';
 import { gunzip, parseRdg1, type Rdg1 } from './rdg1';
+import { pointInRings } from './safety';
 import { smoothRun } from './smooth';
 import type { RoutingBundle } from './types';
 import { buildVegLut } from './vegClasses';
@@ -54,8 +57,12 @@ const PASS2_CAP = 4_000_000;
 type Pt = { x: number; y: number; cell: number };
 
 export class OffroadEngine {
+  /** perimeterMask: MASK_FIRE / MASK_STANDOFF / 0. */
   mask: Uint8Array | null = null;
   maskKey: string | null = null;
+  /** The same perimeter in grid cell units, for exact inside tests. */
+  private polys: GridPolygon[] | null = null;
+  private standoffCells = 0;
 
   constructor(
     readonly bundle: RoutingBundle,
@@ -90,6 +97,7 @@ export class OffroadEngine {
     this.maskKey = key;
     if (!polygons || !polygons.length) {
       this.mask = null;
+      this.polys = null;
       return 0;
     }
     const k = this.grid.cell;
@@ -97,9 +105,11 @@ export class OffroadEngine {
       const [x, y] = this.toGridM(lon, lat);
       return [x / k, y / k] as [number, number];
     })));
-    this.mask = rasterizePolygons(gp, this.grid.width, this.grid.height, marginM / k);
+    this.polys = gp;
+    this.standoffCells = marginM / k;
+    this.mask = perimeterMask(gp, this.grid.width, this.grid.height, this.standoffCells);
     let n = 0;
-    for (let i = 0; i < this.mask.length; i++) n += this.mask[i];
+    for (let i = 0; i < this.mask.length; i++) if (this.mask[i]) n++;
     return n;
   }
 
@@ -258,6 +268,35 @@ export class OffroadEngine {
     };
   }
 
+  /** The mask to route on: `mask` itself, or a copy with the part each
+   * masked pin needs opened (rasterize.releaseEndpoint). Adds the notes. */
+  private releaseEndpoints(mask: Uint8Array, a: [number, number], b: [number, number],
+    notes: RouteNote[]): Uint8Array {
+    const k = this.grid.cell;
+    const inside: string[] = [];
+    const near: string[] = [];
+    let out = mask;
+    for (const [p, who] of [[a, 'A'], [b, 'B']] as const) {
+      const cell = cellOf(this.grid, p[0], p[1]);
+      if (cell < 0 || !mask[cell]) continue;
+      const isIn = (this.polys ?? []).some((poly) => pointInRings([p[0] / k, p[1] / k], poly));
+      if (out === mask) out = mask.slice();
+      releaseEndpoint(out, this.grid.width, this.grid.height, cell, isIn, this.standoffCells);
+      (isIn ? inside : near).push(who);
+    }
+    const who = (w: string[]) => (w.length > 1 ? 'A and B are' : `${w[0]} is`);
+    const them = (w: string[]) => (w.length > 1 ? 'them' : w[0]);
+    if (inside.length) {
+      notes.push({ level: 'warn', code: 'ENDPOINT_IN_PERIM',
+        text: `${who(inside)} inside the latest mapped fire perimeter, so the route may cross the fire near ${them(inside)}. The rest of the perimeter is still avoided.` });
+    }
+    if (near.length) {
+      notes.push({ level: 'warn', code: 'ENDPOINT_NEAR_PERIM',
+        text: `${who(near)} within ${PERIMETER_STANDOFF_M} m of the latest mapped fire perimeter. The route passes through the standoff near ${them(near)} but still avoids the fire.` });
+    }
+    return out;
+  }
+
   /** Sliced route: yields settled counts; returns the result. */
   *route(aLL: [number, number], bLL: [number, number], opts: RouteOptions)
     : Generator<number, OffroadResult, void> {
@@ -269,19 +308,7 @@ export class OffroadEngine {
     const a = this.toGridM(...aLL);
     const b = this.toGridM(...bLL);
     const notes: RouteNote[] = [];
-    let mask = opts.avoidPerimeter ? this.mask : null;
-    if (mask) {
-      const ca = cellOf(this.grid, a[0], a[1]);
-      const cb = cellOf(this.grid, b[0], b[1]);
-      const inA = ca >= 0 && mask[ca] === 1;
-      const inB = cb >= 0 && mask[cb] === 1;
-      if (inA || inB) {
-        mask = null;
-        const who = inA && inB ? 'A and B are' : inA ? 'A is' : 'B is';
-        notes.push({ level: 'warn', code: 'ENDPOINT_IN_PERIM',
-          text: `${who} inside the latest fire perimeter (or its ${PERIMETER_STANDOFF_M} m standoff) — perimeter avoidance is off for this route.` });
-      }
-    }
+    const mask = opts.avoidPerimeter && this.mask ? this.releaseEndpoints(this.mask, a, b, notes) : null;
     const tryRoute = function* (self: OffroadEngine, m: Uint8Array | null)
       : Generator<number, OffroadResult | { s: HybridSearch; weighted: boolean; notes: RouteNote[] }, void> {
       const n2: RouteNote[] = [];

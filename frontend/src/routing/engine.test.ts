@@ -109,12 +109,49 @@ describe('OffroadEngine on the synthetic bundle', () => {
     e.setPerimeter(null, null);
   });
 
+  const entersSquare = (r: { geometry: { coordinates: [number, number][] } }, cx: number, cy: number,
+    half: number) => r.geometry.coordinates.some(([lon, lat]) => {
+    const [x, y] = lonLatToUtm(lon, lat, 11);
+    return Math.abs(x - CX - cx) < half && Math.abs(y - CY - cy) < half;
+  });
+
   it('routes anyway when an endpoint is inside the perimeter', async () => {
     const e = await engineP;
     e.setPerimeter('p2', square(0, 0, 1200));
     const r = ok(routeSync(e, at(100, 100), at(3000, 4000), { avoidPerimeter: true }));
     expect(r.notes!.find((n) => n.code === 'ENDPOINT_IN_PERIM')?.text).toMatch(/^A is inside/);
-    expect(r.provenance!.avoidPerimeter).toBe(false);
+    expect(r.provenance!.avoidPerimeter).toBe(true);
+    e.setPerimeter(null, null);
+  });
+
+  it('a pin within the standoff, outside the fire, still routes around the fire', async () => {
+    // SISI: a pin 45 m outside the edge turned avoidance off for the whole
+    // route, which then ran down the PCT through the fire.
+    const e = await engineP;
+    e.setPerimeter('p3', square(0, 0, 1200));
+    const r = ok(routeSync(e, at(-3000, -4000), at(1245, 0), { avoidPerimeter: true }));
+    expect(entersSquare(r, 0, 0, 1200)).toBe(false);
+    // and it crosses the 60 m ring only near B, not along the fire's edge
+    const hugs = r.geometry.coordinates.filter(([lon, lat]) => {
+      const [x, y] = lonLatToUtm(lon, lat, 11);
+      const d = Math.max(Math.abs(x - CX), Math.abs(y - CY)) - 1200;
+      return d < 30 && Math.hypot(x - CX - 1245, y - CY) > 150;
+    });
+    expect(hugs).toEqual([]);
+    const codes = r.notes!.map((n) => n.code);
+    expect(codes).toContain('ENDPOINT_NEAR_PERIM');
+    expect(codes).not.toContain('ENDPOINT_IN_PERIM');
+    expect(r.notes!.find((n) => n.code === 'ENDPOINT_NEAR_PERIM')!.text).toMatch(/^B is within 60 m/);
+    expect(r.provenance!.avoidPerimeter).toBe(true);
+    e.setPerimeter(null, null);
+  });
+
+  it('a pin inside a spot fire opens that spot only, not the main fire', async () => {
+    const e = await engineP;
+    e.setPerimeter('p4', [...square(0, 0, 1200), ...square(-3000, -3800, 100)]);
+    const r = ok(routeSync(e, at(-3000, -3800), at(3000, 4000), { avoidPerimeter: true }));
+    expect(entersSquare(r, 0, 0, 1200)).toBe(false);
+    expect(r.notes!.find((n) => n.code === 'ENDPOINT_IN_PERIM')?.text).toMatch(/^A is inside .* near A\./);
     e.setPerimeter(null, null);
   });
 

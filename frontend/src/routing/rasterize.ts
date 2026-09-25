@@ -3,18 +3,30 @@
  * coordinates (fractional col, row; bundleIndex.toGrid). A cell is masked
  * when its centre is inside (even-odd per polygon, so holes stay open), when
  * any perimeter edge touches it (supercover — a thin sliver still blocks), or
- * when it is within the standoff of either (disk dilation).
+ * when it is within the standoff of either (disk dilation). perimeterMask
+ * keeps the two apart (MASK_FIRE / MASK_STANDOFF) so the engine can let a pin
+ * out of the standoff without opening the fire.
  */
 export type GridRing = [number, number][];
 export type GridPolygon = GridRing[];
+
+/** perimeterMask values; 0 = open. */
+export const MASK_STANDOFF = 1;
+export const MASK_FIRE = 2;
 
 function setCell(mask: Uint8Array, w: number, h: number, c: number, r: number): void {
   if (c >= 0 && r >= 0 && c < w && r < h) mask[r * w + c] = 1;
 }
 
-/** Every cell a segment passes through (Amanatides–Woo). */
-function supercover(mask: Uint8Array, w: number, h: number, x0: number, y0: number,
-  x1: number, y1: number): void {
+/**
+ * Every cell a segment passes through (Amanatides–Woo), in cell units:
+ * `visit(col, row)`; return true to stop early. A segment through a cell
+ * corner visits both cells beside that corner, so a line can't slip
+ * diagonally between two cells it touches. Unclamped: cells may lie
+ * outside the grid.
+ */
+export function supercoverCells(x0: number, y0: number, x1: number, y1: number,
+  visit: (c: number, r: number) => boolean | void): void {
   let c = Math.floor(x0);
   let r = Math.floor(y0);
   const c1 = Math.floor(x1);
@@ -27,18 +39,31 @@ function supercover(mask: Uint8Array, w: number, h: number, x0: number, y0: numb
   const tdy = dy !== 0 ? Math.abs(1 / dy) : Infinity;
   let tx = dx !== 0 ? (dx > 0 ? c + 1 - x0 : x0 - c) * tdx : Infinity;
   let ty = dy !== 0 ? (dy > 0 ? r + 1 - y0 : y0 - r) * tdy : Infinity;
-  setCell(mask, w, h, c, r);
+  if (visit(c, r)) return;
   let guard = Math.abs(c1 - c) + Math.abs(r1 - r) + 2;
   while ((c !== c1 || r !== r1) && guard-- > 0) {
-    if (tx < ty) {
+    if (Math.abs(tx - ty) < 1e-9) {
+      // exactly through a corner: both side cells, then the diagonal one
+      if (visit(c + sx, r) || visit(c, r + sy)) return;
+      tx += tdx;
+      ty += tdy;
+      c += sx;
+      r += sy;
+      guard--;
+    } else if (tx < ty) {
       tx += tdx;
       c += sx;
     } else {
       ty += tdy;
       r += sy;
     }
-    setCell(mask, w, h, c, r);
+    if (visit(c, r)) return;
   }
+}
+
+function supercover(mask: Uint8Array, w: number, h: number, x0: number, y0: number,
+  x1: number, y1: number): void {
+  supercoverCells(x0, y0, x1, y1, (c, r) => setCell(mask, w, h, c, r));
 }
 
 function fillPolygon(mask: Uint8Array, w: number, h: number, poly: GridPolygon): void {
@@ -106,4 +131,80 @@ export function rasterizePolygons(polys: GridPolygon[], w: number, h: number,
   const mask = new Uint8Array(w * h);
   for (const p of polys) fillPolygon(mask, w, h, p);
   return dilate(mask, w, h, standoffCells);
+}
+
+/** rasterizePolygons with the fire itself marked MASK_FIRE and the standoff
+ * ring MASK_STANDOFF. */
+export function perimeterMask(polys: GridPolygon[], w: number, h: number,
+  standoffCells: number): Uint8Array {
+  const fire = new Uint8Array(w * h);
+  for (const p of polys) fillPolygon(fire, w, h, p);
+  const d = dilate(fire, w, h, standoffCells);
+  const out = d === fire ? fire.slice() : d;
+  for (let i = 0; i < out.length; i++) if (fire[i]) out[i] = MASK_FIRE;
+  return out;
+}
+
+/**
+ * Open the part of a perimeterMask that a route pin needs, in place (pass a
+ * copy). Avoidance stays on everywhere else — turning it off for the whole
+ * route sent a pin 45 m outside the SISI fire straight through it.
+ *
+ *  inside   the pin is in a fire polygon: open the fire cells connected to
+ *           its cell (8-neighbour) and the standoff cells within
+ *           `standoffCells` of them. Other polygons stay blocked.
+ *  outside  the pin is only within the standoff: open its own cell (an edge
+ *           cell can be MASK_FIRE yet outside the polygon) and the standoff
+ *           cells connected to it within `standoffCells + 1.5` cells — enough
+ *           to walk out of the ring, not to follow it round the fire.
+ */
+export function releaseEndpoint(mask: Uint8Array, w: number, h: number, cell: number,
+  inside: boolean, standoffCells: number): void {
+  if (cell < 0 || cell >= w * h || !mask[cell]) return;
+  const fire = inside && mask[cell] === MASK_FIRE;
+  const want = fire ? MASK_FIRE : MASK_STANDOFF;
+  const c0 = cell % w;
+  const r0 = (cell - c0) / w;
+  const lim2 = fire ? Infinity : (standoffCells + 1.5) ** 2;
+  const OPENING = 3;
+  const opened: number[] = [cell];
+  mask[cell] = OPENING;
+  for (let q = 0; q < opened.length; q++) {
+    const i = opened[q];
+    const c = i % w;
+    const r = (i - c) / w;
+    for (let dr = -1; dr <= 1; dr++) {
+      for (let dc = -1; dc <= 1; dc++) {
+        const nc = c + dc;
+        const nr = r + dr;
+        if (nc < 0 || nr < 0 || nc >= w || nr >= h) continue;
+        const j = nr * w + nc;
+        if (mask[j] !== want || (nc - c0) ** 2 + (nr - r0) ** 2 > lim2) continue;
+        mask[j] = OPENING;
+        opened.push(j);
+      }
+    }
+  }
+  if (fire) {
+    // the opened polygon's own standoff: its boundary cells stamp a disk,
+    // as in dilate(); another polygon's fire cells stay blocked
+    const R = Math.ceil(standoffCells);
+    const r2 = standoffCells * standoffCells + 1e-9;
+    for (const i of opened) {
+      const c = i % w;
+      const r = (i - c) / w;
+      const edge = c === 0 || r === 0 || c === w - 1 || r === h - 1 || mask[i - 1] !== OPENING
+        || mask[i + 1] !== OPENING || mask[i - w] !== OPENING || mask[i + w] !== OPENING;
+      if (!edge) continue;
+      for (let dr = -R; dr <= R; dr++) {
+        for (let dc = -R; dc <= R; dc++) {
+          const nc = c + dc;
+          const nr = r + dr;
+          if (dr * dr + dc * dc > r2 || nc < 0 || nr < 0 || nc >= w || nr >= h) continue;
+          if (mask[nr * w + nc] === MASK_STANDOFF) mask[nr * w + nc] = 0;
+        }
+      }
+    }
+  }
+  for (const i of opened) mask[i] = 0;
 }

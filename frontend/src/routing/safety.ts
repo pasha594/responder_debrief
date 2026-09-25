@@ -6,7 +6,9 @@
 export type LonLat = [number, number];
 export type PolygonRings = LonLat[][];
 
-function pointInRings(p: LonLat, rings: PolygonRings): boolean {
+/** Even-odd point-in-polygon over all rings (holes stay out). Planar, so it
+ * also serves grid coordinates (engine.ts). */
+export function pointInRings(p: LonLat, rings: PolygonRings): boolean {
   let inside = false;
   for (const ring of rings) {
     for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
