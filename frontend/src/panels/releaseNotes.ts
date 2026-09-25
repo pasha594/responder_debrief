@@ -56,7 +56,7 @@ export const RELEASE_NOTES: ReleaseDay[] = [
       {
         title: 'Infrared (IR) flights on the map for more fires',
         summary:
-          'Nightly IR heat now shows on the map for fires whose teams publish only a KMZ, like Sisi, drawn with the same symbols and legend as the IR PDF. Flights sit under their day in the Maps tab with when the plane flew.',
+          'Nightly IR heat now shows on the map for fires whose teams publish only a KMZ, like Sisi, drawn with the same symbols and legend as the IR PDF. Flights sit under their day in the Maps tab with a thumbnail of the IR PDF and when the plane flew.',
       },
       {
         title: 'Tidier map corners',

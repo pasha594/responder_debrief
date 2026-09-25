@@ -373,6 +373,8 @@ export interface IrFlight {
   heat_types: string[];
   estimated_acres: number | null;
   pdf_url: string | null;
+  /** First page of the flight's PDF, like a map sheet's card thumbnail. */
+  preview_url?: string | null;
   kmz_url: string | null;
   readme_url: string | null;
 }

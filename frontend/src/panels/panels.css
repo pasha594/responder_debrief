@@ -892,6 +892,8 @@
 
 .rd-ir-row {
   position: relative; /* corner open-PDF icon anchors here */
+  display: flex; /* thumbnail + body, like a map card */
+  gap: 10px;
   padding: 8px;
   margin-bottom: 6px;
   border: 1px solid var(--color-border);
