@@ -14,6 +14,27 @@ import { flipLatestLine } from '../map/layers/drawPlan';
 import { useCompactControls } from '../utils/useMediaQuery';
 import { useDismiss } from '../utils/useDismiss';
 
+/** Hooked arrow for Undo; Redo gets its mirror image. Stroked like the locate icon. */
+function UndoRedoIcon({ redo = false }: { redo?: boolean }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      width="15"
+      height="15"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      style={redo ? { transform: 'scaleX(-1)' } : undefined}
+    >
+      <path d="M9 14 4 9l5-5" />
+      <path d="M4 9h10.5a5 5 0 0 1 0 10H11" />
+    </svg>
+  );
+}
+
 export function DrawMapToolbar({ placement }: { placement: 'corner' | 'stack' }) {
   const tabOpen = useStore((s) => s.ui.sidebarTab === 'draw');
   const draw = useStore((s) => s.draw);
@@ -97,7 +118,7 @@ export function DrawMapToolbar({ placement }: { placement: 'corner' | 'stack' })
               disabled={!draw.past.length}
               title="Undo"
             >
-              ↩ Undo
+              <UndoRedoIcon /> Undo
             </button>
             <button
               type="button"
@@ -106,7 +127,7 @@ export function DrawMapToolbar({ placement }: { placement: 'corner' | 'stack' })
               disabled={!draw.future.length}
               title="Redo"
             >
-              ↪ Redo
+              <UndoRedoIcon redo /> Redo
             </button>
           </div>
           <button
