@@ -12,6 +12,7 @@ import {
   type WeatherProductMeta,
 } from '../../api/types';
 import { useStore } from '../../state/store';
+import { weatherCoverage } from '../../timeline/framePlan';
 import { formatDateTime, formatRelative } from '../../utils/format';
 import { GradientLegend } from '../../utils/GradientLegend';
 
@@ -21,11 +22,14 @@ function WeatherRow({
   product,
   meta,
   legendTemplate,
+  coverage,
   arrowNote,
 }: {
   product: WeatherProduct;
   meta: WeatherProductMeta;
   legendTemplate: string | undefined;
+  /** The run's rendered-hour span; turning a layer on outside it jumps the playhead to its start. */
+  coverage: [number, number] | null;
   /** True on wind rows when the run carries U/V grids (arrows will render). */
   arrowNote?: boolean;
 }) {
@@ -43,7 +47,14 @@ function WeatherRow({
           <input
             type="checkbox"
             checked={visible}
-            onChange={(e) => actions.setWeatherLayer(product, { visible: e.target.checked })}
+            onChange={(e) => {
+              const on = e.target.checked;
+              const t = useStore.getState().time.currentTime;
+              if (on && coverage && (t < coverage[0] || t > coverage[1])) {
+                actions.setTime(coverage[0]);
+              }
+              actions.setWeatherLayer(product, { visible: on });
+            }}
           />
           <span>{label}</span>
         </label>
@@ -111,6 +122,7 @@ export function WeatherSection() {
           return meta ? ([[p, meta]] as [WeatherProduct, WeatherProductMeta][]) : [];
         });
         const hasArrows = !!run.frames?.wind_uv_template;
+        const coverage = weatherCoverage(run);
         return (
           <div key={modelId}>
             <h3 className="rd-section-title">
@@ -127,6 +139,7 @@ export function WeatherSection() {
                 product={p}
                 meta={meta}
                 legendTemplate={model.legend_template}
+                coverage={coverage}
                 arrowNote={hasArrows && (p === 'ws' || p === 'wg')}
               />
             ))}

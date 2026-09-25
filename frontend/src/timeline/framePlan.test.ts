@@ -6,6 +6,7 @@ import {
   resolveWeatherFrame,
   spreadCoverage,
   spreadHourTicks,
+  weatherCoverage,
 } from './framePlan';
 import type { PyrecastRun, WeatherRun } from '../api/types';
 
@@ -151,6 +152,21 @@ describe('weatherHours with an empty frames block', () => {
     expect(weatherHours(run)).toEqual([]);
     // legacy manifests (no frames block) still fall back to the hour list
     expect(weatherHours({ ...run, frames: undefined })).toHaveLength(2);
+  });
+});
+
+describe('weatherCoverage', () => {
+  it('spans the first to last rendered hour', () => {
+    expect(weatherCoverage(weatherRun)).toEqual([
+      T('2026-08-17T12:00:00Z'),
+      T('2026-08-17T14:00:00Z'),
+    ]);
+  });
+  it('null when nothing is rendered', () => {
+    expect(weatherCoverage(null)).toBeNull();
+    expect(
+      weatherCoverage({ ...weatherRun, frames: { hours: [] } } as unknown as WeatherRun),
+    ).toBeNull();
   });
 });
 

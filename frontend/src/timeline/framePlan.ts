@@ -92,6 +92,15 @@ export function weatherHours(run: WeatherRun | null): string[] {
   return run.frames ? (run.frames.hours ?? []) : (run.hours ?? []);
 }
 
+/** [first, last] rendered hour (epoch ms), or null when nothing is rendered. */
+export function weatherCoverage(run: WeatherRun | null): [number, number] | null {
+  const hours = weatherHours(run);
+  if (!hours.length) return null;
+  const t0 = Date.parse(hours[0]);
+  const t1 = Date.parse(hours[hours.length - 1]);
+  return Number.isFinite(t0) && Number.isFinite(t1) ? [t0, t1] : null;
+}
+
 /**
  * Nearest rendered hour within tolerance (90 min), else null (layer hides +
  * chip). Weather frames are per-hour image swaps.
