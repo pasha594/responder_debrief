@@ -214,3 +214,15 @@ describe('legs helpers', () => {
     expect(fmtDur(120 * 60)).toBe('2 h');
   });
 });
+
+describe('gunzip', () => {
+  it('passes through bytes a server already inflated (Content-Encoding: gzip)', async () => {
+    const { gunzip, parseRdg1 } = await import('./rdg1');
+    const gz = buf('graph.bin.gz');
+    const raw = await gunzip(gz);
+    expect(new Uint8Array(raw, 0, 4)).toEqual(new Uint8Array([0x52, 0x44, 0x47, 0x31]));
+    const again = await gunzip(raw);
+    expect(again).toBe(raw);
+    expect(parseRdg1(again).strings).toContain('FS 100');
+  });
+});

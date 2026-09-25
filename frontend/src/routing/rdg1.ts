@@ -31,7 +31,13 @@ export interface Rdg1 {
   strings: string[];
 }
 
+/** graph.bin.gz → raw RDG1. Some servers (Vite's dev server, a proxy)
+ * label .gz files Content-Encoding: gzip, and fetch then hands back the
+ * already-inflated bytes — so only inflate what still starts with the gzip
+ * magic. */
 export async function gunzip(buf: ArrayBuffer): Promise<ArrayBuffer> {
+  const head = new Uint8Array(buf, 0, Math.min(2, buf.byteLength));
+  if (head[0] !== 0x1f || head[1] !== 0x8b) return buf;
   const stream = new Blob([buf]).stream().pipeThrough(new DecompressionStream('gzip'));
   return new Response(stream).arrayBuffer();
 }
