@@ -16,13 +16,14 @@ import { loadFireBundle } from '../../routing/hooks';
 import { utmBoundsTo4326 } from '../../spread/utm';
 import { useStore } from '../../state/store';
 import type { LayerManager } from '../layerTypes';
+import { OSM_CREDIT } from '../pmtilesSource';
 import { beforeIdFor } from '../zOrder';
 
 const SRC = 'rd-routing-area';
 const LYR = 'rd-routing-area';
 const EMPTY = { type: 'FeatureCollection', features: [] } as GeoJSON.GeoJSON;
-export const WALK_ATTRIBUTION = 'Walk routes: <a href="https://www.openstreetmap.org/copyright" target="_blank" '
-  + 'rel="noopener">© OpenStreetMap contributors</a> (ODbL) · USFS · BLM · NPS · LANDFIRE · USGS NHD';
+/** Only the ODbL credit: the agency sources are on the Sources page. */
+export const WALK_ATTRIBUTION = OSM_CREDIT;
 
 let unsubscribe: (() => void) | null = null;
 let lastKey = '';

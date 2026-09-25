@@ -28,6 +28,7 @@ import { routeClickClaims, useStore } from '../../state/store';
 import { rdLabelFont } from '../glyphFonts';
 import type { LayerManager } from '../layerTypes';
 import {
+  OSM_CREDIT,
   ensurePmtilesProtocol,
   fireTrailsArchive,
   nationalTrailsArchive,
@@ -104,7 +105,7 @@ async function resolveArchive(online: boolean, corneaId: string | null): Promise
     key: `fire-http:${b.bundle_id}`,
     kind: 'fire',
     url: `pmtiles://${dataUrl(t.path)}`,
-    attribution: 'Trails: USFS · BLM · NPS · © OpenStreetMap contributors',
+    attribution: OSM_CREDIT, // the per-fire extract carries OSM ways
   };
 }
 

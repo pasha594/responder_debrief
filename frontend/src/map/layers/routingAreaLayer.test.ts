@@ -59,7 +59,8 @@ describe('routingAreaLayer', () => {
     routingAreaLayer.mount(map as never);
     const src = map.sources.get('rd-routing-area')!;
     expect(src.spec.attribution).toBe(WALK_ATTRIBUTION);
-    expect(WALK_ATTRIBUTION).toMatch(/OpenStreetMap contributors.*ODbL/);
+    expect(WALK_ATTRIBUTION).toContain('© OpenStreetMap contributors');
+    expect(WALK_ATTRIBUTION).not.toMatch(/USFS|BLM|NPS|LANDFIRE|NHD/); // Sources page
     const vis = () => map.layers.get('rd-routing-area')!.layout.visibility;
     expect(vis()).toBe('none'); // Drive: no credit in the attribution control
 

@@ -47,6 +47,12 @@ export class OpfsFileSource implements Source {
   }
 }
 
+/** The one credit the map itself must carry for OSM-derived data (ODbL);
+ * the public-domain agency sources (USFS, BLM, NPS, LANDFIRE, USGS) are
+ * credited on the Sources page instead (owner call). */
+export const OSM_CREDIT =
+  '<a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">© OpenStreetMap contributors</a>';
+
 export interface TrailsArchive {
   /** Recreate the MapLibre source when this changes. */
   key: string;
@@ -62,7 +68,7 @@ export function nationalTrailsArchive(p: TrailsPointer): TrailsArchive {
     key: `national:${p.build_id}`,
     kind: 'national',
     url: `pmtiles://${http}`,
-    attribution: p.attribution || 'Trails: USFS · BLM · NPS',
+    attribution: '', // agency trails only: credited on the Sources page
   };
 }
 
@@ -76,6 +82,6 @@ export function fireTrailsArchive(bundle: RoutingBundle, file: File): TrailsArch
     key,
     kind: 'fire',
     url: `pmtiles://${key}`,
-    attribution: 'Trails: USFS · BLM · NPS · © OpenStreetMap contributors',
+    attribution: OSM_CREDIT, // the extract carries OSM ways
   };
 }
