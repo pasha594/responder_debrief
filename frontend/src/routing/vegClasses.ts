@@ -8,7 +8,7 @@
  * pace band; the router itself only reads the pace.
  */
 export const STREAM_BIT = 0x10;
-export const STREAM_COLOR = '#2f8fd8';
+export const STREAM_COLOR = '#7cc4f2'; // light blue: a creek, lighter than water
 /** Legend text for the stream bit: only creeks carry it now; a river
  * draws as class 10. */
 export const STREAM_LABEL = 'Perennial creek (crossable)';
@@ -37,8 +37,8 @@ export const VEG_CLASSES: VegClass[] = [
   { id: 8, key: 'developed', label: 'Developed / agriculture', short: 'developed ground', color: '#d9b9a3' },
   // impassable since COST_GRID_VERSION 3 (glaciers and permanent snow/ice)
   { id: 9, key: 'snow', label: 'Snow / ice (impassable)', short: 'snow and ice', color: '#e6f2ff', impassable: true },
-  { id: 10, key: 'water', label: 'Open water or river (impassable)', legend: 'Water / river (impassable)', short: 'water', color: '#3b78c2', impassable: true },
-  { id: 11, key: 'steep', label: 'Too steep > 45° (impassable)', short: 'steep ground', color: '#5b3a29', impassable: true },
+  { id: 10, key: 'water', label: 'Open water or river (impassable)', legend: 'Water / river (impassable)', short: 'water', color: '#1f4e9c', impassable: true },
+  { id: 11, key: 'steep', label: 'Steep >45° (impassable)', short: 'steep ground', color: '#4a4a4a', impassable: true },
 ];
 
 export const vegClass = (id: number): VegClass => VEG_CLASSES[id & 0x0f] ?? VEG_CLASSES[0];
