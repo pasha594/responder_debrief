@@ -7,18 +7,20 @@
  *     engines don't, so a "no path" or "blocked by the perimeter" here
  *     never falls back to them.
  *  2. Otherwise, offline → an explicit error (not the generic "no route").
- *  3. Otherwise → ORS / Valhalla, with ONLINE_NO_PERIM always, CROSSES_PERIM
- *     when the line enters the latest perimeter, and any end the engine
- *     couldn't reach (they snap up to tens of km) drawn as a dotted,
- *     untimed straight 'gap' leg — or, when that gap lies inside the fire's
- *     routing area, modeled cross-country by the on-device router.
+ *  3. Otherwise → ORS / Valhalla, with ONLINE_NO_PERIM always, and any end
+ *     the engine couldn't reach (they snap up to tens of km) drawn as a
+ *     dotted, untimed straight 'gap' leg — or, when that gap lies inside the
+ *     fire's routing area, modeled cross-country by the on-device router.
+ * Either way the drawn line is checked against the latest perimeter, with
+ * avoidance on or off: CROSSES_PERIM when it enters it, NEAR_PERIM within
+ * 200 m, PERIM_OLD when the perimeter is over 12 h old.
  */
 import { routeHikeOnline, type RouteLeg, type RouteNote, type RouteResult } from './routing';
 import type { PerimeterFeature } from './types';
 import { insideRoutingArea } from '../routing/bundleIndex';
 import { loadPackedBundle } from '../routing/hooks';
 import { ensureBundle, routeOffroad, setPerimeter } from '../routing/offroadClient';
-import { ageHours, crossesPerimeter, metresBetween, polygonsOf } from '../routing/safety';
+import { ageHours, crossesPerimeter, metresBetween, nearestApproachM, polygonsOf } from '../routing/safety';
 import type { RoutingBundle } from '../routing/types';
 
 type LonLat = [number, number];
@@ -53,6 +55,7 @@ export class WalkError extends Error {
 
 const GAP_M = 25;
 const PERIM_OLD_H = 12;
+const NEAR_PERIM_M = 200;
 
 export const WALK_ERROR_TEXT: Record<WalkErrorCode, string> = {
   'offline-no-bundle': "Offline walking routes aren't available for this fire yet.",
@@ -66,16 +69,24 @@ export const WALK_ERROR_TEXT: Record<WalkErrorCode, string> = {
   superseded: '',
 };
 
-function perimeterNotes(p: WalkPerimeter | null, ctx: WalkContext, avoided: boolean): RouteNote[] {
+/** The latest perimeter against the line actually drawn — whether or not
+ * the route avoided it (a pin inside the fire, avoidance off, an online
+ * engine). */
+function perimeterNotes(p: WalkPerimeter | null, line: LonLat[], nowMs: number): RouteNote[] {
   const out: RouteNote[] = [];
-  if (!p) {
-    if (ctx.avoidPerimeter) {
-      out.push({ level: 'warn', code: 'NO_PERIMETER', text: 'Fire perimeter unavailable — route does not avoid the fire.' });
+  if (!p) return out;
+  const polys = polygonsOf(p.feature.geometry);
+  if (crossesPerimeter(line, polys)) {
+    out.push({ level: 'warn', code: 'CROSSES_PERIM', text: 'This route crosses the latest mapped fire perimeter.' });
+  } else {
+    const d = nearestApproachM(line, polys, NEAR_PERIM_M);
+    if (d != null) {
+      out.push({ level: 'warn', code: 'NEAR_PERIM',
+        text: `This route passes within ${Math.max(10, Math.round(d / 10) * 10)} m of the latest mapped fire perimeter.` });
     }
-    return out;
   }
-  const age = ageHours(p.date, ctx.nowMs);
-  if (avoided && age != null && age > PERIM_OLD_H) {
+  const age = ageHours(p.date, nowMs);
+  if (age != null && age > PERIM_OLD_H) {
     out.push({ level: 'warn', code: 'PERIM_OLD', text: `Fire perimeter is ${Math.round(age)} h old — the fire may have moved.` });
   }
   return out;
@@ -114,8 +125,12 @@ async function offroad(a: LonLat, b: LonLat, bundleIn: RoutingBundle, ctx: WalkC
     ctx.onStatus?.(null);
   }
   if (res.ok) {
-    res.route.notes = [...(res.route.notes ?? []),
-      ...perimeterNotes(perim, ctx, !!res.route.provenance?.avoidPerimeter)];
+    const notes = [...(res.route.notes ?? []),
+      ...perimeterNotes(perim, res.route.geometry.coordinates, ctx.nowMs)];
+    if (!perim && ctx.avoidPerimeter) {
+      notes.push({ level: 'warn', code: 'NO_PERIMETER', text: 'Fire perimeter unavailable — route does not avoid the fire.' });
+    }
+    res.route.notes = notes;
     return res.route;
   }
   if (res.code === 'superseded') throw new WalkError('superseded', '');
@@ -166,10 +181,6 @@ async function online(a: LonLat, b: LonLat, ctx: WalkContext): Promise<RouteResu
   legs.push({ kind: 'net', coordinates: coords, distanceM: base.distanceM, climbM: 0, descentM: 0,
     durationS: base.durationS });
   legs.push(...(await gap(coords[coords.length - 1], b)));
-  const perim = await ctx.getPerimeter().catch(() => null);
-  if (perim && crossesPerimeter(coords, polygonsOf(perim.feature.geometry))) {
-    notes.push({ level: 'warn', code: 'CROSSES_PERIM', text: 'This route crosses the latest mapped fire perimeter.' });
-  }
   const all: LonLat[] = [];
   let dist = 0;
   let dur = 0;
@@ -184,6 +195,8 @@ async function online(a: LonLat, b: LonLat, ctx: WalkContext): Promise<RouteResu
       slow += l.durationRangeS?.[1] ?? l.durationS;
     }
   }
+  const perim = await ctx.getPerimeter().catch(() => null);
+  notes.push(...perimeterNotes(perim, all, ctx.nowMs));
   return {
     ...base,
     geometry: { type: 'LineString', coordinates: all },
@@ -199,7 +212,8 @@ async function online(a: LonLat, b: LonLat, ctx: WalkContext): Promise<RouteResu
 export async function routeWalk(a: LonLat, b: LonLat, ctx: WalkContext): Promise<RouteResult> {
   const bundle = ctx.bundle;
   if (bundle && insideRoutingArea(bundle, a) && insideRoutingArea(bundle, b)) {
-    const perim = ctx.avoidPerimeter ? await ctx.getPerimeter().catch(() => null) : null;
+    // fetched with avoidance off too: the route is still checked against it
+    const perim = await ctx.getPerimeter().catch(() => null);
     return offroad(a, b, bundle, ctx, perim);
   }
   if (!ctx.online) {

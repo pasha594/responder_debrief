@@ -65,6 +65,36 @@ describe('routeWalk', () => {
     expect(hoisted.setPerimeter).toHaveBeenCalledWith('/p', expect.any(Array));
   });
 
+  it('checks an offline route against the perimeter: crossing, passing close, avoidance off', async () => {
+    // through the 100 m square: SISI route (e) started inside the fire with
+    // no note but its own; the card never said the line crosses it
+    const through = { ...structuredClone(offRoute),
+      geometry: { type: 'LineString' as const, coordinates: [at(-300, 0), at(300, 0)] } };
+    hoisted.routeOffroad.mockResolvedValue({ ok: true, route: through });
+    let codes = (await routeWalk(at(0, 0), at(500, 500), ctx())).notes!.map((n) => n.code);
+    expect(codes).toContain('CROSSES_PERIM');
+    expect(codes).not.toContain('NEAR_PERIM');
+    // 80 m north of the square (SISI route (d) passed 79 m from the fire, no note)
+    const skirt = { ...structuredClone(offRoute),
+      geometry: { type: 'LineString' as const, coordinates: [at(-300, 130), at(300, 130)] } };
+    hoisted.routeOffroad.mockResolvedValue({ ok: true, route: skirt });
+    const near = (await routeWalk(at(0, 0), at(500, 500), ctx())).notes!;
+    expect(near.map((n) => n.code)).not.toContain('CROSSES_PERIM');
+    expect(near.find((n) => n.code === 'NEAR_PERIM')?.text).toMatch(/within 80 m/);
+    // avoidance off: the perimeter is still fetched and the line still checked
+    hoisted.routeOffroad.mockResolvedValue({ ok: true,
+      route: { ...structuredClone(through), provenance: { ...offRoute.provenance!, avoidPerimeter: false } } });
+    codes = (await routeWalk(at(0, 0), at(500, 500), ctx({ avoidPerimeter: false }))).notes!.map((n) => n.code);
+    expect(hoisted.routeOffroad).toHaveBeenLastCalledWith(expect.anything(), expect.anything(), false, perimeter.date);
+    expect(codes).toEqual(expect.arrayContaining(['CROSSES_PERIM', 'PERIM_OLD']));
+    // far from the fire: nothing but the age
+    const far = { ...structuredClone(offRoute),
+      geometry: { type: 'LineString' as const, coordinates: [at(-300, 400), at(300, 400)] } };
+    hoisted.routeOffroad.mockResolvedValue({ ok: true, route: far });
+    codes = (await routeWalk(at(0, 0), at(500, 500), ctx())).notes!.map((n) => n.code);
+    expect(codes).toEqual(['PERIM_OLD']);
+  });
+
   it('never falls back online when the fire blocks the route', async () => {
     hoisted.routeOffroad.mockResolvedValue({ ok: false, code: 'blocked_by_perimeter', message: 'x',
       alternative: offRoute });
