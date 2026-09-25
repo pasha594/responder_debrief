@@ -2,11 +2,11 @@
  * Drawing tools, shown while the Draw tab is open (on phones, whatever height
  * the sheet is at): stop drawing, flip the last directional line, erase,
  * undo / redo, clear. The Draw tab itself keeps only the palette. On desktop
- * they sit in the map's top-right corner; on phones, touch tablets and narrow
- * windows they ride under the search bar, folded behind one "Drawing Tools"
- * button (lit while a tool is armed) that opens the list — a tap elsewhere
- * folds it again. App mounts one of each placement; each renders only in its
- * own layout.
+ * they sit in the map's top-right corner, under the top line of controls; on
+ * phones, touch tablets and narrow windows they ride on the line under those
+ * controls, folded behind one "Drawing Tools" button (lit while a tool is
+ * armed) that opens the list — a tap elsewhere folds it again. App mounts one
+ * of each placement; each renders only in its own layout.
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useStore } from '../state/store';

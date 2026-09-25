@@ -1,4 +1,7 @@
-/** Bottom sheet (mobile <768px): snap points peek / half / full, drag handle. */
+/**
+ * Bottom sheet (mobile <768px): snap points peek / half / full, drag handle,
+ * and a slot pinned to its top-right corner (the settings gear).
+ */
 import { useRef, useState, type PointerEvent, type ReactNode } from 'react';
 import { useStore, type AppState } from '../state/store';
 
@@ -24,7 +27,7 @@ function snapHeights(): Record<Snap, number> {
   return { peek: 96, half: avail * 0.45, full: avail * 0.9 };
 }
 
-export function MobileSheet({ children }: { children: ReactNode }) {
+export function MobileSheet({ children, corner }: { children: ReactNode; corner?: ReactNode }) {
   const snap = useStore((s) => s.ui.sheetSnap);
   const setSheetSnap = useStore((s) => s.actions.setSheetSnap);
   const sheetRef = useRef<HTMLDivElement>(null);
@@ -89,6 +92,7 @@ export function MobileSheet({ children }: { children: ReactNode }) {
       >
         <span className="rd-sheet-handle-bar" aria-hidden="true" />
       </div>
+      {corner}
       <div className="rd-sheet-content">{children}</div>
     </div>
   );

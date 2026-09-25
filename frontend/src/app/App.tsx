@@ -41,7 +41,7 @@ import { SharedPlayheadSync } from '../share/SharedPlayheadSync';
 import { ShareFormatError } from '../share/bytes';
 import { decodeShareBody } from '../share/shareCodec';
 import { parseShareText } from '../share/transport';
-import { useCompactControls } from '../utils/useMediaQuery';
+import { useCompactControls, useIsDesktop } from '../utils/useMediaQuery';
 
 function MapLayerBridge() {
   const perimeterReady = useMapLayerSync();
@@ -272,9 +272,10 @@ function NowSampler() {
  * manager, so a repeat entry starts from a clean map.
  */
 function FireMapView() {
-  // phones, touch tablets and narrow windows stack the folded controls down
-  // the left edge
+  // phones, touch tablets and narrow windows get the folded controls
   const compact = useCompactControls();
+  // phones carry the settings gear in the bottom sheet instead (see Sidebar)
+  const isDesktop = useIsDesktop();
   return (
     <MapRoot>
       <MapLayerBridge />
@@ -290,13 +291,13 @@ function FireMapView() {
         <ErrorBoundary label="Search">
           <SearchDirectionsControl />
         </ErrorBoundary>
-        {/* phones: under the search bar */}
+        {/* folded controls: on the line under the buttons */}
         <ErrorBoundary label="Drawing tools">
           <DrawMapToolbar placement="stack" />
         </ErrorBoundary>
       </div>
-      <SettingsControl />
-      {/* desktop: the map's top-right corner */}
+      {isDesktop && <SettingsControl />}
+      {/* full controls: the map's top-right corner, under the top line */}
       <ErrorBoundary label="Drawing tools">
         <DrawMapToolbar placement="corner" />
       </ErrorBoundary>

@@ -23,7 +23,7 @@ export function BackControl() {
   }, [expanded]);
 
   const compact = !fullControls && !expanded;
-  return (
+  const button = (
     <button
       type="button"
       className={`rd-back-control${compact ? ' rd-back-control--compact' : ''}`}
@@ -35,4 +35,7 @@ export function BackControl() {
       {compact ? '←' : '← All fires'}
     </button>
   );
+  // folded: the arrow keeps a fixed slot, so spelling it out overlaps the
+  // basemap pill instead of shoving the one-line toolbar along
+  return fullControls ? button : <span className="rd-back-slot">{button}</span>;
 }

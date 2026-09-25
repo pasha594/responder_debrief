@@ -2,8 +2,9 @@
  * Ground switcher: vector map / USGS satellite (hybrid) / USGS topo.
  * A floating segmented pill under the back control at the map's top-left;
  * on phones, touch tablets and narrow windows it folds to one pill naming
- * the current ground, which opens to all three when tapped and closes again
- * on a pick (or a tap elsewhere).
+ * the current ground, which opens to all three when tapped (over its
+ * neighbours, so the one-line toolbar holds still) and closes again on a
+ * pick (or a tap elsewhere).
  */
 import { useCallback, useRef, useState } from 'react';
 import { useStore, type AppState } from '../state/store';
@@ -25,26 +26,12 @@ export function BasemapControl() {
   const close = useCallback(() => setOpen(false), []);
   useDismiss(ref, open, close);
 
-  if (!fullControls && !open) {
-    const current = CHOICES.find((c) => c.id === basemap) ?? CHOICES[0];
-    return (
-      <div className="rd-basemap-control" ref={ref}>
-        <button
-          type="button"
-          className="rd-basemap-btn rd-basemap-btn--active"
-          aria-haspopup="true"
-          aria-expanded={false}
-          aria-label={`Basemap: ${current.label}`}
-          onClick={() => setOpen(true)}
-        >
-          {current.label} ▾
-        </button>
-      </div>
-    );
-  }
-
-  return (
-    <div className="rd-basemap-control" role="group" aria-label="Basemap" ref={ref}>
+  const choices = (
+    <div
+      className={`rd-basemap-control${fullControls ? '' : ' rd-basemap-menu'}`}
+      role="group"
+      aria-label="Basemap"
+    >
       {CHOICES.map((c) => (
         <button
           key={c.id}
@@ -59,6 +46,28 @@ export function BasemapControl() {
           {c.label}
         </button>
       ))}
+    </div>
+  );
+  if (fullControls) return choices;
+
+  // folded: the pill keeps its place in the one-line toolbar and the chooser
+  // opens over its neighbours
+  const current = CHOICES.find((c) => c.id === basemap) ?? CHOICES[0];
+  return (
+    <div className="rd-basemap-fold" ref={ref}>
+      <div className="rd-basemap-control">
+        <button
+          type="button"
+          className="rd-basemap-btn rd-basemap-btn--active"
+          aria-haspopup="true"
+          aria-expanded={open}
+          aria-label={`Basemap: ${current.label}`}
+          onClick={() => setOpen(!open)}
+        >
+          {current.label} ▾
+        </button>
+      </div>
+      {open && choices}
     </div>
   );
 }
