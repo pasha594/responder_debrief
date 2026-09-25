@@ -928,36 +928,20 @@
   margin-top: 8px;
 }
 
-/* IR heat key (active flight row + map legend). Chips take their color from
-   --chip; the shapes mirror the map: outline = perimeter, dot = isolated,
-   ring = possible, dashed = imagery obscured. */
+/* IR heat key (active flight row + map legend): one column, like the PDF's
+   legend. Chips carry the map's own symbol images on the PDF's white paper. */
 .rd-ir-legend {
-  display: grid;
-  grid-template-columns: repeat(2, max-content);
-  gap: 4px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
-.rd-ir-legend .rd-swatch-chip {
-  background: var(--chip);
-}
-.rd-ir-legend .rd-swatch-chip--outline {
-  background: transparent;
-  box-shadow: inset 0 0 0 2px var(--chip);
-}
-.rd-ir-legend .rd-swatch-chip--dot,
-.rd-ir-legend .rd-swatch-chip--ring {
-  width: 8px;
-  height: 8px;
-  margin: 0 3px;
-  border-radius: 50%;
-}
-.rd-ir-legend .rd-swatch-chip--ring {
-  background: transparent;
-  box-shadow: inset 0 0 0 1.75px var(--chip);
-}
-.rd-ir-legend .rd-swatch-chip--dashed {
-  background: color-mix(in srgb, var(--chip) 35%, transparent);
-  box-shadow: none;
-  border: 1px dashed var(--chip);
+.rd-ir-chip {
+  width: 26px;
+  height: 14px;
+  flex-shrink: 0;
+  box-sizing: border-box;
+  border-radius: 2px;
+  background-color: #fff;
 }
 
 /* PyreCast credit (over the map, bottom-left; +40px clears the attribution,
