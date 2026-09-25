@@ -260,6 +260,36 @@ class _Hash:
         return out
 
 
+class _SegHash:
+    """Segment index: each segment listed in every cell it crosses."""
+
+    def __init__(self, cell: float):
+        self.cell = cell
+        self.buckets: dict[tuple[int, int], list[int]] = {}
+
+    def add(self, si: int, p, q) -> None:
+        c = self.cell
+        n = max(1, int(math.ceil(math.hypot(q[0] - p[0], q[1] - p[1]) / (c / 2))))
+        seen = set()
+        for i in range(n + 1):
+            t = i / n
+            key = (int(math.floor((p[0] + (q[0] - p[0]) * t) / c)),
+                   int(math.floor((p[1] + (q[1] - p[1]) * t) / c)))
+            if key not in seen:
+                seen.add(key)
+                self.buckets.setdefault(key, []).append(si)
+
+    def near(self, x: float, y: float, r: float) -> list[int]:
+        c = self.cell
+        kx, ky = int(math.floor(x / c)), int(math.floor(y / c))
+        span = int(math.ceil(r / c))
+        out: set[int] = set()
+        for dx in range(-span, span + 1):
+            for dy in range(-span, span + 1):
+                out.update(self.buckets.get((kx + dx, ky + dy), ()))
+        return list(out)
+
+
 def _bdiff(a: float, b: float) -> float:
     d = abs(a - b) % 180.0
     return min(d, 180.0 - d)
@@ -389,24 +419,24 @@ def conflate(g: Graph, agency: list[tuple[dict, list]], *, log=print) -> dict:
             continue
         covered = np.zeros(len(ap), bool)
         hit_edges: set[int] = set()
+        near_samples: set[int] = set()  # OSM samples within COVER_M of this trail
         for i, (x, y) in enumerate(ap.tolist()):
             for j in h.near(x, y, COVER_M):
-                if (P[j, 0] - x) ** 2 + (P[j, 1] - y) ** 2 <= COVER_M ** 2 \
-                        and _bdiff(B[j], ab[i]) < COVER_BEARING:
-                    covered[i] = True
-                    hit_edges.add(int(O[j]))
+                if (P[j, 0] - x) ** 2 + (P[j, 1] - y) ** 2 <= COVER_M ** 2:
+                    near_samples.add(j)
+                    if _bdiff(B[j], ab[i]) < COVER_BEARING:
+                        covered[i] = True
+                        hit_edges.add(int(O[j]))
         attrs = agency_edge_attrs(props)
         if covered.mean() >= COVER_FRACTION:
             stats["agency_dropped_covered"] += 1
-            ah = _Hash(ap, 25.0)
             for ei in hit_edges:
                 e = g.edges[ei]
                 lo, hi = edge_range[ei]
-                near = 0
-                for x, y in P[lo:hi].tolist():
-                    if any((ap[k, 0] - x) ** 2 + (ap[k, 1] - y) ** 2 <= COVER_M ** 2
-                           for k in ah.near(x, y, COVER_M)):
-                        near += 1
+                # agency points are 10 m apart, OSM samples 5 m: a sample
+                # between two agency points can sit just beyond COVER_M of
+                # both, which only makes this test a little conservative
+                near = sum(1 for j in near_samples if lo <= j < hi)
                 if hi > lo and near / (hi - lo) >= NAME_EDGE_FRACTION:
                     if not e.name:
                         e.name = attrs["name"]
@@ -429,15 +459,13 @@ def conflate(g: Graph, agency: list[tuple[dict, list]], *, log=print) -> dict:
                     new_runs.append((props, run))
                 start = None
 
-    # snap run ends onto OSM, splitting edges; then agency-agency clusters
+    # snap run ends onto OSM, splitting edges; then agency-agency clusters.
+    # Every segment is hashed into each 25 m cell it passes through, so a
+    # query costs 9 buckets however long the network's straight segments are.
     seg_ref = [(ei, k) for ei in osm_idx for k in range(len(g.edges[ei].xy) - 1)]
-    mids = np.array([((g.edges[ei].xy[k][0] + g.edges[ei].xy[k + 1][0]) / 2,
-                      (g.edges[ei].xy[k][1] + g.edges[ei].xy[k + 1][1]) / 2)
-                     for ei, k in seg_ref]).reshape(-1, 2)
-    # Segments are hashed by midpoint; a query widens by the longest
-    # half-segment so a long straight road segment is still found.
-    long_half = max((_length(g.edges[ei].xy[k:k + 2]) / 2 for ei, k in seg_ref), default=0.0)
-    seg_hash = _Hash(mids, max(25.0, min(long_half, 400.0)))
+    seg_hash = _SegHash(25.0)
+    for si, (ei, k) in enumerate(seg_ref):
+        seg_hash.add(si, g.edges[ei].xy[k], g.edges[ei].xy[k + 1])
 
     ends = []  # (run index, which end, x, y)
     for ri, (_, run) in enumerate(new_runs):
@@ -447,7 +475,7 @@ def conflate(g: Graph, agency: list[tuple[dict, list]], *, log=print) -> dict:
     snapped_to: dict[tuple[int, int], int] = {}
     pending = []
     for ri, which, x, y in ends:
-        cand = seg_hash.near(x, y, SNAP_SEGMENT_M + long_half)
+        cand = seg_hash.near(x, y, SNAP_SEGMENT_M)
         best = _nearest_on_edges(g, cand, seg_ref, x, y) if cand else None
         if best is not None:
             snap_req.setdefault(best[1], []).append((best[2], best[3], (ri, which)))
