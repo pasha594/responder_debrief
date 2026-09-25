@@ -1,11 +1,11 @@
 {
  "schema": "rd-routing-bundle/1",
  "recipe": 1,
- "bundle_id": "9d77487426c7",
+ "bundle_id": "faab9204add8",
  "cornea_id": "{SYNTH-0001}",
  "fire_key": "synth-0001",
  "fire_name": "Synthetic Ridge",
- "built_at": "2026-09-25T17:28:25Z",
+ "built_at": "2026-09-25T17:42:44Z",
  "crs": {
   "epsg": 32611,
   "zone": 11,
@@ -32,24 +32,24 @@
  },
  "files": {
   "grid": {
-   "path": "/routing/synth-0001/b9d77487426c7/grid.tif",
+   "path": "/routing/synth-0001/bfaab9204add8/grid.tif",
    "bytes": 9495,
    "sha256": "dca31c32aa7fa1904331c2714cbcd773dadabc734d1f9d6d3364c3b49aa77219"
   },
   "dem": {
-   "path": "/routing/synth-0001/b9d77487426c7/dem.tif",
+   "path": "/routing/synth-0001/bfaab9204add8/dem.tif",
    "bytes": 10439,
    "sha256": "968e667adb61fbd061660e8d56c839bdb5d98a93c47a172c641e7455a1a0884a"
   },
   "graph": {
-   "path": "/routing/synth-0001/b9d77487426c7/graph.bin.gz",
+   "path": "/routing/synth-0001/bfaab9204add8/graph.bin.gz",
    "bytes": 390,
    "sha256": "30a78273e617e9108a745e643e460726e362b7992872cb3d2104854e96993666",
    "nodes": 5,
    "edges": 5
   },
   "trails": {
-   "path": "/routing/synth-0001/b9d77487426c7/trails.pmtiles",
+   "path": "/routing/synth-0001/bfaab9204add8/trails.pmtiles",
    "bytes": 13232,
    "sha256": "28ba7ed7a8f136be65d2ae7ba771ea10cdbc5ed799b8fa73f07263ccd579d53e",
    "minzoom": 10,
@@ -115,6 +115,7 @@
    "agency_dropped_covered": 1,
    "agency_runs_added": 1,
    "agency_runs_parallel": 0,
+   "agency_runs_braided": 0,
    "osm_edges_named": 1,
    "snapped": 2
   }
@@ -136,7 +137,7 @@
   "nhd_trim": 2,
   "osm_filter": 2,
   "graph_format": "RDG1",
-  "graph_build": 2,
+  "graph_build": 4,
   "epsg": 32611,
   "grid": {
    "x0": 651780.0,
