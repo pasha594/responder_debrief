@@ -14,15 +14,19 @@
   /* ...and above the fire panel's peeking sheet (panels.css: 108px) */
   .rd-sd-bar:has(.rd-walk) { max-height: calc(100dvh - var(--timeline-h) - 64px - 108px); }
 }
-.rd-walk-time strong { font-size: 14px; }
+/* The one-line summary doubles as the expand/collapse toggle. */
+.rd-walk-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; width: 100%;
+  padding: 0; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.rd-walk-head strong { font-size: 14px; }
+.rd-walk-warncount { color: #e0a24a; font-weight: 600; }
+.rd-walk-chev { margin-left: auto; color: var(--color-text-muted); }
 .rd-walk-muted { color: var(--color-text-muted); }
 .rd-walk-split { display: flex; height: 5px; border-radius: 3px; overflow: hidden; background: var(--color-border, #444); }
 .rd-walk-bar--trail { background: #4aa3ff; }
 .rd-walk-bar--xc { background: repeating-linear-gradient(90deg, #c9a25a 0 6px, transparent 6px 10px); }
-.rd-walk-veg { line-height: 1.6; }
-.rd-walk-veg .rd-hist-chip { vertical-align: -1px; }
-.rd-walk-label { border-left: 3px solid #e0a24a; padding: 4px 8px; background: rgba(224, 162, 74, 0.12); border-radius: 4px; font-weight: 600; }
-.rd-walk-sub { display: block; font-weight: 400; color: var(--color-text-muted); }
+/* Items sit apart by spacing, not separator dots (owner call). */
+.rd-walk-items { display: flex; flex-wrap: wrap; gap: 2px 12px; line-height: 1.6; }
+.rd-walk-items .rd-hist-chip { vertical-align: -1px; }
 .rd-walk-note--warn { color: #e0a24a; }
 .rd-walk-note--info { color: var(--color-text-muted); }
 .rd-walk-avoid { font-size: 12px; }
