@@ -64,6 +64,11 @@ export const RELEASE_NOTES: ReleaseDay[] = [
           'The legend moved to the bottom-left. The scale sits beside the info button, with the compass above it, and the map credits fold into that button after five seconds. An IR flight and an incident map now replace each other on the map instead of stacking.',
       },
       {
+        title: 'Map key folds away',
+        summary:
+          "The map's key now sits folded as a small Key pill in the bottom-left corner, so it no longer covers the map; tap it to open, and it stays the way you left it. Every layer's key also shows under its row in the Layers tab, now including hotspot age and the perimeter line.",
+      },
+      {
         title: 'Map buttons on one line',
         summary:
           "Back, basemap, 3D, QR, search and locate now share one line of compact buttons across the top of the map on every screen, with the Draw tools under them on the left. On phones the settings gear moved into the fire panel's top corner.",
@@ -71,7 +76,7 @@ export const RELEASE_NOTES: ReleaseDay[] = [
       {
         title: 'Bigger layer rows',
         summary:
-          'Every layer in the Layers tab is now a full-height row you can tap anywhere on to turn it on or off. The HRRR weather layers lost their Legend button: the legend shows on the map, or under the layer on phones.',
+          'Every layer in the Layers tab is now a full-height row you can tap anywhere on to turn it on or off. The HRRR weather layers lost their Legend button: the legend shows under the layer whenever it is on.',
       },
       {
         title: 'Share by QR code',

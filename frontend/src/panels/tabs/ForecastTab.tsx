@@ -35,6 +35,7 @@ import {
 } from '../../spread/toaBands';
 import { staleBadgeLabel } from '../../spread/runMeta';
 import { trafficAvailable } from '../../map/layers/trafficLayer';
+import { AGE_ORANGE, AGE_PURPLE, AGE_YELLOW } from '../../map/layers/hotspotLayer';
 import { incidentsAvailable } from '../../api/tomtomTraffic';
 import { useStore, type ToaMode } from '../../state/store';
 import { formatDateTime, formatRelative } from '../../utils/format';
@@ -206,12 +207,6 @@ function FireForecastSection({ corneaId }: { corneaId: string }) {
   const spread = useStore((s) => s.layers.spread);
   const actions = useStore((s) => s.actions);
 
-  // Mirror this tab's active product into the LegendBar (only while shown).
-  useEffect(() => {
-    const key = run && spread.visible ? `spread:${spread.product}` : null;
-    if (useStore.getState().ui.legendKey !== key) actions.setLegendKey(key);
-  }, [run, spread.product, spread.visible, actions]);
-
   const products = run ? availableProducts(run) : [];
   if (!run || products.length === 0) {
     return <div className="rd-empty">No spread forecast published for this fire.</div>;
@@ -357,8 +352,21 @@ function MapLayerToggles({ corneaId }: { corneaId: string }) {
   const actions = useStore((s) => s.actions);
   return (
     <section className="rd-section">
-      <LayerRow label="Hotspots" checked={hotspots} onChange={() => actions.toggleHotspots()} />
-      <LayerRow label="Perimeters" checked={perimeters} onChange={() => actions.togglePerimeters()} />
+      <LayerRow label="Hotspots" checked={hotspots} onChange={() => actions.toggleHotspots()}>
+        {hotspots && (
+          <div className="rd-hist-legend" aria-hidden="true">
+            <span className="rd-hist-chip rd-hist-chip--dot" style={{ background: AGE_YELLOW }} /> new
+            <span className="rd-hist-chip rd-hist-chip--dot" style={{ background: AGE_ORANGE }} /> 1 day
+            <span className="rd-hist-chip rd-hist-chip--dot" style={{ background: AGE_PURPLE }} /> 2 days
+          </div>
+        )}
+      </LayerRow>
+      <LayerRow
+        label="Perimeters"
+        swatch={<span className="rd-perimeter-chip" aria-hidden="true" />}
+        checked={perimeters}
+        onChange={() => actions.togglePerimeters()}
+      />
       <LayerRow
         label="Historic perimeters"
         checked={historic}

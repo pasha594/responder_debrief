@@ -38,9 +38,9 @@ const DAY_MS = 86_400_000;
 export const HOTSPOT_MAX_AGE_MS = 3 * DAY_MS;
 
 /** Age ramp: fresh yellow → 1 d orange → 2 d purple, smooth in between. */
-const AGE_YELLOW = '#ffd400';
-const AGE_ORANGE = '#ff7518';
-const AGE_PURPLE = '#c05de1';
+export const AGE_YELLOW = '#ffd400';
+export const AGE_ORANGE = '#ff7518';
+export const AGE_PURPLE = '#c05de1';
 
 const EMPTY_FC: HotspotFeatureCollection = { type: 'FeatureCollection', features: [] };
 

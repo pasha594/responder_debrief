@@ -190,8 +190,6 @@ export interface AppState {
     basemap: 'map' | 'satellite' | 'topo';
     sidebarCollapsed: boolean;
     sheetSnap: 'peek' | 'half' | 'full';
-    /** which product's legend the LegendBar shows (qualified key, see LegendBar) */
-    legendKey: string | null;
     toast: string | null;
     /**
      * Directory search/filter/sort. Lives in the store (not component state)
@@ -263,7 +261,6 @@ export interface AppState {
     /** Load persisted features without touching undo history. */
     drawHydrate(features: DrawFeature[]): void;
     setSheetSnap(snap: AppState['ui']['sheetSnap']): void;
-    setLegendKey(key: string | null): void;
     showToast(msg: string): void;
     clearToast(): void;
     setDirectoryQuery(query: string): void;
@@ -389,7 +386,6 @@ export const useStore = create<AppState>((set, get) => ({
     basemap: DEFAULT_BASEMAP,
     sidebarCollapsed: false,
     sheetSnap: 'peek',
-    legendKey: null,
     toast: null,
     directory: { query: '', filter: 'all', sort: DEFAULT_DIRECTORY_SORT, near: null },
     mapStyle: initMapStyle(),
@@ -734,7 +730,6 @@ export const useStore = create<AppState>((set, get) => ({
     drawHydrate: (features) =>
       set(() => ({ draw: { tool: 'none', features, past: [], future: [] } })),
     setSheetSnap: (sheetSnap) => set((s) => ({ ui: { ...s.ui, sheetSnap } })),
-    setLegendKey: (legendKey) => set((s) => ({ ui: { ...s.ui, legendKey } })),
     showToast: (toast) => {
       set((s) => ({ ui: { ...s.ui, toast } }));
       setTimeout(() => {

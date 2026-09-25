@@ -6,7 +6,6 @@
  */
 import { useStore } from '../../state/store';
 import { useFireBundle } from '../../routing/hooks';
-import { useIsDesktop } from '../../utils/useMediaQuery';
 import { TRAIL_PAINT } from '../../map/layers/trailsStyle';
 import { VegetationLegend } from '../VegetationLegend';
 import { LayerRow } from './LayerRow';
@@ -40,7 +39,6 @@ export function VegetationRow({ corneaId }: { corneaId: string }) {
   const setVeg = useStore((s) => s.actions.setVegetation);
   const bundle = useFireBundle(corneaId);
   const available = !!bundle.data;
-  const isDesktop = useIsDesktop();
   return (
     <LayerRow
       label="Vegetation"
@@ -63,8 +61,7 @@ export function VegetationRow({ corneaId }: { corneaId: string }) {
             onChange={(e) => setVeg({ opacity: Number(e.target.value) })}
             aria-label="Vegetation opacity"
           />
-          {/* desktop has the map's legend box; phones have no map legend */}
-          {!isDesktop && <VegetationLegend />}
+          <VegetationLegend />
         </>
       )}
     </LayerRow>

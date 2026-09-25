@@ -948,7 +948,7 @@
   background-color: #fff;
 }
 
-/* Vegetation key (Vegetation row on phones + map legend): one column too. */
+/* Vegetation key (Vegetation row + map key): one column too. */
 .rd-veg-legend {
   display: flex;
   flex-direction: column;
@@ -1054,6 +1054,55 @@
   backdrop-filter: blur(6px);
   border: 1px solid var(--color-border);
   border-radius: var(--radius);
+}
+/* Folded: a pill like the PyreCast credit under it. */
+.rd-legendbar:not([open]) {
+  padding: 0;
+  border-radius: 999px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.25);
+}
+.rd-legendbar:not([open]):hover {
+  border-color: var(--color-accent);
+}
+.rd-legendbar-summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+.rd-legendbar-summary::-webkit-details-marker {
+  display: none;
+}
+.rd-legendbar-summary:hover {
+  color: var(--color-text);
+}
+.rd-legendbar-summary:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+  border-radius: 999px;
+}
+.rd-legendbar:not([open]) .rd-legendbar-summary {
+  padding: 5px 10px 5px 12px;
+}
+.rd-legendbar[open] .rd-legendbar-summary {
+  margin-bottom: 6px;
+}
+/* Up while folded (the key opens upward), down to fold it again. */
+.rd-legendbar-chevron {
+  width: 10px;
+  height: 10px;
+}
+.rd-legendbar[open] .rd-legendbar-chevron {
+  transform: rotate(180deg);
+}
+.rd-legendbar-body {
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -2046,6 +2095,19 @@
   height: 10px;
   border-radius: 2px;
   display: inline-block;
+}
+.rd-hist-chip--dot {
+  border-radius: 50%; /* hotspots are dots on the map */
+}
+/* Perimeters' key on its row: the map's red line round a faint red fill. */
+.rd-perimeter-chip {
+  flex: 0 0 auto;
+  width: 14px;
+  height: 10px;
+  box-sizing: border-box;
+  border: 2px solid var(--perimeter);
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--perimeter) 13%, transparent);
 }
 
 /* Land-status legend: the agencies present around the fire, then private */

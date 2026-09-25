@@ -1,6 +1,6 @@
 /**
- * IR heat key, shared by the active IR flight row (the only legend on
- * phones) and the map's LegendBar, so the two can never disagree. Wording,
+ * IR heat key, shared by the active IR flight row and the map's key
+ * (LegendBar), so the two can never disagree. Wording,
  * order and symbols follow the legend printed on the NIROPS IR PDFs; the
  * chips are the map's own symbol images (irHeatImages.ts) on the PDF's white
  * paper. Lists only the classes the flight actually has.

@@ -2,13 +2,15 @@
  * One Layers-tab row: the whole line is the toggle (a full-width label, so a
  * click anywhere on it flips the layer), ruled off below like its neighbours.
  * Children — legend, opacity, notes — sit under the line inside the same row;
- * callers pass them only while the layer is on.
+ * callers pass them only while the layer is on. A layer drawn in one style
+ * passes a `swatch` instead: its key rides on the line itself.
  */
 import type { ReactNode } from 'react';
 
 export function LayerRow({
   label,
   meta,
+  swatch,
   title,
   checked,
   disabled,
@@ -18,6 +20,8 @@ export function LayerRow({
   label: string;
   /** Muted note after the label (source, "not built yet"). */
   meta?: ReactNode;
+  /** The layer's one on-map symbol, drawn after the label. */
+  swatch?: ReactNode;
   title?: string;
   checked: boolean;
   disabled?: boolean;
@@ -34,6 +38,7 @@ export function LayerRow({
           onChange={(e) => onChange(e.target.checked)}
         />
         <span>{label}</span>
+        {swatch}
         {meta && <span className="rd-title-meta">{meta}</span>}
       </label>
       {children && <div className="rd-layer-row-body">{children}</div>}

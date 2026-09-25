@@ -13,7 +13,6 @@ import type React from 'react';
 import { useMap } from '../../map/MapRoot';
 import { useStore } from '../../state/store';
 import { formatBytes, formatTime, zoneAbbr } from '../../utils/format';
-import { useIsDesktop } from '../../utils/useMediaQuery';
 import {
   friendlyOpDate,
   groupMapsByDate,
@@ -268,7 +267,6 @@ const IR_WHEN_TITLE = {
 } as const;
 
 function IrFlightRow({ flight, timezone }: { flight: IrFlight; timezone: string | null }) {
-  const isDesktop = useIsDesktop();
   const activeId = useStore((s) => s.layers.irFlight.flightId);
   const actions = useStore((s) => s.actions);
   // A PDF-only flight has flight_id null — which must not match the store's
@@ -323,8 +321,7 @@ function IrFlightRow({ flight, timezone }: { flight: IrFlight; timezone: string 
             </a>
           )}
         </div>
-        {/* desktop has the map's legend box; phones have no map legend */}
-        {active && !isDesktop && <IrHeatLegend heatTypes={flight.heat_types} />}
+        {active && <IrHeatLegend heatTypes={flight.heat_types} />}
       </div>
       {flight.pdf_url && <OpenPdfLink href={dataUrl(flight.pdf_url)} />}
     </div>

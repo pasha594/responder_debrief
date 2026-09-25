@@ -14,7 +14,6 @@ import { useStore } from '../../state/store';
 import { weatherCoverage, weatherJumpTarget } from '../../timeline/framePlan';
 import { formatDateTime, formatRelative } from '../../utils/format';
 import { GradientLegend } from '../../utils/GradientLegend';
-import { useIsDesktop } from '../../utils/useMediaQuery';
 import { LayerRow } from '../layers/LayerRow';
 
 const STALE_MS = 7 * 3600_000;
@@ -37,7 +36,6 @@ function WeatherRow({
   const label = meta.label;
   const state = useStore((s) => s.layers.weather[product]);
   const actions = useStore((s) => s.actions);
-  const isDesktop = useIsDesktop();
   const visible = state?.visible ?? false;
   const opacity = state?.opacity ?? 0.7;
 
@@ -69,16 +67,13 @@ function WeatherRow({
             onChange={(e) => actions.setWeatherLayer(product, { opacity: Number(e.target.value) })}
             aria-label={`${label} opacity`}
           />
-          {/* desktop has the map's legend box; phones have no map legend */}
-          {!isDesktop && (
-            <div className="rd-mini-legend">
-              {meta.legend_stops ? (
-                <GradientLegend stops={meta.legend_stops} units={meta.units} />
-              ) : (
-                <LegendImg src={weatherLegendUrl(product, legendTemplate)} alt={`${label} legend`} />
-              )}
-            </div>
-          )}
+          <div className="rd-mini-legend">
+            {meta.legend_stops ? (
+              <GradientLegend stops={meta.legend_stops} units={meta.units} />
+            ) : (
+              <LegendImg src={weatherLegendUrl(product, legendTemplate)} alt={`${label} legend`} />
+            )}
+          </div>
         </>
       )}
     </LayerRow>

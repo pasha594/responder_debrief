@@ -1,6 +1,6 @@
 /**
- * Vegetation key, shared by the Vegetation row (the only legend on phones)
- * and the map's LegendBar, so the two can never disagree. One column, one
+ * Vegetation key, shared by the Vegetation row and the map's key
+ * (LegendBar), so the two can never disagree. One column, one
  * swatch per class the layer paints (vegClasses.ts), then the creek bit.
  */
 import { STREAM_COLOR, STREAM_LABEL, VEG_CLASSES } from '../routing/vegClasses';
