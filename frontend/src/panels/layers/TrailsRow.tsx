@@ -6,7 +6,8 @@
  */
 import { useStore } from '../../state/store';
 import { useFireBundle } from '../../routing/hooks';
-import { VEG_CLASSES, STREAM_COLOR, STREAM_LABEL } from '../../routing/vegClasses';
+import { useIsDesktop } from '../../utils/useMediaQuery';
+import { VegetationLegend } from '../VegetationLegend';
 
 export function TrailsRow() {
   const mode = useStore((s) => s.layers.trails.mode);
@@ -36,6 +37,7 @@ export function VegetationRow({ corneaId }: { corneaId: string }) {
   const setVeg = useStore((s) => s.actions.setVegetation);
   const bundle = useFireBundle(corneaId);
   const available = !!bundle.data;
+  const isDesktop = useIsDesktop();
   return (
     <>
       <label
@@ -66,18 +68,8 @@ export function VegetationRow({ corneaId }: { corneaId: string }) {
             onChange={(e) => setVeg({ opacity: Number(e.target.value) })}
             aria-label="Vegetation opacity"
           />
-          <div className="rd-hist-legend rd-veg-legend" aria-hidden="true">
-            {VEG_CLASSES.filter((c) => c.id > 0).map((c) => (
-              <span key={c.id} style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                <span className="rd-hist-chip" style={{ background: c.color }} />
-                {c.label}
-              </span>
-            ))}
-            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-              <span className="rd-hist-chip" style={{ background: STREAM_COLOR }} />
-              {STREAM_LABEL}
-            </span>
-          </div>
+          {/* desktop has the map's legend box; phones have no map legend */}
+          {!isDesktop && <VegetationLegend />}
         </>
       )}
     </>

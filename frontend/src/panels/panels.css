@@ -940,6 +940,16 @@
   background-color: #fff;
 }
 
+/* Vegetation key (Vegetation row on phones + map legend): one column too. */
+.rd-veg-legend {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.rd-section > .rd-veg-legend {
+  padding: 2px 0 4px 26px; /* under the row's checkbox, like the historic key */
+}
+
 /* PyreCast credit (over the map, bottom-left corner, under the legend) */
 
 .rd-credit {

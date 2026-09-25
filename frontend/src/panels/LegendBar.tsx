@@ -1,7 +1,7 @@
 /**
  * Small legend card, bottom-left above the timeline. Mirrors the active
  * spread product (ui.legendKey = "spread:{product}"), every visible
- * weather layer, and the IR flight shown on the map.
+ * weather layer, the IR flight shown on the map, and the vegetation layer.
  */
 import { LegendImg } from '../utils/LegendImg';
 import { useMemo } from 'react';
@@ -26,6 +26,8 @@ import { GradientLegend } from '../utils/GradientLegend';
 import { irFlightWhen } from '../utils/incidentMaps';
 import { IrHeatLegend } from './IrHeatLegend';
 import { useManifestForFire } from './tabs/IncidentMapsTab';
+import { VegetationLegend } from './VegetationLegend';
+import { useFireBundle } from '../routing/hooks';
 
 interface WeatherLegendRow {
   product: WeatherProduct;
@@ -42,6 +44,7 @@ export function LegendBar() {
   const toaMode = useStore((s) => s.layers.spread.toaMode);
   const toaWithinHours = useStore((s) => s.layers.spread.toaWithinHours);
   const irFlightId = useStore((s) => s.layers.irFlight.flightId);
+  const vegVisible = useStore((s) => s.layers.vegetation.visible);
   const view = useStore((s) => s.view);
   const corneaId = view.mode === 'fire' ? view.corneaId : null;
 
@@ -53,6 +56,9 @@ export function LegendBar() {
   const irFlight =
     (irFlightId && manifest?.ir_flights.find((f) => f.flight_id === irFlightId && f.geojson_url)) ||
     null;
+  // Vegetation paints only when the fire has a routing bundle.
+  const { data: bundle } = useFireBundle(vegVisible ? corneaId : null);
+  const showVeg = vegVisible && !!bundle;
 
   const run = useMemo(() => {
     const slug =
@@ -106,7 +112,7 @@ export function LegendBar() {
     return rows;
   }, [weatherState, weatherRuns]);
 
-  if (!showSpread && weatherRows.length === 0 && !irFlight) return null;
+  if (!showSpread && weatherRows.length === 0 && !irFlight && !showVeg) return null;
 
   return (
     <div className="rd-legendbar">
@@ -142,6 +148,12 @@ export function LegendBar() {
             IR heat · {irFlightWhen(irFlight, fire?.timezone ?? null).label}
           </div>
           <IrHeatLegend heatTypes={irFlight.heat_types} />
+        </div>
+      )}
+      {showVeg && (
+        <div>
+          <div className="rd-legendbar-caption">Vegetation</div>
+          <VegetationLegend />
         </div>
       )}
       {weatherRows.map((row) => (

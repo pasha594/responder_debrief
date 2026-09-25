@@ -19,6 +19,8 @@ export interface VegClass {
   label: string;
   /** Short word for step text: "through timber". */
   short: string;
+  /** Map legend text, where `label` is too long for one line. */
+  legend?: string;
   color: string;
   impassable?: boolean;
 }
@@ -26,8 +28,8 @@ export interface VegClass {
 export const VEG_CLASSES: VegClass[] = [
   { id: 0, key: 'unknown', label: 'Unknown', short: 'unmapped ground', color: '#7a7a7a' },
   { id: 1, key: 'grass', label: 'Grass / herb', short: 'grass', color: '#e3cf6f' },
-  { id: 2, key: 'shrub_light', label: 'Light brush (< 40% cover)', short: 'light brush', color: '#c9a25a' },
-  { id: 3, key: 'shrub_dense', label: 'Dense brush (≥ 40% cover)', short: 'dense brush', color: '#9a6a33' },
+  { id: 2, key: 'shrub_light', label: 'Light brush (< 40% cover)', legend: 'Light brush', short: 'light brush', color: '#c9a25a' },
+  { id: 3, key: 'shrub_dense', label: 'Dense brush (≥ 40% cover)', legend: 'Dense brush', short: 'dense brush', color: '#9a6a33' },
   { id: 4, key: 'timber', label: 'Timber', short: 'timber', color: '#4f8a3c' },
   { id: 5, key: 'timber_litter', label: 'Timber, heavy litter', short: 'timber with heavy litter', color: '#2f5f2a' },
   { id: 6, key: 'slash', label: 'Slash / blowdown', short: 'slash', color: '#b4532a' },
@@ -35,7 +37,7 @@ export const VEG_CLASSES: VegClass[] = [
   { id: 8, key: 'developed', label: 'Developed / agriculture', short: 'developed ground', color: '#d9b9a3' },
   // impassable since COST_GRID_VERSION 3 (glaciers and permanent snow/ice)
   { id: 9, key: 'snow', label: 'Snow / ice (impassable)', short: 'snow and ice', color: '#e6f2ff', impassable: true },
-  { id: 10, key: 'water', label: 'Open water or river (impassable)', short: 'water', color: '#3b78c2', impassable: true },
+  { id: 10, key: 'water', label: 'Open water or river (impassable)', legend: 'Water / river (impassable)', short: 'water', color: '#3b78c2', impassable: true },
   { id: 11, key: 'steep', label: 'Too steep > 45° (impassable)', short: 'steep ground', color: '#5b3a29', impassable: true },
 ];
 
