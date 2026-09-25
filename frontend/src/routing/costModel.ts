@@ -15,7 +15,8 @@
  * (α(θ) + α(−θ)) / 2 = 1, so an out-and-back keeps GET's time.
  *
  * Every rate is over HORIZONTAL distance (how the studies define them).
- * All costs are seconds of typical time.
+ * All costs are seconds of typical time, plus LEAVE_TRAIL_PENALTY_S in the
+ * search only.
  */
 
 interface Lorentz { a: number; b: number; c: number; d: number; e: number }
@@ -79,6 +80,15 @@ export const SAC_FACTOR = [1, 1, 1, 1.54, 2.5, 4.0, 6.67];
  * (1/max r_mod ≈ 0.712) and the fastest cross-country pace (flat grass
  * 1/rGET(0) ≈ 0.870; steeper grades are slower even with α < 1). */
 export const H_PACE = 0.7;
+
+/** Route-choice cost of stepping off a trail or road onto open ground
+ * (owner decision, SISI validation): without it the router cut switchbacks
+ * to save 0–2.6 min each, writing steps like "go cross-country up 260 ft of
+ * rock in 5 min". A cut now has to save more than this to be taken. It
+ * steers the search only — reported times come from the drawn line
+ * (legs.ts), never from the search cost. astar.ts charges it on leaving the
+ * network, not on joining it, not on the last move into the goal cell. */
+export const LEAVE_TRAIL_PENALTY_S = 90;
 
 /** Directional grade in degrees from a rise over a horizontal run. */
 export function gradeDeg(dz: number, dh: number): number {

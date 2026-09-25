@@ -10,11 +10,14 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { lonLatToUtm, utmToLonLat } from '../spread/utm';
+import type { RouteResult } from '../api/routing';
 import { HybridSearch, searchWindow } from './astar';
+import { LEAVE_TRAIL_PENALTY_S, sullivanRate } from './costModel';
 import { OffroadEngine, routeSync } from './engine';
 import type { RoutingGrid } from './gridDecode';
 import { buildHybridGraph } from './hybridGraph';
 import { buildLegs, climbOf, fmtDur } from './legs';
+import { PACE_LUT } from './pacecode';
 import type { Rdg1 } from './rdg1';
 import type { RoutingBundle } from './types';
 
@@ -199,6 +202,87 @@ describe('A* is exact at weight 1', () => {
         expect(a.settled).toBeLessThanOrEqual(d.settled);
       }
     }
+  });
+});
+
+describe('leaving a trail costs LEAVE_TRAIL_PENALTY_S in the search, never in the times', () => {
+  // Flat 40x30 grid of uniform pace; one trail with a hairpin:
+  // N0 (45,465) → N1 (315,465) → N2 (315,165) → N3 (405,165) → N4 (405,465)
+  // → N5 (1065,465). The hairpin N1…N4 is 690 m of trail; the cut N1→N4 is
+  // 90 m of cross-country. Every vertex sits on a cell centre.
+  const W = 40;
+  const H = 30;
+  const TRAIL = 1 / sullivanRate(0, 'mod'); // s/m, flat
+  const X0 = 500_010;
+  const Y0 = 4_900_020;
+  const pts: [number, number][] = [[45, 465], [315, 465], [315, 165], [405, 165], [405, 465], [1065, 465]];
+  function hairpin(paceCode: number) {
+    const grid: RoutingGrid = { width: W, height: H, cell: 30, pace: new Uint8Array(W * H).fill(paceCode),
+      veg: new Uint8Array(W * H).fill(1), dem: new Int16Array(W * H).fill(1000) };
+    const deltas: number[] = [];
+    for (let i = 1; i < pts.length; i++) deltas.push((pts[i][0] - pts[i - 1][0]) * 10, (pts[i][1] - pts[i - 1][1]) * 10);
+    const rdg = {
+      epsg: 32611, x0: X0, y0: Y0,
+      nodes: Int32Array.from([pts[0][0] * 10, pts[0][1] * 10, pts[5][0] * 10, pts[5][1] * 10]),
+      from: Uint32Array.from([0]), to: Uint32Array.from([1]),
+      dstart: Uint32Array.from([0, 5]), deltas: Int16Array.from(deltas),
+      name: Uint32Array.from([0]), ref: Uint32Array.from([0xffffffff]), note: Uint32Array.from([0xffffffff]),
+      kind: Uint8Array.from([4]), src: Uint8Array.from([1]), sac: Uint8Array.from([0]),
+      flags: Uint8Array.from([0]), strings: ['Hairpin Trail'],
+    } as Rdg1;
+    const b = { ...bundle, warnings: [], crs: { epsg: 32611, zone: 11, northern: true },
+      grid: { x0: X0, y0: Y0, cell_m: 30, width: W, height: H } } as RoutingBundle;
+    const e = new OffroadEngine(b, grid, rdg, buildHybridGraph(rdg, grid));
+    const ll = ([x, y]: [number, number]) => e.toLonLat(x, y);
+    return { e, grid, ll, pace: PACE_LUT[paceCode] };
+  }
+  const xcM = (r: RouteResult) => r.legs!.filter((l) => l.kind === 'xc').reduce((s, l) => s + l.distanceM, 0);
+  // pace code whose cut saves `save` seconds over the hairpin (flat: α = 1)
+  const codeSaving = (save: number) => {
+    const pace = (690 * TRAIL - save) / 90;
+    return 1 + Math.round((253 * Math.log(pace / 0.8)) / Math.log(1024));
+  };
+
+  it('no longer cuts a switchback that saves under the penalty (SISI: 7 cuts on McGregor)', () => {
+    const { e, ll, pace } = hairpin(codeSaving(45));
+    const saving = 690 * TRAIL - 90 * pace;
+    expect(saving).toBeGreaterThan(20); // the cut IS faster on foot...
+    expect(saving).toBeLessThan(LEAVE_TRAIL_PENALTY_S); // ...but not by enough
+    const r = ok(routeSync(e, ll(pts[0]), ll(pts[5]), { avoidPerimeter: false }));
+    expect(xcM(r)).toBeLessThan(1);
+    expect(r.distanceM).toBeCloseTo(1620, 0);
+    expect(r.durationS).toBeCloseTo(1620 * TRAIL, 0);
+    expect(r.steps.map((s) => s.text.split(' ')[0])).toEqual(['Follow', 'Arrive']);
+    // a pin ON the trail at the hairpin's foot can't cut it for free either
+    const r2 = ok(routeSync(e, ll(pts[1]), ll(pts[5]), { avoidPerimeter: false }));
+    expect(xcM(r2)).toBeLessThan(1);
+  });
+
+  it('still takes a cross-country shortcut that saves more than the penalty, timed without it', () => {
+    const { e, ll, pace } = hairpin(codeSaving(230));
+    expect(690 * TRAIL - 90 * pace).toBeGreaterThan(LEAVE_TRAIL_PENALTY_S + 100);
+    const r = ok(routeSync(e, ll(pts[0]), ll(pts[5]), { avoidPerimeter: false }));
+    expect(xcM(r)).toBeCloseTo(90, 0);
+    expect(r.distanceM).toBeCloseTo(1020, 0);
+    // reported time = trail + cross-country on the drawn line, no penalty
+    expect(r.durationS).toBeCloseTo(930 * TRAIL + 90 * pace, 0);
+  });
+
+  it('charges nothing to join the trail, to arrive on it, or to start off it', () => {
+    const { grid, e, pace } = hairpin(codeSaving(230));
+    const g = e.graph;
+    const run = (sx: number, sy: number, gx: number, gy: number) => {
+      const start = { x: sx, y: sy, cell: Math.floor(sy / 30) * W + Math.floor(sx / 30) };
+      const goal = { x: gx, y: gy, cell: Math.floor(gy / 30) * W + Math.floor(gx / 30) };
+      const s = new HybridSearch({ grid, graph: g, mask: null, window: searchWindow(grid, start, goal, true),
+        start, goal, weight: 1, maxSettled: 1e7 });
+      while (s.step(1e6) === 'running');
+      return s;
+    };
+    // on-trail start and goal (N3 → N5 along the trail): join + arrive are free
+    expect(run(405, 165, 1065, 465).cost).toBeCloseTo((300 + 660) * TRAIL, 1);
+    // off-network start and goal, no trail between: plain cross-country
+    expect(run(645, 825, 945, 825).cost).toBeCloseTo(300 * pace, 1);
   });
 });
 

@@ -12,15 +12,22 @@
  *   cell ↔ node   "portal": distance to the node · P(cell) — join or leave a
  *                 trail anywhere. Never from an impassable or masked cell.
  *   node → node   the precomputed Sullivan sub-edge cost.
- * The perimeter mask blocks cells AND graph nodes (a trail through the fire
- * is not a way around it). Graph nodes are otherwise allowed on impassable
- * cells: bridges cross rivers, switchbacks climb cliffs.
+ * Leaving the network (node → cell, or a first cross-country step from a
+ * start pinned on a trail) adds LEAVE_TRAIL_PENALTY_S, so a switchback cut
+ * must save more than that to be taken. Joining is free, and so is the last
+ * move into the goal cell: a pin on or beside a trail must not tilt the
+ * route toward arriving cross-country. Penalties only raise edge costs, so
+ * h stays admissible and consistent.
+ * The perimeter mask (non-zero = blocked) blocks cells AND graph nodes (a
+ * trail through the fire is not a way around it). Graph nodes are otherwise
+ * allowed on impassable cells: bridges cross rivers, switchbacks climb
+ * cliffs.
  *
  * h = straight-line distance · H_PACE · weight (admissible at weight 1).
  * `step(budget)` settles up to `budget` states and returns, so the worker
  * can yield between slices and drop a superseded search.
  */
-import { H_PACE, alphaFast, gradeDeg } from './costModel';
+import { H_PACE, LEAVE_TRAIL_PENALTY_S, alphaFast, gradeDeg } from './costModel';
 import type { RoutingGrid } from './gridDecode';
 import { MinHeap } from './heap';
 import type { HybridGraph } from './hybridGraph';
@@ -36,7 +43,7 @@ export interface Window {
 export interface SearchInput {
   grid: RoutingGrid;
   graph: HybridGraph;
-  /** Perimeter mask (1 = blocked) or null when avoidance is off. */
+  /** Perimeter mask (non-zero = blocked) or null when avoidance is off. */
   mask: Uint8Array | null;
   window: Window;
   /** Start / goal in grid metres (x east, y south of the origin). */
@@ -66,6 +73,10 @@ export class HybridSearch {
   private readonly closed: Uint8Array;
   private readonly heap = new MinHeap(4096);
   private readonly goalState: number;
+  private readonly startState: number;
+  /** The start cell holds a usable trail/road vertex: the pin is on the
+   * network, so stepping straight off it cross-country is leaving it. */
+  private readonly startOnNetwork: boolean = false;
 
   constructor(private readonly inp: SearchInput) {
     const w = inp.window;
@@ -77,10 +88,17 @@ export class HybridSearch {
     this.parent = new Int32Array(total).fill(-1);
     this.closed = new Uint8Array(total);
     const s = this.cellState(inp.start.cell);
+    this.startState = s;
     this.goalState = this.cellState(inp.goal.cell);
     if (s < 0 || this.goalState < 0) {
       this.status = 'exhausted';
       return;
+    }
+    const span = inp.graph.cellIndex.get(inp.start.cell);
+    if (span) {
+      for (let i = span[0]; i < span[1] && !this.startOnNetwork; i++) {
+        this.startOnNetwork = !this.nodeBlocked(inp.graph.cellNodes[i]);
+      }
     }
     const [sx, sy] = this.cellCenter(inp.start.cell);
     const p0 = PACE_LUT[inp.grid.pace[inp.start.cell]];
@@ -118,14 +136,14 @@ export class HybridSearch {
 
   private cellBlocked(cell: number): boolean {
     const m = this.inp.mask;
-    return !Number.isFinite(PACE_LUT[this.inp.grid.pace[cell]]) || (!!m && m[cell] === 1);
+    return !Number.isFinite(PACE_LUT[this.inp.grid.pace[cell]]) || (!!m && m[cell] !== 0);
   }
 
   private nodeBlocked(node: number): boolean {
     const c = this.inp.graph.cell[node];
     if (c < 0 || this.cellState(c) < 0) return true;
     const m = this.inp.mask;
-    return !!m && m[c] === 1;
+    return !!m && m[c] !== 0;
   }
 
   private relax(u: number, v: number, cost: number, vx: number, vy: number): void {
@@ -177,6 +195,7 @@ export class HybridSearch {
         // A start cell may itself be impassable only if the engine let it be
         // (it snaps first); never expand out of a blocked cell otherwise.
         if (Number.isFinite(pu)) {
+          const leave = u === this.startState && this.startOnNetwork ? LEAVE_TRAIL_PENALTY_S : 0;
           for (let d = 0; d < 8; d++) {
             const nc = lc + DC[d];
             const nr = lr + DR[d];
@@ -189,7 +208,8 @@ export class HybridSearch {
             const zv = grid.dem[cv];
             const dz = zu === -32768 || zv === -32768 ? 0 : zv - zu;
             const cost = dh * 0.5 * (pu + PACE_LUT[grid.pace[cv]]) * alphaFast(gradeDeg(dz, dh));
-            this.relax(u, nr * this.ww + nc, cost, ux + DC[d] * k, uy + DR[d] * k);
+            const v = nr * this.ww + nc;
+            this.relax(u, v, v === this.goalState ? cost : cost + leave, ux + DC[d] * k, uy + DR[d] * k);
           }
           const span = graph.cellIndex.get(cu);
           if (span && !(this.inp.mask && this.inp.mask[cu])) {
@@ -214,7 +234,8 @@ export class HybridSearch {
           if (s >= 0) {
             const [cx, cy] = this.cellCenter(cn);
             const dist = Math.hypot(graph.x[node] - cx, graph.y[node] - cy);
-            this.relax(u, s, dist * PACE_LUT[grid.pace[cn]], cx, cy);
+            const leave = s === this.goalState ? 0 : LEAVE_TRAIL_PENALTY_S;
+            this.relax(u, s, dist * PACE_LUT[grid.pace[cn]] + leave, cx, cy);
           }
         }
       }
