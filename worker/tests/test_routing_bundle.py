@@ -10,7 +10,8 @@ from datetime import datetime, timedelta, timezone
 import numpy as np
 import pytest
 
-from responder_worker import config, gdal_cli, graph_build, pmtiles_inspect
+from responder_worker import config, cost_grid, gdal_cli, graph_build, nhd, osm_extract
+from responder_worker import pmtiles_inspect
 from responder_worker import routing_bundle as rb
 from responder_worker import routing_plan as rp
 from responder_worker.b2 import DryRunStorage
@@ -123,6 +124,56 @@ class TestRunShard:
                                     log=lambda m: None)
         assert res["failed"] == [{"cornea_id": "{X}", "slug": "x", "error": "osm region unavailable"}]
         assert storage.get_json(rb.state_key("x"))["failures"] == 1
+
+
+class TestCodeVersions:
+    """Bundles are immutable and a rerun with the same id is "unchanged", so
+    every piece of code that turns inputs into bytes needs a version in the
+    id; the graph builder alone had one, and the SISI conflation fix first
+    came back "unchanged"."""
+
+    @pytest.mark.parametrize("module, attr", [
+        (graph_build, "BUILD_VERSION"), (cost_grid, "COST_GRID_VERSION"),
+        (nhd, "NHD_TRIM_VERSION"), (osm_extract, "FILTER_VERSION")])
+    def test_bumping_a_version_changes_the_bundle_id(self, module, attr, monkeypatch):
+        aoi = rp.aoi_for([-120.8, 48.35], None)
+        args = {"osm_hash": "o", "trails_hash": "t", "huc8": ["17020009", "17020008"]}
+        before = rb.bundle_id_for(rb.bundle_inputs(aoi, NOW, **args))
+        assert rb.bundle_id_for(rb.bundle_inputs(aoi, NOW, **args)) == before
+        monkeypatch.setattr(module, attr, getattr(module, attr) + 1)
+        assert rb.bundle_id_for(rb.bundle_inputs(aoi, NOW, **args)) != before
+
+    def test_nhd_cache_is_keyed_by_trim_version(self, tmp_path, monkeypatch):
+        # An HU8 trimmed by older code (in B2 or in a --keep-work dir) must
+        # not stand in for the current trim.
+        storage = DryRunStorage(tmp_path / "out")
+        old = tmp_path / "old.gpkg"
+        old.write_bytes(b"old trim")
+        storage.put_file("work/nhd/17020009.gpkg", old)  # the unversioned layout
+        downloads = []
+
+        def download(client, url, dest, timeout):
+            downloads.append(url)
+            dest.write_bytes(b"zip")
+
+        monkeypatch.setattr(nhd, "download_to", download)
+        monkeypatch.setattr(nhd, "trim_huc8", lambda z, dest: dest.write_bytes(b"new trim") and dest)
+        item = {"huc8": "17020009", "url": "https://x/NHD_H_17020009_HU8_GPKG.zip"}
+        quiet = {"log": lambda *_: None}
+        for d in ("w1", "w2", "w3"):
+            (tmp_path / d).mkdir()
+        (tmp_path / "w2" / "nhd_17020009.gpkg").write_bytes(b"old trim")
+
+        assert nhd.ensure_huc8(None, storage, item, tmp_path / "w1", **quiet).read_bytes() == b"new trim"
+        assert len(downloads) == 1
+        assert storage.exists(f"work/nhd/v{nhd.NHD_TRIM_VERSION}/17020009.gpkg")
+        # a fresh run reads the versioned cache, never the stale local file
+        assert nhd.ensure_huc8(None, storage, item, tmp_path / "w2", **quiet).read_bytes() == b"new trim"
+        assert len(downloads) == 1
+        # a new trim version misses the cache and trims again
+        monkeypatch.setattr(nhd, "NHD_TRIM_VERSION", nhd.NHD_TRIM_VERSION + 1)
+        nhd.ensure_huc8(None, storage, item, tmp_path / "w3", **quiet)
+        assert len(downloads) == 2
 
 
 class TestIndexDoc:

@@ -34,6 +34,12 @@ from __future__ import annotations
 
 import numpy as np
 
+# Part of every bundle id (routing_bundle.bundle_inputs): bump it whenever the
+# SAME LANDFIRE/NHD/OSM inputs would now give a different grid.tif (classes,
+# multipliers, barriers, the hydro burn in nhd.py), so existing bundles
+# rebuild instead of staying "unchanged" until the monthly LANDFIRE epoch.
+COST_GRID_VERSION = 1
+
 PACE_MIN = 0.8
 PACE_SPAN = 1024.0
 PACE_STEPS = 253

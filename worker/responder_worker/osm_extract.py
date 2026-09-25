@@ -27,6 +27,11 @@ import httpx
 from . import config, gdal_cli
 from .http import download_to, get
 
+# Part of every bundle id (routing_bundle.bundle_inputs): bump it whenever
+# extract_fires keeps different objects (the tags-filter expressions, the
+# extract strategy), since the per-fire hashes only cover what was kept.
+FILTER_VERSION = 1
+
 
 # ---------------------------------------------------------------------------
 # region choice (pure)

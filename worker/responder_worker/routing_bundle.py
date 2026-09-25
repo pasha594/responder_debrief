@@ -8,10 +8,11 @@
     catalogs/routing/fires/{fire_key}.json          pointer, written LAST
 
 bundle_id = sha256(inputs)[:12], where the inputs are the grid, the recipe,
-and content hashes of what the AOI actually contains (OSM ways, agency
-trails, NHD HU8 list) plus a monthly LANDFIRE epoch (LF2025 rolls out by
-GeoArea). A "check" run that finds the same id skips the expensive part
-(LANDFIRE, warps, PMTiles) and only stamps the state doc.
+content hashes of what the AOI actually contains (OSM ways, agency trails,
+NHD HU8 list), a monthly LANDFIRE epoch (LF2025 rolls out by GeoArea) and
+the versions of the code that builds the bytes (bundle_inputs). A "check"
+run that finds the same id skips the expensive part (LANDFIRE, warps,
+PMTiles) and only stamps the state doc.
 
 The descriptor lists only files that exist; a missing optional input
 becomes a `warnings` entry the app shows (nhd_unavailable,
@@ -49,6 +50,23 @@ def canonical(obj) -> str:
 
 def bundle_id_for(inputs: dict) -> str:
     return hashlib.sha256(canonical(inputs).encode()).hexdigest()[:12]
+
+
+def bundle_inputs(aoi: dict, now: datetime, *, osm_hash: str, trails_hash: str,
+                  huc8: list[str]) -> dict:
+    """What a bundle is built from; its id hashes this. The hashes cover the
+    data inside the AOI; the *_VERSION constants stand for the code that
+    turns that data into bytes (and for the NHD cache), so a fix there
+    rebuilds every bundle instead of leaving it "unchanged"."""
+    return {
+        "recipe": config.ROUTING_RECIPE, "cost_model": "getv2-evc+sullivan2020/1",
+        "cost_grid": cost_grid.COST_GRID_VERSION, "nhd_trim": nhd.NHD_TRIM_VERSION,
+        "osm_filter": osm_extract.FILTER_VERSION,
+        "graph_format": GRAPH_FORMAT, "graph_build": graph_build.BUILD_VERSION,
+        "epsg": aoi["epsg"], "grid": aoi["grid"],
+        "lf": "LF2025-else-LF2024/pixel", "lf_epoch": f"{now:%Y-%m}", "topo": "LF2020",
+        "osm_hash": osm_hash, "trails_hash": trails_hash, "nhd": sorted(huc8),
+    }
 
 
 def pointer_key(fk: str) -> str:
@@ -247,15 +265,9 @@ def build_fire(client: httpx.Client, storage: Storage, entry: dict, *, workdir: 
         items = None
     if not items:
         warnings.append("nhd_unavailable")
-    inputs = {
-        "recipe": config.ROUTING_RECIPE, "cost_model": "getv2-evc+sullivan2020/1",
-        "graph_format": GRAPH_FORMAT, "graph_build": graph_build.BUILD_VERSION,
-        "epsg": epsg, "grid": g,
-        "lf": "LF2025-else-LF2024/pixel", "lf_epoch": f"{now:%Y-%m}", "topo": "LF2020",
-        "osm_hash": graph_build.osm_hash(nodes_ll, ways),
-        "trails_hash": graph_build.trails_hash(agency),
-        "nhd": sorted(i["huc8"] for i in (items or [])),
-    }
+    inputs = bundle_inputs(aoi, now, osm_hash=graph_build.osm_hash(nodes_ll, ways),
+                           trails_hash=graph_build.trails_hash(agency),
+                           huc8=[i["huc8"] for i in (items or [])])
     bid = bundle_id_for(inputs)
     prefix = f"routing/{fk}/b{bid}"
     prev = storage.get_json(pointer_key(fk))

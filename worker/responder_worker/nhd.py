@@ -8,7 +8,7 @@ GeoPackage when its title contains "(HU) 8" or its downloadURL contains
 "_HU8_" — and prodFormats=GeoPackage keeps the national/state/HU4 products
 (which the API lists first) from pushing HU8s past `max`.
 
-Kept (trimmed, EPSG:4326, cached at work/nhd/{huc8}.gpkg):
+Kept (trimmed, EPSG:4326, cached at work/nhd/v{NHD_TRIM_VERSION}/{huc8}.gpkg):
 - streams: NHDFlowline fcode 46006 (perennial stream/river);
 - water:   NHDWaterbody ftype 390 LakePond / 436 Reservoir minus the
            intermittent/ephemeral fcodes (dry playas are not barriers),
@@ -28,6 +28,10 @@ from .b2 import Storage
 from .http import download_to, get
 
 CACHE_PREFIX = "work/nhd"
+# In the cache key and in every bundle id: bump it whenever trim_huc8 keeps
+# different layers, rows or fields. The cache is write-once, so without it a
+# cached HU8 (in B2, or in a --keep-work dir) would keep the old trim forever.
+NHD_TRIM_VERSION = 1
 NON_PERENNIAL_WATERBODY = (39001, 39005, 39006, 43614)
 _HU8_URL = re.compile(r"_(\d{8})_HU8_", re.I)
 
@@ -94,11 +98,15 @@ def trim_huc8(zip_path: Path, dest: Path) -> Path:
     return dest
 
 
+def cache_key(huc8: str) -> str:
+    return f"{CACHE_PREFIX}/v{NHD_TRIM_VERSION}/{huc8}.gpkg"
+
+
 def ensure_huc8(client: httpx.Client, storage: Storage, item: dict, workdir: Path,
                 log=print) -> Path:
     """Cached trimmed GPKG for one HU8 (downloads + trims on a cache miss)."""
-    local = workdir / f"nhd_{item['huc8']}.gpkg"
-    key = f"{CACHE_PREFIX}/{item['huc8']}.gpkg"
+    local = workdir / f"nhd_v{NHD_TRIM_VERSION}_{item['huc8']}.gpkg"
+    key = cache_key(item["huc8"])
     if local.exists() or storage.get_file(key, local):
         return local
     z = workdir / f"nhd_{item['huc8']}.zip"
