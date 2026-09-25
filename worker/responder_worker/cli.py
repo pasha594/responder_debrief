@@ -762,6 +762,7 @@ def _tile_and_manifest(args, storage, state, fires_by_slug, mirrors) -> None:
         inc_state = state["incidents"].setdefault(inc_key, {})
         inc_state["map_count"] = len(merged_maps)
         inc_state["ir_count"] = len(merged_ir)
+        inc_state["ir_manifest_v"] = IR_MANIFEST_VERSION
         inc_state["latest_upload_ts"] = max(upload_ts) if upload_ts else None
         inc_state["latest_upload"] = max(upload_dates) if upload_dates else None
 
@@ -878,10 +879,46 @@ def _ir_flights(args, storage, state, fire, ir_by_flight: dict[str, dict]) -> li
             "heat_types": heat_types,
             "estimated_acres": est_acres,
             "pdf_url": f"/{pdfs[0].key}" if pdfs else None,
+            "preview_url": _ir_preview_url(storage, state, fire_slug, pdfs[0]) if pdfs else None,
             "kmz_url": f"/{kmzs[0].key}" if kmzs else None,
             "readme_url": f"/{readmes[0].key}" if readmes else None,
         })
     return out
+
+
+def _ir_preview_url(storage, state, fire_slug: str, pdf) -> str | None:
+    """Card thumbnail for an IR flight: its PDF's first page, rendered and
+    keyed exactly like a map sheet's (previews/…/{sha}.png, recorded in
+    state["tiled"]). The probe backlog renders missing ones from the bucket;
+    a PDF downloaded this run is rendered here (~1 s) so a new flight shows
+    its thumbnail straight away. IR PDFs are never tiled: they aren't map
+    overlays (the KMZ/shapefile vectors are), so their records are marked
+    done for the tiler."""
+    sha = pdf.sha16
+    if not sha:
+        return None
+    rec = state["tiled"].get(sha)
+    key = f"previews/incidents/{fire_slug}/{sha}.png"
+    if rec and (rec.get("geo") or {}).get("preview"):
+        return f"/{key}"
+    if rec is not None or pdf.local_path is None or not geopdf.gdal_available():
+        return None  # tried before, not here yet, or no GDAL this run
+    ok = False
+    try:
+        with tempfile.TemporaryDirectory(prefix="irprev_") as td:
+            png = Path(td) / "preview.png"
+            geopdf.render_preview(pdf.local_path, png)
+            storage.put_file(key, png)
+            ok = True
+    except Exception as exc:
+        log(f"[ir] preview failed for {pdf.filename}: {exc}")
+    now = state_mod.now_iso()
+    state["tiled"][sha] = {
+        "tiler_version": config.TILER_VERSION,
+        "at": now, "repair_at": now, "grat_at": now,
+        "geo": {"georeferenced": False, "projection": None, "tiles": None, "preview": ok},
+    }
+    return f"/{key}" if ok else None
 
 
 def tile_meta_key(fire_slug: str, sha: str) -> str:
@@ -908,7 +945,7 @@ def _pending_sheets(state) -> list[tuple[str, str, str]]:
             continue
         for rel, meta in (inc.get("files") or {}).items():
             sha = meta.get("sha16")
-            if not sha or sha in seen:
+            if not sha or sha in seen or meta.get("kind") == "ir":
                 continue
             rec = state["tiled"].get(sha)
             if (not rec or rec.get("tiler_version") is not None
@@ -989,6 +1026,8 @@ def _tile_backlog(storage, state, log, *, cap: int = 12,
         for rel, meta in (inc.get("files") or {}).items():
             if tiled >= cap or frames.deadline_passed():
                 break
+            if meta.get("kind") == "ir":
+                continue  # IR PDFs aren't map overlays; never tile them
             sha = meta.get("sha16")
             rec = state["tiled"].get(sha) if sha else None
             if (not rec or rec.get("tiler_version") is not None
@@ -1078,7 +1117,10 @@ def _probe_backlog(storage, state, log, *, cap: int = 40) -> set[str]:
             if (not sha or not rel.lower().endswith(".pdf")
                     or meta.get("kind") == "mobile"):
                 continue
+            is_ir = meta.get("kind") == "ir"
             rec = state["tiled"].get(sha)
+            if rec is not None and is_ir:
+                continue  # IR PDFs only ever need the card thumbnail
             if rec is not None:
                 # Repair passes, each attempted once per sheet:
                 #  - broken records (no preview, no tiles) from failed probes
@@ -1116,7 +1158,9 @@ def _probe_backlog(storage, state, log, *, cap: int = 40) -> set[str]:
                     "grat_at": state_mod.now_iso(),
                     # georeferenced sheets keep tiler_version None -> the
                     # normal tiling budget picks them up from B2 next runs
-                    "tiler_version": None if probe["georeferenced"] else config.TILER_VERSION,
+                    # (IR PDFs never: they aren't map overlays)
+                    "tiler_version": (None if probe["georeferenced"] and not is_ir
+                                      else config.TILER_VERSION),
                     "at": state_mod.now_iso(),
                     "geo": geo,
                 }
@@ -1128,13 +1172,20 @@ def _probe_backlog(storage, state, log, *, cap: int = 40) -> set[str]:
     return touched
 
 
+# Bump when ir_flights entries gain a field that needs no reconversion (e.g.
+# preview_url): every incident with IR files gets one manifest rebuild.
+IR_MANIFEST_VERSION = 2
+
+
 def _ir_backlog(state: dict, log) -> set[str]:
     """Incidents holding IR flights that were mirrored before conversion
     existed for their format (e.g. KMZ-only flights, pre-KMZ-fallback code).
     State-only scan, zero network: any flight dir with a convertible source
     but no attempt recorded in state["ir"] under the current converter marks
     the incident for a manifest rebuild, which runs the conversion (results
-    cached either way) — so a converter bump reconverts every flight."""
+    cached either way) — so a converter bump reconverts every flight. An
+    IR_MANIFEST_VERSION bump rebuilds each IR incident's manifest once
+    (replay only, nothing reconverted)."""
     touched: set[str] = set()
     attempted_by_fire: dict[str, int] = {}
     for key, rec in state.get("ir", {}).items():
@@ -1147,16 +1198,19 @@ def _ir_backlog(state: dict, log) -> set[str]:
         if not fire_slug:
             continue
         flights = set()
+        has_ir = False
         for rel in rec.get("files", {}):
             parts = rel.split("/")
-            if (len(parts) >= 3 and parts[0] == "ir"
-                    and rel.lower().endswith(("shapefiles.zip", ".kmz"))):
-                flights.add(parts[1])
-        if len(flights) > attempted_by_fire.get(fire_slug, 0):
+            if len(parts) >= 3 and parts[0] == "ir":
+                has_ir = True
+                if rel.lower().endswith(("shapefiles.zip", ".kmz")):
+                    flights.add(parts[1])
+        if (len(flights) > attempted_by_fire.get(fire_slug, 0)
+                or (has_ir and rec.get("ir_manifest_v") != IR_MANIFEST_VERSION)):
             touched.add(inc_key)
     if touched:
         log(f"[incidents] IR backlog: {len(touched)} incidents have "
-            "unconverted flights — queuing manifest rebuilds")
+            "unconverted flights or older IR manifests — queuing rebuilds")
     return touched
 
 

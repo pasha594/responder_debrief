@@ -27,7 +27,7 @@ def test_classify_kmz_layer():
 
 
 def test_ir_backlog_flags_unconverted_flights():
-    from responder_worker.cli import _ir_backlog
+    from responder_worker.cli import IR_MANIFEST_VERSION as M, _ir_backlog
     from responder_worker.ir_vectors import IR_CONVERTER_VERSION as V
 
     state = {
@@ -36,6 +36,7 @@ def test_ir_backlog_flags_unconverted_flights():
         "incidents": {
             "gb/2026_Bear_Trap": {
                 "fire_slug": "bear-trap",
+                "ir_manifest_v": M,
                 "files": {
                     "ir/20260819/20260819_c0800_Bear_Trap_Aircraft3_All.kmz": {},
                     "ir/20260819/20260819_c0800_Bear_Trap_Aircraft3_All.pdf": {},
@@ -43,6 +44,7 @@ def test_ir_backlog_flags_unconverted_flights():
             },
             "gb/2026_Big_Grass": {
                 "fire_slug": "big-grass",
+                "ir_manifest_v": M,
                 "files": {"ir/20260818/x_Shapefiles.zip": {}},
             },
             "gb/2026_No_IR": {"fire_slug": "no-ir", "files": {"qr/ops.pdf": {}}},
@@ -63,6 +65,18 @@ def test_ir_backlog_flags_unconverted_flights():
         "heat_types": ["Intense"]}
     assert _ir_backlog(state, lambda *_: None) == {
         "gb/2026_Bear_Trap", "gb/2026_Big_Grass"}
+
+    # an IR manifest from before the current IR_MANIFEST_VERSION (e.g. no
+    # preview_url yet) is rebuilt once, even with every flight converted
+    state["ir"] = {
+        "vectors/ir/big-grass/a.geojson": {"heat_types": ["Intense"], "v": V},
+        "vectors/ir/bear-trap/b.geojson": {"failed": True, "v": V}}
+    assert _ir_backlog(state, lambda *_: None) == set()
+    state["incidents"]["gb/2026_Big_Grass"]["ir_manifest_v"] = M - 1
+    assert _ir_backlog(state, lambda *_: None) == {"gb/2026_Big_Grass"}
+    # incidents without IR files never need it
+    state["incidents"]["gb/2026_No_IR"].pop("ir_manifest_v", None)
+    assert "gb/2026_No_IR" not in _ir_backlog(state, lambda *_: None)
 
 
 def test_regroup_flat_coords():
@@ -284,3 +298,102 @@ def test_ir_flights_keeps_an_older_result_when_it_cannot_reconvert(monkeypatch):
     assert flight["geojson_url"] == f"/{key}"
     assert flight["flown_at"] is None
     assert state["ir"][key] == {"heat_types": ["Perimeter"]}
+
+
+def _ir_pdf(local, sha="abcd1234abcd1234"):
+    from responder_worker.mirror import MirroredFile
+    return MirroredFile(
+        kind="ir", filename="20260925_Sisi_IR_11x17_Aerial.pdf",
+        key="raw/incidents/sisi/ir/20260925/20260925_Sisi_IR_11x17_Aerial.pdf",
+        url="", size=1, sha16=sha, rev=1, local_path=local, changed=True,
+        rel_dir="ir/20260925")
+
+
+def test_ir_preview_url_reuses_renders_and_never_queues_tiling(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    from responder_worker import cli, config, geopdf
+
+    put = {}
+    storage = SimpleNamespace(put_file=lambda key, p: put.__setitem__(key, p.read_bytes()))
+    rendered = []
+
+    def fake_render(pdf, out):
+        rendered.append(pdf)
+        out.write_bytes(b"png")
+        return out
+
+    monkeypatch.setattr(geopdf, "render_preview", fake_render)
+    monkeypatch.setattr(geopdf, "gdal_available", lambda: True)
+    key = "previews/incidents/sisi/abcd1234abcd1234.png"
+
+    # a preview the probe backlog already made (same key as map sheets)
+    state = {"tiled": {"abcd1234abcd1234": {"geo": {"preview": True}}}}
+    assert cli._ir_preview_url(storage, state, "sisi", _ir_pdf(None)) == f"/{key}"
+    assert not rendered
+
+    # a PDF downloaded this run: rendered now, recorded as done for the tiler
+    pdf = tmp_path / "ir.pdf"
+    pdf.write_bytes(b"%PDF")
+    state = {"tiled": {}}
+    assert cli._ir_preview_url(storage, state, "sisi", _ir_pdf(pdf)) == f"/{key}"
+    assert rendered == [pdf] and put[key] == b"png"
+    rec = state["tiled"]["abcd1234abcd1234"]
+    assert rec["tiler_version"] == config.TILER_VERSION
+    assert rec["geo"]["preview"] is True
+
+    # a replayed PDF with no preview yet: nothing now, the probe backlog does it
+    state = {"tiled": {}}
+    assert cli._ir_preview_url(storage, state, "sisi", _ir_pdf(None)) is None
+    assert state["tiled"] == {}
+
+
+def test_tilers_skip_ir_pdfs():
+    from responder_worker import cli
+
+    state = {
+        "incidents": {"pnw/2026_Sisi": {"fire_slug": "sisi", "files": {
+            "ir/20260925/a.pdf": {"sha16": "aaaa", "kind": "ir"},
+            "products/20260923/ops.pdf": {"sha16": "bbbb", "kind": "product"},
+        }}},
+        "tiled": {
+            # an IR PDF an older probe queued for tiling, and a real map sheet
+            "aaaa": {"tiler_version": None, "geo": {"georeferenced": True}},
+            "bbbb": {"tiler_version": None, "geo": {"georeferenced": True}},
+        },
+    }
+    assert [sha for sha, _, _ in cli._pending_sheets(state)] == ["bbbb"]
+
+
+def test_probe_backlog_previews_ir_pdfs_without_queuing_tiles(monkeypatch):
+    from types import SimpleNamespace
+
+    from responder_worker import cli, config, frames, geopdf
+
+    def get_file(key, local):
+        local.write_bytes(b"%PDF")
+        return True
+
+    put = {}
+    storage = SimpleNamespace(get_file=get_file,
+                              put_file=lambda key, p: put.__setitem__(key, True))
+    monkeypatch.setattr(geopdf, "gdal_available", lambda: True)
+    monkeypatch.setattr(geopdf, "probe_pdf",
+                        lambda p: {"georeferenced": True, "projection": "UTM 10N"})
+    monkeypatch.setattr(geopdf, "render_preview",
+                        lambda pdf, out: out.write_bytes(b"png") or out)
+    frames.start_deadline(0)
+    state = {"tiled": {}, "incidents": {"pnw/2026_Sisi": {"fire_slug": "sisi", "files": {
+        "ir/20260925/a.pdf": {"sha16": "aaaa", "kind": "ir"},
+        "products/20260923/ops.pdf": {"sha16": "bbbb", "kind": "product"},
+    }}}}
+    assert cli._probe_backlog(storage, state, lambda *_: None) == {"pnw/2026_Sisi"}
+    assert "previews/incidents/sisi/aaaa.png" in put
+    # georeferenced either way — only the map sheet is owed tiles
+    assert state["tiled"]["aaaa"]["tiler_version"] == config.TILER_VERSION
+    assert state["tiled"]["bbbb"]["tiler_version"] is None
+    # and an IR record is never "repaired" into a tiling candidate later
+    state["tiled"]["aaaa"].pop("grat_at")
+    put.clear()
+    cli._probe_backlog(storage, state, lambda *_: None)
+    assert "previews/incidents/sisi/aaaa.png" not in put

@@ -35,7 +35,7 @@ export function useManifestForFire(corneaId: string | null) {
   return useIncidentManifest(catalogFire?.incident_manifest ?? null);
 }
 
-function Thumb({ entry }: { entry: IncidentMapEntry }) {
+function Thumb({ previewUrl }: { previewUrl: string | null | undefined }) {
   const fallback = (
     <div className="rd-thumb rd-thumb--fallback" aria-hidden="true">
       <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
@@ -44,11 +44,11 @@ function Thumb({ entry }: { entry: IncidentMapEntry }) {
       </svg>
     </div>
   );
-  if (!entry.preview_url) return fallback;
+  if (!previewUrl) return fallback;
   return (
     <PackImg
       className="rd-thumb"
-      src={dataUrl(entry.preview_url)}
+      src={dataUrl(previewUrl)}
       alt=""
       width={56}
       height={56}
@@ -116,7 +116,7 @@ function MapRow({
         target="_blank"
         rel="noopener noreferrer"
       >
-        <Thumb entry={entry} />
+        <Thumb previewUrl={entry.preview_url} />
         <div className="rd-map-row-body">
           <div className="rd-map-row-title">{entry.product_label}</div>
           <div className="rd-map-row-meta">
@@ -145,7 +145,7 @@ function MapRow({
       onClick={onRowClick}
       title={overlayable && !active ? 'Show this map on the map' : undefined}
     >
-      <Thumb entry={entry} />
+      <Thumb previewUrl={entry.preview_url} />
       <div className="rd-map-row-body">
         <div className="rd-map-row-title">{entry.product_label}</div>
         <div className="rd-map-row-meta">{rowMeta(entry, timezone)}</div>
@@ -292,37 +292,40 @@ function IrFlightRow({ flight, timezone }: { flight: IrFlight; timezone: string 
       onClick={onRowClick}
       title={clickable ? 'Show this IR flight on the map' : undefined}
     >
-      <div className="rd-ir-date">IR flight</div>
-      <div className="rd-ir-when" title={when.source ? IR_WHEN_TITLE[when.source] : undefined}>
-        {when.source === 'folder' ? `${when.label} (folder date)` : `Flown ${when.label}`}
-        {flight.estimated_acres != null &&
-          ` · ${Math.round(flight.estimated_acres).toLocaleString('en-US')} ac est.`}
-      </div>
-      <div className="rd-ir-row-actions">
-        <button
-          type="button"
-          className={`rd-toggle-btn${active ? ' rd-toggle-btn--on' : ''}`}
-          aria-pressed={active}
-          disabled={!canShow}
-          title={canShow ? undefined : 'No heat perimeter for this flight'}
-          onClick={() => actions.setIrFlight(active ? null : flight.flight_id)}
-        >
-          <span className="rd-radio-dot" aria-hidden="true" />
-          {active ? 'Shown on map' : 'Show on map'}
-        </button>
-        {flight.kmz_url && (
-          <a
-            className="rd-pdf-pill"
-            href={dataUrl(flight.kmz_url)}
-            target="_blank"
-            rel="noopener noreferrer"
+      <Thumb previewUrl={flight.preview_url} />
+      <div className="rd-map-row-body">
+        <div className="rd-ir-date">IR flight</div>
+        <div className="rd-ir-when" title={when.source ? IR_WHEN_TITLE[when.source] : undefined}>
+          {when.source === 'folder' ? `${when.label} (folder date)` : `Flown ${when.label}`}
+          {flight.estimated_acres != null &&
+            ` · ${Math.round(flight.estimated_acres).toLocaleString('en-US')} ac est.`}
+        </div>
+        <div className="rd-ir-row-actions">
+          <button
+            type="button"
+            className={`rd-toggle-btn${active ? ' rd-toggle-btn--on' : ''}`}
+            aria-pressed={active}
+            disabled={!canShow}
+            title={canShow ? undefined : 'No heat perimeter for this flight'}
+            onClick={() => actions.setIrFlight(active ? null : flight.flight_id)}
           >
-            KMZ
-          </a>
-        )}
+            <span className="rd-radio-dot" aria-hidden="true" />
+            {active ? 'Shown on map' : 'Show on map'}
+          </button>
+          {flight.kmz_url && (
+            <a
+              className="rd-pdf-pill"
+              href={dataUrl(flight.kmz_url)}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              KMZ
+            </a>
+          )}
+        </div>
+        {/* desktop has the map's legend box; phones have no map legend */}
+        {active && !isDesktop && <IrHeatLegend heatTypes={flight.heat_types} />}
       </div>
-      {/* desktop has the map's legend box; phones have no map legend */}
-      {active && !isDesktop && <IrHeatLegend heatTypes={flight.heat_types} />}
       {flight.pdf_url && <OpenPdfLink href={dataUrl(flight.pdf_url)} />}
     </div>
   );

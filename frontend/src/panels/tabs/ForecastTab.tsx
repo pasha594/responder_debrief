@@ -11,6 +11,7 @@
  * see the store's selectFire / setSpreadProduct).
  */
 import { useEffect, useMemo } from 'react';
+import { LayerRow } from '../layers/LayerRow';
 import { TrailsRow, VegetationRow } from '../layers/TrailsRow';
 import {
   latestRun,
@@ -229,100 +230,95 @@ function FireForecastSection({ corneaId }: { corneaId: string }) {
   const timezone = fire?.timezone ?? null;
 
   return (
-    <>
-      <label className="rd-field--row">
-        <input
-          type="checkbox"
-          checked={spread.visible}
-          onChange={(e) => actions.setSpreadVisible(e.target.checked)}
-        />
-        <span>Show on map</span>
-      </label>
-
-      {!spread.visible ? null : (
+    <LayerRow
+      label="Show on map"
+      checked={spread.visible}
+      onChange={(visible) => actions.setSpreadVisible(visible)}
+    >
+      {spread.visible && (
         <>
-      <div className="rd-field">
-        <span className="rd-field-label">Product</span>
-        <select
-          className="rd-select"
-          value={product}
-          onChange={(e) => actions.setSpreadProduct(e.target.value as SpreadProduct)}
-        >
-          {products.map((p) => (
-            <option key={p} value={p}>
-              {SPREAD_PRODUCT_LABELS[p]}
-            </option>
-          ))}
-        </select>
-      </div>
-
-      {/* Run/Covers sits with the product it describes — a reader picking a
-          product asks "how old is this?" before touching any of the knobs. */}
-      <RunMeta run={run} timezone={timezone} />
-
-      {isToa && <ToaModeSwitch />}
-      {wholeMode && <ToaReachSlider horizonHours={run.horizon_hours} />}
-
-      <div className="rd-field">
-        <span className="rd-field-label">Ensemble percentile</span>
-        <div className="rd-pills" role="group" aria-label="Ensemble percentile">
-          {ALL_PERCENTILES.map((p) => {
-            const enabled = percentiles.includes(p);
-            return (
-              <button
-                key={p}
-                type="button"
-                className={`rd-pill${effectivePct === p ? ' rd-pill--active' : ''}`}
-                disabled={!enabled}
-                title={enabled ? undefined : 'Not published for this product'}
-                aria-pressed={effectivePct === p}
-                onClick={() => actions.setSpreadPercentile(p)}
-              >
-                {p}
-              </button>
-            );
-          })}
-        </div>
-        {effectivePct !== null && effectivePct !== spread.percentile && (
-          <div className="rd-field-note">
-            Showing nearest available percentile ({effectivePct}).
+          <div className="rd-field">
+            <span className="rd-field-label">Product</span>
+            <select
+              className="rd-select"
+              value={product}
+              onChange={(e) => actions.setSpreadProduct(e.target.value as SpreadProduct)}
+            >
+              {products.map((p) => (
+                <option key={p} value={p}>
+                  {SPREAD_PRODUCT_LABELS[p]}
+                </option>
+              ))}
+            </select>
           </div>
-        )}
-      </div>
 
-      <div className="rd-field">
-        <span className="rd-field-label">Opacity</span>
-        <input
-          type="range"
-          className="rd-slider"
-          min={0}
-          max={1}
-          step={0.05}
-          value={spread.opacity}
-          onChange={(e) => actions.setSpreadOpacity(Number(e.target.value))}
-          aria-label="Forecast opacity"
-        />
-      </div>
+          {/* Run/Covers sits with the product it describes — a reader picking a
+              product asks "how old is this?" before touching any of the knobs. */}
+          <RunMeta run={run} timezone={timezone} />
 
-      <div className="rd-legend-card">
-        {isToa ? (
-          wholeMode ? (
-            <ToaBandLegend
-              horizonHours={run.horizon_hours}
-              withinHours={clampWithinHours(spread.toaWithinHours, run.horizon_hours)}
+          {isToa && <ToaModeSwitch />}
+          {wholeMode && <ToaReachSlider horizonHours={run.horizon_hours} />}
+
+          <div className="rd-field">
+            <span className="rd-field-label">Ensemble percentile</span>
+            <div className="rd-pills" role="group" aria-label="Ensemble percentile">
+              {ALL_PERCENTILES.map((p) => {
+                const enabled = percentiles.includes(p);
+                return (
+                  <button
+                    key={p}
+                    type="button"
+                    className={`rd-pill${effectivePct === p ? ' rd-pill--active' : ''}`}
+                    disabled={!enabled}
+                    title={enabled ? undefined : 'Not published for this product'}
+                    aria-pressed={effectivePct === p}
+                    onClick={() => actions.setSpreadPercentile(p)}
+                  >
+                    {p}
+                  </button>
+                );
+              })}
+            </div>
+            {effectivePct !== null && effectivePct !== spread.percentile && (
+              <div className="rd-field-note">
+                Showing nearest available percentile ({effectivePct}).
+              </div>
+            )}
+          </div>
+
+          <div className="rd-field">
+            <span className="rd-field-label">Opacity</span>
+            <input
+              type="range"
+              className="rd-slider"
+              min={0}
+              max={1}
+              step={0.05}
+              value={spread.opacity}
+              onChange={(e) => actions.setSpreadOpacity(Number(e.target.value))}
+              aria-label="Forecast opacity"
             />
-          ) : (
-            <ToaTimelineLegend run={run} timezone={timezone} />
-          )
-        ) : meta?.legend_labels?.length ? (
-          <DiscreteLegend stops={meta.legend_stops} labels={[...meta.legend_labels]} />
-        ) : meta?.legend_stops?.length ? (
-          <GradientLegend stops={meta.legend_stops} units={meta.units ?? undefined} />
-        ) : null}
-      </div>
+          </div>
+
+          <div className="rd-legend-card">
+            {isToa ? (
+              wholeMode ? (
+                <ToaBandLegend
+                  horizonHours={run.horizon_hours}
+                  withinHours={clampWithinHours(spread.toaWithinHours, run.horizon_hours)}
+                />
+              ) : (
+                <ToaTimelineLegend run={run} timezone={timezone} />
+              )
+            ) : meta?.legend_labels?.length ? (
+              <DiscreteLegend stops={meta.legend_stops} labels={[...meta.legend_labels]} />
+            ) : meta?.legend_stops?.length ? (
+              <GradientLegend stops={meta.legend_stops} units={meta.units ?? undefined} />
+            ) : null}
+          </div>
         </>
       )}
-    </>
+    </LayerRow>
   );
 }
 
@@ -361,37 +357,31 @@ function MapLayerToggles({ corneaId }: { corneaId: string }) {
   const actions = useStore((s) => s.actions);
   return (
     <section className="rd-section">
-      <label className="rd-field--row">
-        <input type="checkbox" checked={hotspots} onChange={() => actions.toggleHotspots()} />
-        <span>Hotspots</span>
-      </label>
-      <label className="rd-field--row">
-        <input type="checkbox" checked={perimeters} onChange={() => actions.togglePerimeters()} />
-        <span>Perimeters</span>
-      </label>
-      <label className="rd-field--row">
-        <input
-          type="checkbox"
-          checked={historic}
-          onChange={() => actions.toggleHistoricPerimeters()}
-        />
-        <span>Historic perimeters</span>
-      </label>
-      {historic && (
-        <div className="rd-hist-legend" aria-hidden="true">
-          <span className="rd-hist-chip" style={{ background: '#e0a24a' }} /> recent
-          <span className="rd-hist-chip" style={{ background: '#a5875a' }} /> ~5 yr
-          <span className="rd-hist-chip" style={{ background: '#6f675f' }} /> 10 yr
-        </div>
-      )}
+      <LayerRow label="Hotspots" checked={hotspots} onChange={() => actions.toggleHotspots()} />
+      <LayerRow label="Perimeters" checked={perimeters} onChange={() => actions.togglePerimeters()} />
+      <LayerRow
+        label="Historic perimeters"
+        checked={historic}
+        onChange={() => actions.toggleHistoricPerimeters()}
+      >
+        {historic && (
+          <div className="rd-hist-legend" aria-hidden="true">
+            <span className="rd-hist-chip" style={{ background: '#e0a24a' }} /> recent
+            <span className="rd-hist-chip" style={{ background: '#a5875a' }} /> ~5 yr
+            <span className="rd-hist-chip" style={{ background: '#6f675f' }} /> 10 yr
+          </div>
+        )}
+      </LayerRow>
       <TrailsRow />
       <VegetationRow corneaId={corneaId} />
-      <label className="rd-field--row">
-        <input type="checkbox" checked={land} onChange={() => actions.toggleLand()} />
-        <span>Land ownership</span>
-        <span className="rd-title-meta">NIFC · online</span>
-      </label>
-      {land && <LandLegend corneaId={corneaId} />}
+      <LayerRow
+        label="Land ownership"
+        meta="NIFC · online"
+        checked={land}
+        onChange={() => actions.toggleLand()}
+      >
+        {land && <LandLegend corneaId={corneaId} />}
+      </LayerRow>
     </section>
   );
 }
@@ -406,17 +396,15 @@ function TrafficToggles() {
     <section className="rd-section">
       <h3 className="rd-section-title">Traffic</h3>
       {trafficAvailable && (
-        <label className="rd-field--row">
-          <input type="checkbox" checked={traffic} onChange={() => actions.toggleTraffic()} />
-          <span>Live traffic</span>
-        </label>
+        <LayerRow label="Live traffic" checked={traffic} onChange={() => actions.toggleTraffic()} />
       )}
       {incidentsAvailable && (
-        <label className="rd-field--row">
-          <input type="checkbox" checked={incidents} onChange={() => actions.toggleIncidents()} />
-          <span>Road incidents</span>
-          <span className="rd-title-meta">closures, delays</span>
-        </label>
+        <LayerRow
+          label="Road incidents"
+          meta="closures, delays"
+          checked={incidents}
+          onChange={() => actions.toggleIncidents()}
+        />
       )}
     </section>
   );

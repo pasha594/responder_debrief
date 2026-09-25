@@ -678,25 +678,34 @@
   max-width: 100%;
 }
 
-/* ---------- Weather tab ---------- */
+/* ---------- Layers tab rows (LayerRow) ---------- */
 
-.rd-weather-row {
-  padding: 8px 0;
+/* Every layer is one ruled row; the label fills it, so a click anywhere on
+   the line toggles the layer. 40px + the rule = the old weather row, whose
+   height came from its Legend button. */
+.rd-layer-row {
   border-bottom: 1px solid var(--color-border);
 }
-.rd-weather-row--on {
-  background: none;
+.rd-layer-row-toggle {
+  box-sizing: border-box;
+  min-height: 40px;
+  padding: 8px 0;
 }
-
-.rd-weather-row-top {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
+.rd-layer-row-toggle:has(input:disabled) {
+  cursor: default;
 }
-
-.rd-weather-row .rd-slider {
+/* What an on layer shows under its line: legend, opacity, notes. */
+.rd-layer-row-body {
+  padding-bottom: 10px;
+}
+.rd-layer-row-body:empty {
+  display: none;
+}
+.rd-layer-row-body > * + * {
   margin-top: 6px;
+}
+.rd-layer-row-body > .rd-slider {
+  display: block;
 }
 
 .rd-mini-btn {
@@ -712,9 +721,6 @@
   background: var(--color-hover-bg);
 }
 
-.rd-mini-legend {
-  margin-top: 6px;
-}
 .rd-mini-legend img {
   display: block;
   max-width: 100%;
@@ -886,6 +892,8 @@
 
 .rd-ir-row {
   position: relative; /* corner open-PDF icon anchors here */
+  display: flex; /* thumbnail + body, like a map card */
+  gap: 10px;
   padding: 8px;
   margin-bottom: 6px;
   border: 1px solid var(--color-border);
@@ -946,7 +954,7 @@
   flex-direction: column;
   gap: 4px;
 }
-.rd-section > .rd-veg-legend {
+.rd-layer-row-body > .rd-veg-legend {
   padding: 2px 0 4px 26px; /* under the row's checkbox, like the historic key */
 }
 
@@ -1164,6 +1172,29 @@
 }
 .rd-compass-pin {
   fill: var(--color-text-muted);
+}
+
+/* MapLibre's "i" is a black disc in a thick white ring. Ours is drawn like
+   the compass and the scale bar beside it: the overlays' translucent ground
+   in a 2px ring (the scale bar's line) with the glyph in the same text
+   color. The white control behind it is cleared while it is just the "i". */
+.rd-map-root .maplibregl-ctrl-attrib.maplibregl-compact:not(.maplibregl-compact-show) {
+  background: none;
+}
+.rd-map-root .maplibregl-ctrl-attrib.maplibregl-compact .maplibregl-ctrl-attrib-button {
+  background: var(--overlay-bg);
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+  border: 2px solid var(--color-text);
+}
+/* MapLibre's glyph, cut to the 20px inside the ring. */
+.rd-map-root .maplibregl-ctrl-attrib-button::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: var(--color-text);
+  -webkit-mask: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='4 4 12 12'%3E%3Cpath d='M9 7a1 1 0 1 0 2 0 1 1 0 1 0-2 0m0 3a1 1 0 1 1 2 0v3a1 1 0 1 1-2 0z'/%3E%3C/svg%3E") center / 100% no-repeat;
+  mask: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='4 4 12 12'%3E%3Cpath d='M9 7a1 1 0 1 0 2 0 1 1 0 1 0-2 0m0 3a1 1 0 1 1 2 0v3a1 1 0 1 1-2 0z'/%3E%3C/svg%3E") center / 100% no-repeat;
 }
 
 /* MapLibre's own bottom-right corner (the attribution) belongs to the
@@ -1441,6 +1472,9 @@
   .rd-toggle-btn,
   .rd-pdf-pill {
     min-height: 32px;
+  }
+  .rd-layer-row-toggle {
+    min-height: 48px; /* the weather row's height with its 32px Legend button */
   }
 }
 
