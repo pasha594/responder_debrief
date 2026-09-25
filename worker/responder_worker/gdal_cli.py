@@ -232,7 +232,9 @@ def write_raster(arr: np.ndarray, geo: Georef, dest: Path, *,
 def transform_points(points: list[tuple[float, float]], src_epsg: int,
                      dst_epsg: int) -> list[tuple[float, float]]:
     """Batch-project points with gdaltransform (PROJ does the math)."""
-    text = "\n".join(f"{x!r} {y!r}" for x, y in points) + "\n"
+    # float() first: under numpy 2 repr(np.float64(5.0)) is "np.float64(5.0)",
+    # which gdaltransform does not reject — it silently projects garbage.
+    text = "\n".join(f"{float(x)!r} {float(y)!r}" for x, y in points) + "\n"
     tool = which("gdaltransform")
     if tool is None:
         raise GdalError("gdaltransform not on PATH")

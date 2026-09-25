@@ -65,6 +65,16 @@ class TestUtm:
             e, n = utm.fwd(lon, lat, 10)
             assert (e, n) == pytest.approx((we, wn), abs=0.01)
 
+    @needs_gdal
+    def test_numpy_scalars_project_like_floats(self):
+        # routing_bundle.bbox_5070 passes np.float64s; numpy 2's repr of them
+        # once sent the SISI fire's LANDFIRE box to (-3276435, -1921065, ...).
+        # SISI grid corner, 2026-09-25 (UTM 10N -> CONUS Albers).
+        want = gdal_cli.transform_points([(650340.0, 5368830.0)], 32610, 5070)
+        got = gdal_cli.transform_points([(np.float64(650340.0), np.float64(5368830.0))], 32610, 5070)
+        assert got == want
+        assert want[0] == pytest.approx((-1844069.0, 3071888.39), abs=0.5)
+
 
 class TestPmtilesInspect:
     def test_summary_of_gdal_archive(self, fixtures):
