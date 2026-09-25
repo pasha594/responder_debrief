@@ -341,6 +341,8 @@ export function useMapLayerSync(): boolean {
   const flownTo = useRef<string | null>(null);
   const perimeterFit = useRef<string | null>(null);
   const userMoved = useRef(false);
+  const sharedCamera = useStore((s) =>
+    s.share.pending && s.share.pending.corneaId === corneaId ? s.share.pending.camera : null);
   useEffect(() => {
     if (!map) return;
     const onUserMove = (e: { originalEvent?: unknown }) => {
@@ -362,6 +364,21 @@ export function useMapLayerSync(): boolean {
     if (flownTo.current !== view.corneaId) {
       userMoved.current = false;
       perimeterFit.current = null;
+    }
+    // A scanned share's camera beats every automatic framing — now, and when
+    // the perimeter lands later (it counts as the user having moved).
+    if (sharedCamera) {
+      flownTo.current = view.corneaId;
+      perimeterFit.current = view.corneaId;
+      userMoved.current = true;
+      map.jumpTo({
+        center: sharedCamera.center,
+        zoom: sharedCamera.zoom,
+        bearing: sharedCamera.bearing,
+        pitch: sharedCamera.pitch,
+      });
+      actions.settleShared('camera');
+      return;
     }
     const FIT_PADDING = { top: 60, bottom: 120, left: 60, right: 420 };
 
@@ -402,7 +419,7 @@ export function useMapLayerSync(): boolean {
       flownTo.current = view.corneaId;
       map.flyTo({ center, zoom: 10, duration: 1200 });
     }
-  }, [map, view, spreadRun, catalogFire, fires, perimeterFeature]);
+  }, [map, view, spreadRun, catalogFire, fires, perimeterFeature, sharedCamera, actions]);
 
   // Diffalo records once this is true — the perimeter GeoJSON has landed.
   return perimeterFeature != null;

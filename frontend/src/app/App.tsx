@@ -5,6 +5,8 @@
  *   {base}health         → ingestion observability
  *   {base}sources        → upstream data sources
  *   {base}release_notes  → what shipped each day
+ *   {base}s#<digits>     → a QR share code opened as a link: previewed, then
+ *                          applied over the directory (share/)
  */
 import { useEffect, useRef } from 'react';
 import { MapRoot } from '../map/MapRoot';
@@ -14,6 +16,8 @@ import { Sidebar } from '../panels/Sidebar';
 import { BackControl } from '../panels/BackControl';
 import { BasemapControl } from '../panels/BasemapControl';
 import { PitchControl } from '../panels/PitchControl';
+import { QrShareControl } from '../panels/QrShareControl';
+import { IncomingShareCard } from '../panels/IncomingShareCard';
 import { SettingsControl } from '../panels/SettingsControl';
 import { SearchDirectionsControl } from '../panels/SearchDirectionsControl';
 import { DroppedPin } from '../panels/DroppedPin';
@@ -32,6 +36,11 @@ import { navNotify, parseLocation, routePath, useRoute, type Route } from './rou
 import { corneaIdForUrlId, firesLoaded, registerFires, urlIdForFire } from './fireUrl';
 import { useFires } from '../api/queries';
 import { applyViewState, buildSearch, decodeSearch } from './urlState';
+import { track } from './analytics';
+import { SharedPlayheadSync } from '../share/SharedPlayheadSync';
+import { ShareFormatError } from '../share/bytes';
+import { decodeShareBody } from '../share/shareCodec';
+import { parseShareText } from '../share/transport';
 
 function MapLayerBridge() {
   const perimeterReady = useMapLayerSync();
@@ -192,6 +201,38 @@ function UrlStateSync() {
   return null;
 }
 
+/**
+ * `/s#<digits>`: a share code opened by a phone's own camera app (or pasted).
+ * Decode it into the preview card, then land on the directory underneath —
+ * the card's Apply opens the fire.
+ */
+function ShareLinkLanding() {
+  const actions = useStore((s) => s.actions);
+  useEffect(() => {
+    if (parseLocation().name !== 'share') return; // StrictMode's second run
+    let problem: string | null = null;
+    try {
+      const code = parseShareText(window.location.href);
+      if (code?.kind === 'single') {
+        actions.setIncomingShare(decodeShareBody(code.body));
+        track('share_link_opened');
+      } else {
+        problem = code?.kind === 'frame'
+          ? 'That was one part of an animated code — scan it with Scan code in the app.'
+          : 'That share link is incomplete.';
+      }
+    } catch (err) {
+      problem = err instanceof ShareFormatError && err.reason === 'newer'
+        ? 'That share needs a newer version of the app — reconnect to update.'
+        : 'That share link couldn’t be read.';
+    }
+    if (problem) actions.showToast(problem);
+    history.replaceState(null, '', routePath({ name: 'directory' }));
+    navNotify();
+  }, [actions]);
+  return null;
+}
+
 /** Mirrors navigator.onLine into the store (no visible UI — the directory
  * and the offline card carry the messaging). */
 function OnlineSync() {
@@ -234,11 +275,13 @@ function FireMapView() {
     <MapRoot>
       <MapLayerBridge />
       <UrlStateSync />
+      <SharedPlayheadSync />
       <div className="rd-map-toolbar">
         <div className="rd-map-toolbar-row">
           <BackControl />
           <BasemapControl />
           <PitchControl />
+          <QrShareControl />
         </div>
         <ErrorBoundary label="Search">
           <SearchDirectionsControl />
@@ -309,6 +352,13 @@ export function App() {
       </div>
     );
   }
+  if (route.name === 'share') {
+    return (
+      <div className="rd-app">
+        <ShareLinkLanding />
+      </div>
+    );
+  }
   return (
     <div className="rd-app">
       <PathSync />
@@ -326,6 +376,7 @@ export function App() {
           <DirectoryView />
         </ErrorBoundary>
       )}
+      <IncomingShareCard />
       <Toast />
       <OnlineSync />
     </div>

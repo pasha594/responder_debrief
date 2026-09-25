@@ -2697,3 +2697,152 @@
 }
 .rd-offline-note { margin-top: 6px; font-size: 11.5px; color: var(--color-text-muted); }
 
+
+/* ---------- QR sharing (QrDialog, IncomingShareCard) ---------- */
+
+.rd-qr-btn svg { display: block; }
+.rd-qr-scan-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  font-size: 12.5px;
+}
+.rd-dir-actions {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* a bigger code beats a wider margin on phones */
+.rd-qr-backdrop { padding: 12px; }
+.rd-qr-dialog { width: min(420px, 100%); }
+.rd-qr-tabs { margin: 12px 14px 0; }
+.rd-qr-body {
+  padding: 12px 14px 14px;
+  overflow-y: auto;
+}
+.rd-qr-show,
+.rd-qr-scan {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.rd-qr-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 13px;
+  line-height: 1.4;
+  cursor: pointer;
+}
+.rd-qr-check input { margin-top: 2px; accent-color: var(--color-accent); }
+.rd-qr-check--off { color: var(--color-text-muted); cursor: default; }
+/* white in both themes: readers want dark modules on light */
+.rd-qr-frame,
+.rd-qr-viewfinder {
+  position: relative;
+  align-self: center;
+  width: 100%;
+  max-width: 340px;
+  aspect-ratio: 1;
+  border-radius: 6px;
+  overflow: hidden;
+}
+.rd-qr-frame {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #fff;
+}
+.rd-qr-code {
+  display: block;
+  width: 100%;
+  height: 100%;
+  image-rendering: pixelated;
+}
+.rd-qr-wait { font-size: 13px; color: #666; }
+.rd-qr-caption {
+  font-size: 13px;
+  line-height: 1.4;
+  text-align: center;
+}
+.rd-qr-hint,
+.rd-qr-note {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.45;
+  text-align: center;
+  color: var(--color-text-muted);
+}
+.rd-qr-viewfinder { background: #000; }
+.rd-qr-video {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover; /* shows exactly the centre square the decoder reads */
+}
+.rd-qr-reticle {
+  position: absolute;
+  inset: 10%;
+  border: 2px solid rgba(255, 255, 255, 0.85);
+  border-radius: 10px;
+  box-shadow: 0 0 0 999px rgba(0, 0, 0, 0.28);
+  pointer-events: none;
+}
+.rd-qr-progress .rd-offline-bar { margin-top: 6px; }
+.rd-qr-problem {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  line-height: 1.45;
+  text-align: center;
+}
+.rd-qr-problem p { margin: 0; }
+
+.rd-share-card { width: min(460px, 100%); }
+.rd-share-when {
+  flex: 0 0 auto;
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+.rd-share-rows {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 12px 14px;
+  overflow-y: auto;
+}
+.rd-share-row {
+  display: grid;
+  grid-template-columns: 118px 1fr;
+  gap: 10px;
+  font-size: 13px;
+  line-height: 1.4;
+}
+.rd-share-row dt { color: var(--color-text-muted); }
+.rd-share-row dd { margin: 0; overflow-wrap: anywhere; }
+.rd-share-warnings {
+  margin: 0 14px;
+  padding: 8px 12px 8px 26px;
+  font-size: 12.5px;
+  line-height: 1.45;
+  background: var(--color-hover-bg);
+  border-left: 3px solid var(--color-accent);
+  border-radius: var(--radius);
+}
+.rd-share-warnings li + li { margin-top: 4px; }
+.rd-share-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 14px 14px;
+}
+.rd-share-actions .rd-mini-btn { font-size: 13px; padding: 6px 12px; }
+@media (max-width: 480px) {
+  .rd-share-row { grid-template-columns: 96px 1fr; }
+}

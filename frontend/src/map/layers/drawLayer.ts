@@ -63,6 +63,12 @@ function loadPersisted(corneaId: string): DrawFeature[] {
   }
 }
 
+/** How many marks this device has saved for a fire (the share preview's
+ * "replaces your N marks"). */
+export function savedMarkCount(corneaId: string): number {
+  return loadPersisted(corneaId).length;
+}
+
 function persist(corneaId: string, features: DrawFeature[]): void {
   try {
     if (features.length) localStorage.setItem(storageKey(corneaId), JSON.stringify(features));
@@ -162,6 +168,20 @@ function render(map: MlMap): void {
     bounds: [b.getWest(), b.getSouth(), b.getEast(), b.getNorth()] as [number, number, number, number],
   };
   src.setData({ type: 'FeatureCollection', features: drawSourceFeatures(features, view, live) });
+}
+
+/**
+ * A scanned share's drawings replace the fire's marks as ONE undoable edit:
+ * Undo brings the device's own marks back, Redo puts the shared ones in
+ * again. It waits until this fire's saved marks have hydrated, so the undo
+ * step holds them and not an empty set.
+ */
+function applySharedDrawings(): void {
+  const { share, actions } = useStore.getState();
+  const p = share.pending;
+  if (!p?.drawings || p.corneaId !== hydratedFor) return;
+  actions.settleShared('drawings'); // first: drawCommit re-enters the subscription
+  actions.drawCommit(p.drawings);
 }
 
 function setCursor(map: MlMap): void {
@@ -314,6 +334,7 @@ export const drawLayer: LayerManager = {
           persist(cid, state.draw.features);
         }
       }
+      if (state.share.pending !== prev.share.pending) applySharedDrawings();
     });
 
     const handlers = { click, mdown, mmove, mup, tdown, tmove, missing, settled };
@@ -327,6 +348,7 @@ export const drawLayer: LayerManager = {
     if (cid && hydratedFor !== cid) {
       hydratedFor = cid;
       useStore.getState().actions.drawHydrate(loadPersisted(cid));
+      applySharedDrawings();
     }
     // ctx ticks every playback frame — only re-render when the draw slice
     // actually changed (the store subscription covers live edits).

@@ -7,6 +7,7 @@ import { create } from 'zustand';
 import { resetScope, track, trackOncePer } from '../app/analytics';
 import { DEFAULT_BASEMAP, DEFAULT_PLAYBACK_SPEED } from '../app/config';
 import type { Percentile, SpreadProduct, WeatherProduct } from '../api/types';
+import type { ShareCamera, ShareState } from '../share/shareCodec';
 import { TOA_DEFAULT_WITHIN_HOURS } from '../spread/toaBands';
 import type { DirectoryFilter, DirectoryNear, DirectorySort, DirectorySortKey } from '../directory/rowModel';
 import { DEFAULT_DIRECTORY_SORT } from '../directory/rowModel';
@@ -151,6 +152,27 @@ export interface AppState {
     online: boolean;
   };
 
+  /** QR sharing between phones (see share/). */
+  share: {
+    /** A scanned or linked share, shown for the user to Apply or dismiss. */
+    incoming: ShareState | null;
+    /**
+     * The parts of an applied share that wait on something else: the camera
+     * on the map (useMapLayerSync), the playhead on the fire's timeline
+     * domain (SharedPlayheadSync), the drawings on the draw layer loading the
+     * fire's own marks first (drawLayer). Each part is cleared as it lands;
+     * leaving the fire drops the rest.
+     */
+    pending: {
+      corneaId: string;
+      camera: ShareCamera | null;
+      time: number | null;
+      drawings: DrawFeature[] | null;
+      /** Date.now() when applied (a playhead still waiting gives up after 30 s). */
+      at: number;
+    } | null;
+  };
+
   ui: {
     theme: 'dark' | 'light';
     sidebarTab: 'overview' | 'forecast' | 'maps' | 'draw';
@@ -240,6 +262,15 @@ export interface AppState {
     setOfflinePacks(packs: Record<string, import('../offline/packs').PackMeta>): void;
     setOfflineProgress(p: AppState['offline']['progress']): void;
     setOnline(online: boolean): void;
+    setIncomingShare(share: ShareState | null): void;
+    /**
+     * Make the open fire's view match a share: layers, basemap and sheet at
+     * once; camera, playhead and drawings through `share.pending`. Only acts
+     * when that fire is the one open (share/applyShare selects it first).
+     */
+    applySharedView(share: ShareState): void;
+    /** One pending part of an applied share has landed (or was overtaken). */
+    settleShared(part: 'camera' | 'time' | 'drawings'): void;
   };
 }
 
@@ -328,6 +359,8 @@ export const useStore = create<AppState>((set, get) => ({
     online: typeof navigator === 'undefined' ? true : navigator.onLine,
   },
 
+  share: { incoming: null, pending: null },
+
   ui: {
     theme:
       typeof document !== 'undefined'
@@ -375,6 +408,8 @@ export const useStore = create<AppState>((set, get) => ({
         },
         droppedPin: null,
         range: { rings: [] },
+        // a share still landing belongs to the fire it was applied to
+        share: { ...s.share, pending: null },
 
   location: { coords: null, accuracy: null, tracking: false },
       }));
@@ -385,6 +420,7 @@ export const useStore = create<AppState>((set, get) => ({
         view: { mode: 'directory' },
         draw: disarmDraw(s.draw),
         droppedPin: null,
+        share: { ...s.share, pending: null },
         time: { ...s.time, playing: false },
         layers: {
           ...s.layers,
@@ -689,6 +725,60 @@ export const useStore = create<AppState>((set, get) => ({
     setOfflineProgress: (progress) => set((s) => ({ offline: { ...s.offline, progress } })),
     setOnline: (online) =>
       set((s) => (s.offline.online === online ? s : { offline: { ...s.offline, online } })),
+    setIncomingShare: (incoming) => set((s) => ({ share: { ...s.share, incoming } })),
+    applySharedView: (share) =>
+      set((s) => {
+        if (s.view.mode !== 'fire' || s.view.corneaId !== share.fire.corneaId) return {};
+        const L = share.layers;
+        // every weather layer the share doesn't name goes off (opacity kept)
+        const weather: AppState['layers']['weather'] = {};
+        for (const [p, st] of Object.entries(s.layers.weather) as [WeatherProduct, WeatherLayerState][]) {
+          weather[p] = { ...st, visible: false };
+        }
+        for (const [p, opacity] of Object.entries(L.weather) as [WeatherProduct, number][]) {
+          weather[p] = { visible: true, opacity };
+        }
+        return {
+          layers: {
+            ...s.layers,
+            spread: { ...L.spread },
+            weather,
+            hotspots: { visible: L.hotspots },
+            perimeters: { visible: L.perimeters },
+            historicPerimeters: { visible: L.historic },
+            traffic: { visible: L.traffic },
+            incidents: { visible: L.incidents },
+            incidentMap: { ...L.incidentMap },
+            irFlight: { flightId: L.irFlight },
+          },
+          ui: { ...s.ui, basemap: share.basemap },
+          // A "now" share follows the recipient's clock; a scrubbed playhead
+          // waits in `pending` for a timeline domain that reaches it.
+          time: {
+            ...s.time,
+            playing: false,
+            ...(share.time == null ? { currentTime: s.time.now } : {}),
+          },
+          share: {
+            incoming: null,
+            pending: {
+              corneaId: share.fire.corneaId,
+              camera: share.camera,
+              time: share.time,
+              drawings: share.drawings,
+              at: Date.now(),
+            },
+          },
+        };
+      }),
+    settleShared: (part) =>
+      set((s) => {
+        const p = s.share.pending;
+        if (!p || p[part] == null) return {};
+        const next = { ...p, [part]: null };
+        const done = next.camera == null && next.time == null && next.drawings == null;
+        return { share: { ...s.share, pending: done ? null : next } };
+      }),
     setMapStyle: (theme, id) => {
       track('map_style_changed', { theme, style: id });
       try {
