@@ -32,6 +32,13 @@ Inputs: OSM nodes/ways (osm_extract.parse_opl) and agency trail lines
    edge, so a restriction covers the whole matched trail and not just the
    edges that happened to lie close; an edge splits where a match starts or
    ends inside it (_matched_spans, _donate_spans).
+6. An added run that carries the name or number of the OSM trail both its
+   ends join, and runs beside a stretch of that trail of about its length,
+   is the same trail drawn differently (NPS "Agnes Creek Trail (PCT)" by
+   the SISI fire, up to 130 m off OSM's "Agnes Creek Trail"): the OSM line
+   wins and takes its attributes, so routes stop hopping between the two.
+   Nothing tells which line is right on the ground; OSM's is the one the
+   rest of the network joins. Otherwise the run is kept (_braid_path).
 
 RDG1 (little-endian; gzip, mtime 0; sections 4-byte aligned) — the byte
 contract with frontend/src/routing/rdg1.ts (FINAL_PLAN.md §2.6):
@@ -47,8 +54,10 @@ from __future__ import annotations
 
 import gzip
 import hashlib
+import heapq
 import json
 import math
+import re
 import struct
 from dataclasses import dataclass, field
 
@@ -62,7 +71,8 @@ from . import utm
 # 2: offset agency copies are no longer braided in (SAME_TRAIL_M).
 # 3: agency attributes reach every matched OSM trail stretch; roads are
 #    never the "same trail".
-BUILD_VERSION = 3
+# 4: a same-named agency braid of an OSM trail yields to the OSM line.
+BUILD_VERSION = 4
 
 KIND_PAVED, KIND_UNPAVED, KIND_TRACK, KIND_PATH, KIND_STEPS, KIND_AGENCY = 1, 2, 3, 4, 5, 6
 TRAIL_KINDS = (KIND_TRACK, KIND_PATH, KIND_STEPS)
@@ -98,6 +108,8 @@ NAME_EDGE_FRACTION = 0.60
 # CUT_SNAP_M of an edge end takes the whole edge; otherwise the edge splits.
 MATCH_GAP_M, MIN_MATCH_M, MATCH_SUPPORT, CUT_SNAP_M = 200.0, 30.0, 0.5, 25.0
 MIN_AGENCY_RUN_M = 60.0
+# a braid's OSM alternative is within 1.5x or 50 m of the braid's length
+BRAID_RATIO, BRAID_SLACK_M = 1.5, 50.0
 SNAP_VERTEX_M, SNAP_SEGMENT_M, SNAP_AGENCY_M = 10.0, 25.0, 10.0
 SAMPLE_M = 10.0
 MAX_DELTA_DM = 32000
@@ -514,6 +526,58 @@ def _donate_spans(g: Graph, donations: list[tuple[int, float, float, dict]]) -> 
     return named
 
 
+def name_keys(name: str | None, ref: str | None) -> set[str]:
+    """Comparable forms of a trail's name and number: "Agnes Creek Trail
+    (PCT)" -> {"agnes creek trail", "pct"}; "Ridge Trail #101" -> {"ridge
+    trail"}; ref "TR 1281" -> {"#1281"}."""
+    keys = set()
+    s = re.sub(r"#\s*\w+", " ", (name or "").lower())
+    for part in (re.sub(r"\([^)]*\)", " ", s), *re.findall(r"\(([^)]*)\)", s)):
+        k = " ".join(re.findall(r"[a-z0-9]+", part))
+        if k:
+            keys.add(k)
+    keys.update("#" + (n.lstrip("0") or "0") for n in re.findall(r"\d+", ref or ""))
+    return keys
+
+
+def _braid_path(g: Graph, a: int, b: int, keys: set[str], by_key: dict[str, list[int]],
+                run_len: float) -> list[int] | None:
+    """The OSM trail edges from node a to node b through edges sharing a
+    name key with the run (Dijkstra), when that path is about the run's
+    length; else None (a loop, a shortcut, or another trail)."""
+    if a == b or not keys:
+        return None
+    lo = min(run_len / BRAID_RATIO, run_len - BRAID_SLACK_M)
+    hi = max(run_len * BRAID_RATIO, run_len + BRAID_SLACK_M)
+    adj: dict[int, list] = {}
+    for ei in {ei for k in keys for ei in by_key.get(k, ())}:
+        e = g.edges[ei]
+        L = _length(e.xy)
+        adj.setdefault(e.a, []).append((e.b, L, ei))
+        adj.setdefault(e.b, []).append((e.a, L, ei))
+    best = {a: 0.0}
+    prev: dict[int, tuple[int, int]] = {}
+    heap = [(0.0, a)]
+    while heap:
+        d, n = heapq.heappop(heap)
+        if n == b:
+            if d < lo:  # a loop or spur back to (almost) where it left
+                return None
+            path = []
+            while n != a:
+                n, ei = prev[n]
+                path.append(ei)
+            return path
+        if d > best.get(n, math.inf):
+            continue
+        for m, L, ei in adj.get(n, ()):
+            if d + L <= hi and d + L < best.get(m, math.inf):
+                best[m] = d + L
+                prev[m] = (n, ei)
+                heapq.heappush(heap, (d + L, m))
+    return None
+
+
 def conflate(g: Graph, agency: list[tuple[dict, list]], *, log=print) -> dict:
     """agency: [(normalized props, UTM polyline)] already clipped to the AOI.
     Mutates g. -> stats."""
@@ -552,8 +616,8 @@ def conflate(g: Graph, agency: list[tuple[dict, list]], *, log=print) -> dict:
     h = _Hash(P, SAME_TRAIL_M)
 
     stats = {"agency_features": len(agency), "agency_dropped_covered": 0,
-             "agency_runs_added": 0, "agency_runs_parallel": 0, "osm_edges_named": 0,
-             "snapped": 0}
+             "agency_runs_added": 0, "agency_runs_parallel": 0, "agency_runs_braided": 0,
+             "osm_edges_named": 0, "snapped": 0}
     donations: list[tuple[int, float, float, dict]] = []
     new_runs: list[tuple[dict, list]] = []
     for props, line in agency:
@@ -631,6 +695,7 @@ def conflate(g: Graph, agency: list[tuple[dict, list]], *, log=print) -> dict:
         for (_, _, key), n in zip(reqs, nodes):
             snapped_to[key] = n
             stats["snapped"] += 1
+    on_osm = set(snapped_to)
     # remaining ends: merge agency ends within SNAP_AGENCY_M, else new nodes
     placed: list[tuple[float, float, int]] = []
     for ri, which, x, y in pending:
@@ -643,13 +708,30 @@ def conflate(g: Graph, agency: list[tuple[dict, list]], *, log=print) -> dict:
             n = g.add_node(x, y)
             placed.append((x, y, n))
         snapped_to[(ri, which)] = n
+    # OSM trail edges by name key, for the braid test (after every split)
+    by_key: dict[str, list[int]] = {}
+    for ei, e in enumerate(g.edges):
+        if e.src == SRC_OSM and e.kind in TRAIL_KINDS:
+            for k in name_keys(e.name, e.ref):
+                by_key.setdefault(k, []).append(ei)
+    named = 0
     for ri, (props, run) in enumerate(new_runs):
         a, b = snapped_to[(ri, 0)], snapped_to[(ri, 1)]
-        xy = [g.nodes[a], *run[1:-1], g.nodes[b]]
         at = agency_edge_attrs(props)
+        if (ri, 0) in on_osm and (ri, 1) in on_osm:
+            path = _braid_path(g, a, b, name_keys(props.get("name"), props.get("num")), by_key,
+                               _length(run))
+            if path is not None:
+                for ei in path:
+                    _donate(g.edges[ei], at)
+                named += len(path)
+                stats["agency_runs_braided"] += 1
+                continue
+        xy = [g.nodes[a], *run[1:-1], g.nodes[b]]
         g.edges.append(Edge(a, b, xy, KIND_AGENCY, at["src"], 0, at["flags"], at["name"],
                             at["ref"], at["note"]))
         stats["agency_runs_added"] += 1
+    stats["osm_edges_named"] += named
     return stats
 
 

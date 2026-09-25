@@ -469,24 +469,83 @@ class TestGraphBuild:
                                     for f in doc["agency"]], zone=10, northern=True, rect=rect)
             return g, gb.conflate(g, ag, log=lambda *_: None)
 
+        def noted(g):
+            m = {}
+            for e in g.edges:
+                if e.src == gb.SRC_OSM:
+                    k = (e.name, bool(e.note))
+                    m[k] = m.get(k, 0) + gb._length(e.xy)
+            assert all(not n for (name, n) in m if name != "Agnes Creek Trail")  # no road
+            assert all(e.flags & gb.F_RESTRICTED for e in g.edges if e.note)
+            return m
+
+        # The two stretches that do stray (up to 130 m) are braids of the
+        # same-named OSM trail and yield to it (next test); without that
+        # rule they are the only runs added.
+        with monkeypatch.context() as mp:
+            mp.setattr(gb, "_braid_path", lambda *a: None)
+            g, st = run()
+            assert st["agency_runs_added"] == 2 and st["agency_runs_parallel"] == 3
+            assert noted(g)[("Agnes Creek Trail", True)] > 2200
+            osm = np.concatenate([gb.densify(e.xy, 5.0)[0] for e in g.edges if e.src == gb.SRC_OSM])
+            for e in (e for e in g.edges if e.kind == gb.KIND_AGENCY):
+                p, _ = gb.densify(e.xy, 10.0)
+                d = np.array([np.hypot(osm[:, 0] - x, osm[:, 1] - y).min() for x, y in p.tolist()])
+                assert (d > gb.SAME_TRAIL_M).sum() * 10 >= gb.MIN_AGENCY_RUN_M
+            # the old single 20 m tolerance braided all five uncovered runs in
+            mp.setattr(gb, "SAME_TRAIL_M", gb.COVER_M)
+            assert run()[1]["agency_runs_added"] == 5
+        # With it, no NPS line is added and the restriction covers all but
+        # the 18 m bridge of the OSM trail beside the 2.9 km of NPS line.
         g, st = run()
-        assert st["agency_runs_added"] == 2 and st["agency_runs_parallel"] == 3
-        m = {}
-        for e in g.edges:
-            if e.src == gb.SRC_OSM:
-                k = (e.name, bool(e.note))
-                m[k] = m.get(k, 0) + gb._length(e.xy)
-        assert m[("Agnes Creek Trail", True)] > 2200
-        assert all(not noted for (name, noted) in m if name != "Agnes Creek Trail")  # no road
-        assert all(e.flags & gb.F_RESTRICTED for e in g.edges if e.note)
-        osm = np.concatenate([gb.densify(e.xy, 5.0)[0] for e in g.edges if e.src == gb.SRC_OSM])
-        for e in (e for e in g.edges if e.kind == gb.KIND_AGENCY):
-            p, _ = gb.densify(e.xy, 10.0)
-            d = np.array([np.hypot(osm[:, 0] - x, osm[:, 1] - y).min() for x, y in p.tolist()])
-            assert (d > gb.SAME_TRAIL_M).sum() * 10 >= gb.MIN_AGENCY_RUN_M
-        # the old single 20 m tolerance braided all five uncovered runs in
-        monkeypatch.setattr(gb, "SAME_TRAIL_M", gb.COVER_M)
-        assert run()[1]["agency_runs_added"] == 5
+        assert st["agency_runs_added"] == 0 and st["agency_runs_braided"] == 2
+        m = noted(g)
+        assert m[("Agnes Creek Trail", True)] > 3000 and m[("Agnes Creek Trail", False)] < 20
+        assert not any(e.kind == gb.KIND_AGENCY for e in g.edges)
+
+    def test_name_keys(self):
+        assert gb.name_keys("Agnes Creek Trail (PCT)", None) == {"agnes creek trail", "pct"}
+        assert gb.name_keys("Ridge Trail #101", "101") == {"ridge trail", "#101"}
+        assert gb.name_keys("Agnes Gorge Trail", "TR 1281") == {"agnes gorge trail", "#1281"}
+        assert gb.name_keys(None, None) == set()
+
+    def test_same_named_braid_yields_to_osm(self):
+        # An agency line that leaves the OSM trail it is named for, runs up
+        # to 85 m off and rejoins it is that trail drawn differently: the
+        # OSM line wins and takes its attributes. Another name, a loop or a
+        # shortcut the OSM trail does not offer is a trail of its own.
+        def osm(xy, name="Ridge Trail", ref="101"):
+            g = gb.Graph()
+            ids = [g.add_node(*p) for p in xy]
+            for k in range(len(xy) - 1):
+                g.edges.append(gb.Edge(ids[k], ids[k + 1], [xy[k], xy[k + 1]], gb.KIND_PATH,
+                                       name=name, ref=ref, way=(1, 0), seq=k))
+            return g
+
+        braid = [(0.0, 5.0), (200.0, 5.0), (300.0, 90.0), (500.0, 90.0), (600.0, 5.0),
+                 (1000.0, 5.0)]
+        props = dict(self.PROPS, name="Ridge Trail", num="101")
+        g = osm([(0.0, 0.0), (1000.0, 0.0)])
+        st = gb.conflate(g, [(props, braid)], log=lambda *_: None)
+        assert st["agency_runs_braided"] == 1 and st["agency_runs_added"] == 0
+        assert all(e.note == "Closed to stock" for e in g.edges)
+        assert sum(gb._length(e.xy) for e in g.edges) == pytest.approx(1000.0)
+        # another trail's name: kept
+        g = osm([(0.0, 0.0), (1000.0, 0.0)])
+        st = gb.conflate(g, [(dict(props, name="Cutoff Trail", num=None), braid)],
+                         log=lambda *_: None)
+        assert st["agency_runs_braided"] == 0 and st["agency_runs_added"] == 1
+        # the same name, but a shortcut across a U the OSM trail walks around
+        g = osm([(0.0, 0.0), (0.0, 1000.0), (300.0, 1000.0), (300.0, 0.0)])
+        st = gb.conflate(g, [(props, [(0.0, 5.0), (150.0, -60.0), (300.0, 5.0)])],
+                         log=lambda *_: None)
+        assert st["agency_runs_braided"] == 0 and st["agency_runs_added"] == 1
+        # ...or a loop back to (almost) where it left (SISI's Rainbow Loop
+        # Trail: 118 m of agency line, ends 4 m apart along the OSM trail)
+        g = osm([(0.0, 0.0), (1000.0, 0.0)])
+        loop = [(400.0, 5.0), (400.0, 80.0), (460.0, 80.0), (415.0, 5.0)]
+        st = gb.conflate(g, [(props, loop)], log=lambda *_: None)
+        assert st["agency_runs_braided"] == 0 and st["agency_runs_added"] == 1
 
     def _way(self, xs, kind, way=7):
         """One OSM way along y = 0 split into edges at xs (as osm_graph does
