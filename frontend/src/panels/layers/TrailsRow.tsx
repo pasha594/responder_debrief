@@ -9,6 +9,7 @@ import { useFireBundle } from '../../routing/hooks';
 import { useIsDesktop } from '../../utils/useMediaQuery';
 import { TRAIL_PAINT } from '../../map/layers/trailsStyle';
 import { VegetationLegend } from '../VegetationLegend';
+import { LayerRow } from './LayerRow';
 
 export function TrailsRow() {
   const mode = useStore((s) => s.layers.trails.mode);
@@ -16,12 +17,13 @@ export function TrailsRow() {
   const setMode = useStore((s) => s.actions.setTrailsMode);
   const on = mode === 'on' || (mode === 'auto' && !online);
   return (
-    <>
-      <label className="rd-field--row" title="Forest Service, BLM and Park Service trails">
-        <input type="checkbox" checked={on} onChange={() => setMode(on ? 'off' : 'on')} />
-        <span>Trails</span>
-        <span className="rd-title-meta">USFS · BLM · NPS{!online ? ' · offline copy' : ''}</span>
-      </label>
+    <LayerRow
+      label="Trails"
+      meta={`USFS · BLM · NPS${!online ? ' · offline copy' : ''}`}
+      title="Forest Service, BLM and Park Service trails"
+      checked={on}
+      onChange={() => setMode(on ? 'off' : 'on')}
+    >
       {on && (
         <div className="rd-hist-legend" aria-hidden="true">
           <span className="rd-hist-chip" style={{ background: TRAIL_PAINT.topo.core }} /> trail
@@ -29,7 +31,7 @@ export function TrailsRow() {
           assessed (BLM)
         </div>
       )}
-    </>
+    </LayerRow>
   );
 }
 
@@ -40,23 +42,15 @@ export function VegetationRow({ corneaId }: { corneaId: string }) {
   const available = !!bundle.data;
   const isDesktop = useIsDesktop();
   return (
-    <>
-      <label
-        className="rd-field--row"
-        title={available ? 'LANDFIRE vegetation used by offline Walk routing'
-          : "Vegetation needs this fire's terrain model (not built yet)"}
-      >
-        <input
-          type="checkbox"
-          checked={veg.visible && available}
-          disabled={!available}
-          onChange={(e) => setVeg({ visible: e.target.checked })}
-        />
-        <span>Vegetation</span>
-        <span className="rd-title-meta">
-          {available ? `LANDFIRE ${bundle.data?.sources?.landfire?.veg ?? ''}`.trim() : 'not built yet'}
-        </span>
-      </label>
+    <LayerRow
+      label="Vegetation"
+      meta={available ? `LANDFIRE ${bundle.data?.sources?.landfire?.veg ?? ''}`.trim() : 'not built yet'}
+      title={available ? 'LANDFIRE vegetation used by offline Walk routing'
+        : "Vegetation needs this fire's terrain model (not built yet)"}
+      checked={veg.visible && available}
+      disabled={!available}
+      onChange={(visible) => setVeg({ visible })}
+    >
       {veg.visible && available && (
         <>
           <input
@@ -73,6 +67,6 @@ export function VegetationRow({ corneaId }: { corneaId: string }) {
           {!isDesktop && <VegetationLegend />}
         </>
       )}
-    </>
+    </LayerRow>
   );
 }

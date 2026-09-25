@@ -678,25 +678,34 @@
   max-width: 100%;
 }
 
-/* ---------- Weather tab ---------- */
+/* ---------- Layers tab rows (LayerRow) ---------- */
 
-.rd-weather-row {
-  padding: 8px 0;
+/* Every layer is one ruled row; the label fills it, so a click anywhere on
+   the line toggles the layer. 40px + the rule = the old weather row, whose
+   height came from its Legend button. */
+.rd-layer-row {
   border-bottom: 1px solid var(--color-border);
 }
-.rd-weather-row--on {
-  background: none;
+.rd-layer-row-toggle {
+  box-sizing: border-box;
+  min-height: 40px;
+  padding: 8px 0;
 }
-
-.rd-weather-row-top {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
+.rd-layer-row-toggle:has(input:disabled) {
+  cursor: default;
 }
-
-.rd-weather-row .rd-slider {
+/* What an on layer shows under its line: legend, opacity, notes. */
+.rd-layer-row-body {
+  padding-bottom: 10px;
+}
+.rd-layer-row-body:empty {
+  display: none;
+}
+.rd-layer-row-body > * + * {
   margin-top: 6px;
+}
+.rd-layer-row-body > .rd-slider {
+  display: block;
 }
 
 .rd-mini-btn {
@@ -712,9 +721,6 @@
   background: var(--color-hover-bg);
 }
 
-.rd-mini-legend {
-  margin-top: 6px;
-}
 .rd-mini-legend img {
   display: block;
   max-width: 100%;
@@ -946,7 +952,7 @@
   flex-direction: column;
   gap: 4px;
 }
-.rd-section > .rd-veg-legend {
+.rd-layer-row-body > .rd-veg-legend {
   padding: 2px 0 4px 26px; /* under the row's checkbox, like the historic key */
 }
 
@@ -1464,6 +1470,9 @@
   .rd-toggle-btn,
   .rd-pdf-pill {
     min-height: 32px;
+  }
+  .rd-layer-row-toggle {
+    min-height: 48px; /* the weather row's height with its 32px Legend button */
   }
 }
 

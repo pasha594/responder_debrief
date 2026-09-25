@@ -69,6 +69,11 @@ export const RELEASE_NOTES: ReleaseDay[] = [
           "Back, basemap, 3D, QR, search and locate now share one line of compact buttons across the top of the map on every screen, with the Draw tools under them on the left. On phones the settings gear moved into the fire panel's top corner.",
       },
       {
+        title: 'Bigger layer rows',
+        summary:
+          'Every layer in the Layers tab is now a full-height row you can tap anywhere on to turn it on or off. The HRRR weather layers lost their Legend button: the legend shows on the map, or under the layer on phones.',
+      },
+      {
         title: 'Share by QR code',
         summary:
           'The QR button beside 3D shows your map view, layers, incident map and drawings as a code. Another phone scans it with Scan code, no signal needed if both phones downloaded the fire.',
