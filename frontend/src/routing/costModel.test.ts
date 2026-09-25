@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { H_PACE, alpha, alphaFast, getRate, sullivanRate, tertileRatios } from './costModel';
 import { IMPASSABLE, PACE_LUT, paceOf } from './pacecode';
 import { MinHeap } from './heap';
+import { VEG_CLASSES, vegClass } from './vegClasses';
 
 const minPerKm = (r: number) => 1000 / r / 60;
 
@@ -59,6 +60,13 @@ describe('pace code (logpace-v1, shared with worker cost_grid.py)', () => {
     const flat = 1 / getRate(0);
     const code = 1 + Math.round((253 * Math.log(flat / 0.8)) / Math.log(1024));
     expect(Math.abs(PACE_LUT[code] / flat - 1)).toBeLessThan(0.015);
+  });
+
+  it('labels as impassable the classes the worker makes impassable', () => {
+    // cost_grid.py: open water (rivers included), > 45°, and since
+    // COST_GRID_VERSION 3 glaciers and permanent snow/ice
+    expect(VEG_CLASSES.filter((c) => c.impassable).map((c) => c.key)).toEqual(['snow', 'water', 'steep']);
+    expect(vegClass(9).label).toBe('Snow / ice (impassable)');
   });
 });
 
