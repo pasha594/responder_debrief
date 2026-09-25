@@ -93,12 +93,11 @@ describe('coarse prefilter', () => {
 });
 
 describe('historic perimeter date format', () => {
-  it('renders DATE_CUR strings as MM/YY with year fallback', async () => {
+  it('shows the fire year, never the record-edit date', async () => {
     const { fmtWhen } = await import('./historicPerimetersLayer');
-    expect(fmtWhen({ DATE_CUR: '20191001000000' })).toBe('10/19');
-    expect(fmtWhen({ DATE_CUR: '20260805123000' })).toBe('08/26');
+    expect(fmtWhen({ DATE_CUR: '20190102000000', FIRE_YEAR_INT: 2017 })).toBe('2017');
     expect(fmtWhen({ DATE_CUR: null, FIRE_YEAR_INT: 2018 })).toBe('2018');
-    expect(fmtWhen({})).toBe('—');
+    expect(fmtWhen({ DATE_CUR: '20260805123000' })).toBe('—');
   });
 });
 

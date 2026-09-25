@@ -30,6 +30,10 @@ export const RELEASE_NOTES: ReleaseDay[] = [
     date: '2026-09-25',
     notes: [
       {
+        title: 'Names on historic perimeters',
+        summary: 'Each old fire scar now shows its name and year in its middle, no tap needed.',
+      },
+      {
         title: 'Infrared (IR) flights on the map for more fires',
         summary:
           'Nightly IR heat now shows on the map for fires whose teams publish only a KMZ, like Sisi. Each flight lists when the plane flew, and the map marks possible heat and areas clouds or smoke hid from the sensor.',
@@ -38,6 +42,12 @@ export const RELEASE_NOTES: ReleaseDay[] = [
         title: 'Share by QR code',
         summary:
           'The QR button beside 3D shows your map view, layers, incident map and drawings as a code. Another phone scans it with Scan code, no signal needed if both phones downloaded the fire.',
+      },
+      {
+        title: 'Historic perimeter dates',
+        summary:
+          'Tapping an old fire scar showed the date its record was last edited, not when it burned. It now shows the year of the fire.',
+        fix: true,
       },
     ],
   },

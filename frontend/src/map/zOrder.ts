@@ -37,6 +37,7 @@ export const RD_LAYER_ORDER = [
   'rd-incidents-pt',
   'rd-hist-perims-fill',
   'rd-hist-perims-line',
+  'rd-hist-perims-label',
   'rd-ir-heat-fill',
   'rd-ir-heat-line',
   'rd-ir-heat-pt',
