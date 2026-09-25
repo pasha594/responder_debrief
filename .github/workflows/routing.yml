@@ -1,0 +1,218 @@
+name: Routing bundles
+
+# Per-fire offline routing bundles (terrain/vegetation cost grid + road/trail
+# graph + per-fire trails extract) for every active CONUS fire, biggest
+# first. plan -> build (region-affine shard matrix) -> index. Stateless with
+# respect to state/state.json and catalog.json, so its own concurrency group;
+# per-fire pointers are written last by the shard that built the fire, and
+# the index is rebuilt from pointers only. Nothing is ever deleted here.
+on:
+  schedule:
+    - cron: "47 */3 * * *"
+  workflow_run:
+    workflows: ["Trails build"]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      fire:
+        description: "cornea_id, slug or name (optional; default all active fires)"
+        default: ""
+      force:
+        description: "Rebuild even if inputs are unchanged"
+        type: boolean
+        default: false
+      dry_run:
+        description: "Build ONE fire into worker/out and upload it as an artifact (no B2)"
+        type: boolean
+        default: false
+
+concurrency:
+  group: routing-bundles
+  cancel-in-progress: false
+
+env:
+  APT_PACKAGES: gdal-bin osmium-tool
+
+jobs:
+  plan:
+    if: ${{ !inputs.dry_run }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+      work: ${{ steps.plan.outputs.work }}
+    defaults:
+      run:
+        working-directory: worker
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+          enable-cache: true
+          cache-dependency-glob: "worker/uv.lock"
+      - name: Install dependencies
+        run: uv sync
+      - name: Pure routing tests (a red test blocks publishing)
+        run: uv run pytest -q tests/test_routing_builders.py tests/test_trails_foundations.py
+      - name: Plan
+        id: plan
+        env:
+          B2_KEY_ID: ${{ secrets.B2_KEY_ID }}
+          B2_APP_KEY: ${{ secrets.B2_APP_KEY }}
+          B2_BUCKET: responder-debrief-data
+          B2_S3_ENDPOINT: ${{ vars.B2_S3_ENDPOINT }}
+          PRIORITY_FIRES: ${{ vars.PRIORITY_FIRES }}
+          ROUTING_SHARDS: "4"
+          INPUT_FIRE: ${{ inputs.fire }}
+          INPUT_FORCE: ${{ inputs.force }}
+        run: |
+          FLAGS=(--plan-out plan.json)
+          [ -n "$INPUT_FIRE" ] && FLAGS+=(--fire "$INPUT_FIRE")
+          [ "$INPUT_FORCE" = "true" ] && FLAGS+=(--force)
+          uv run python -m responder_worker.cli routing-plan "${FLAGS[@]}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: routing-plan
+          path: worker/plan.json
+          retention-days: 2
+
+  build:
+    needs: plan
+    if: ${{ needs.plan.outputs.work == 'true' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 150
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    defaults:
+      run:
+        working-directory: worker
+    steps:
+      - uses: actions/checkout@v4
+      - name: Runner resources
+        run: df -h / "$RUNNER_TEMP" && free -h && nproc
+      - name: Install GDAL + osmium CLI tools
+        continue-on-error: true
+        timeout-minutes: 9
+        run: |
+          for attempt in 1 2 3 4; do
+            if [ "$attempt" = "3" ]; then
+              echo "azure mirror still failing — switching to archive.ubuntu.com"
+              sudo sed -i 's|azure.archive.ubuntu.com|archive.ubuntu.com|g' \
+                /etc/apt/sources.list /etc/apt/sources.list.d/* 2>/dev/null || true
+            fi
+            if sudo apt-get update -o Acquire::Retries=3 \
+               && sudo apt-get install -y --no-install-recommends -o Acquire::Retries=3 $APT_PACKAGES; then
+              break
+            fi
+            echo "apt attempt $attempt failed — retrying"
+            sleep 5
+          done
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+          enable-cache: true
+          cache-dependency-glob: "worker/uv.lock"
+      - name: Install dependencies
+        run: uv sync
+      - uses: actions/download-artifact@v4
+        with:
+          name: routing-plan
+          path: worker
+      - name: Build shard
+        env:
+          B2_KEY_ID: ${{ secrets.B2_KEY_ID }}
+          B2_APP_KEY: ${{ secrets.B2_APP_KEY }}
+          B2_BUCKET: responder-debrief-data
+          B2_S3_ENDPOINT: ${{ vars.B2_S3_ENDPOINT }}
+          ROUTING_MAX_SECONDS: ${{ vars.ROUTING_MAX_SECONDS || '7800' }}
+          GDAL_NUM_THREADS: "4"
+          CPL_TMPDIR: ${{ runner.temp }}
+        run: |
+          uv run python -m responder_worker.cli routing-build --plan plan.json \
+            --shard ${{ matrix.shard }} --result-out result-${{ matrix.shard }}.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: routing-result-${{ matrix.shard }}
+          path: worker/result-${{ matrix.shard }}.json
+          retention-days: 2
+          if-no-files-found: ignore
+
+  index:
+    needs: [plan, build]
+    if: ${{ always() && needs.plan.result == 'success' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: worker
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+          enable-cache: true
+          cache-dependency-glob: "worker/uv.lock"
+      - name: Install dependencies
+        run: uv sync
+      - uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          pattern: routing-result-*
+          path: worker/results
+      - name: Index + health
+        env:
+          B2_KEY_ID: ${{ secrets.B2_KEY_ID }}
+          B2_APP_KEY: ${{ secrets.B2_APP_KEY }}
+          B2_BUCKET: responder-debrief-data
+          B2_S3_ENDPOINT: ${{ vars.B2_S3_ENDPOINT }}
+        run: uv run python -m responder_worker.cli routing-index --results results
+
+  dryrun:
+    if: ${{ inputs.dry_run }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    defaults:
+      run:
+        working-directory: worker
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install GDAL + osmium CLI tools
+        continue-on-error: true
+        timeout-minutes: 9
+        run: |
+          for attempt in 1 2 3 4; do
+            if sudo apt-get update -o Acquire::Retries=3 \
+               && sudo apt-get install -y --no-install-recommends -o Acquire::Retries=3 $APT_PACKAGES; then
+              break
+            fi
+            sleep 5
+          done
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+          enable-cache: true
+          cache-dependency-glob: "worker/uv.lock"
+      - name: Install dependencies
+        run: uv sync
+      - name: Build one fire (dry run)
+        env:
+          INPUT_FIRE: ${{ inputs.fire }}
+          CPL_TMPDIR: ${{ runner.temp }}
+        run: |
+          FIRE="${INPUT_FIRE:-}"
+          if [ -z "$FIRE" ]; then
+            # biggest active CONUS fire in the published catalog
+            FIRE=$(curl -s https://f005.backblazeb2.com/file/responder-debrief-data/catalogs/catalog.json \
+              | python3 -c "import json,sys; fs=[f for f in json.load(sys.stdin)['fires'] if f.get('coordinates') and -125<=f['coordinates'][0]<=-66.5 and 24.5<=f['coordinates'][1]<=49.5]; print(max(fs,key=lambda f:f.get('acres') or 0)['cornea_id'])")
+          fi
+          uv run python -m responder_worker.cli routing-one --fire "$FIRE" --dry-run --out out \
+            --keep-work "$RUNNER_TEMP/work"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: routing-dryrun
+          path: worker/out/
+          retention-days: 3

@@ -1579,8 +1579,9 @@ def build_parser() -> argparse.ArgumentParser:
     sp.set_defaults(func=cmd_cleanup_spread_frames)
 
     # Trails overlay + offline routing bundles live in their own modules.
-    from . import trails_cli
+    from . import routing_cli, trails_cli
     trails_cli.register(sub, common)
+    routing_cli.register(sub, common)
     return p
 
 

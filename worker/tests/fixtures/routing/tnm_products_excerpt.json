@@ -1,0 +1,14 @@
+{"total": 6, "items": [
+ {"title": "USGS National Hydrography Dataset (NHD) Best Resolution National - 20240105 GeoPackage", "format": "GeoPackage",
+  "downloadURL": "https://prd-tnm.s3.amazonaws.com/StagedProducts/Hydrography/NHD/National/HighResolution/GPKG/NHD_H_National_GPKG.zip"},
+ {"title": "USGS National Hydrography Dataset Best Resolution (NHD) for Idaho State - 20231227 GeoPackage", "format": "GeoPackage",
+  "downloadURL": "https://prd-tnm.s3.amazonaws.com/StagedProducts/Hydrography/NHD/State/GPKG/NHD_H_Idaho_State_GPKG.zip"},
+ {"title": "USGS National Hydrography Dataset (NHD) Best Resolution for Hydrologic Unit (HU) 4 - 1706 (published 20240104) GeoPackage", "format": "GeoPackage",
+  "downloadURL": "https://prd-tnm.s3.amazonaws.com/StagedProducts/Hydrography/NHD/HU4/GPKG/NHD_H_1706_HU4_GPKG.zip"},
+ {"title": "USGS National Hydrography Dataset Best Resolution (NHD) for Hydrological Unit (HU) 8 - 17060201 (published 20240105) GeoPackage", "format": "GeoPackage",
+  "downloadURL": "https://prd-tnm.s3.amazonaws.com/StagedProducts/Hydrography/NHD/HU8/GPKG/NHD_H_17060201_HU8_GPKG.zip"},
+ {"title": "USGS National Hydrography Dataset Best Resolution (NHD) for Hydrological Unit (HU) 8 - 17060205 (published 20240105) GeoPackage", "format": "GeoPackage",
+  "downloadURL": "https://prd-tnm.s3.amazonaws.com/StagedProducts/Hydrography/NHD/HU8/GPKG/NHD_H_17060205_HU8_GPKG.zip"},
+ {"title": "USGS National Hydrography Dataset Best Resolution (NHD) for Hydrological Unit (HU) 8 - 17060201 (published 20240105) FileGDB", "format": "FileGDB",
+  "downloadURL": "https://prd-tnm.s3.amazonaws.com/StagedProducts/Hydrography/NHD/HU8/GDB/NHD_H_17060201_HU8_GDB.zip"}
+]}
