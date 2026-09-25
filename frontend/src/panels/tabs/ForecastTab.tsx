@@ -328,8 +328,6 @@ function MapLayerToggles({ corneaId }: { corneaId: string }) {
   const hotspots = useStore((s) => s.layers.hotspots.visible);
   const perimeters = useStore((s) => s.layers.perimeters.visible);
   const historic = useStore((s) => s.layers.historicPerimeters.visible);
-  const traffic = useStore((s) => s.layers.traffic.visible);
-  const incidents = useStore((s) => s.layers.incidents.visible);
   const actions = useStore((s) => s.actions);
   return (
     <section className="rd-section">
@@ -357,6 +355,20 @@ function MapLayerToggles({ corneaId }: { corneaId: string }) {
         </div>
       )}
       <TrailsRow />
+      <VegetationRow corneaId={corneaId} />
+    </section>
+  );
+}
+
+/** Road layers get their own section (owner call), above the forecasts. */
+function TrafficToggles() {
+  const traffic = useStore((s) => s.layers.traffic.visible);
+  const incidents = useStore((s) => s.layers.incidents.visible);
+  const actions = useStore((s) => s.actions);
+  if (!trafficAvailable && !incidentsAvailable) return null;
+  return (
+    <section className="rd-section">
+      <h3 className="rd-section-title">Traffic</h3>
       {trafficAvailable && (
         <label className="rd-field--row">
           <input type="checkbox" checked={traffic} onChange={() => actions.toggleTraffic()} />
@@ -370,7 +382,6 @@ function MapLayerToggles({ corneaId }: { corneaId: string }) {
           <span className="rd-title-meta">closures, delays</span>
         </label>
       )}
-      <VegetationRow corneaId={corneaId} />
     </section>
   );
 }
@@ -379,6 +390,7 @@ export function ForecastTab({ corneaId }: { corneaId: string }) {
   return (
     <div className="rd-tab-body">
       <MapLayerToggles corneaId={corneaId} />
+      <TrafficToggles />
       <section className="rd-section">
         <WeatherSection />
       </section>

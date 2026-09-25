@@ -1,11 +1,14 @@
 /**
  * Trails overlay styling and popup text (pure — no map, no DOM).
  *
- * Teal, in a casing + core pair tuned per ground. The hue avoids everything
- * else on the map: route blue #4aa3ff, perimeter red, hotspot yellows,
- * the draw palette (purple/blue/ink/red, dashed fuel break, dotted
- * aviation), and USGS Topo's own dashed black trails. BLM "not assessed"
- * segments draw lighter and thinner.
+ * Pink, in a casing + core pair tuned per ground (owner call: teal sank
+ * into the Vegetation layer's greens). Pink is the one hue nothing else on
+ * the map uses: Vegetation's greens/browns/yellows/greys/blues, USGS Topo's
+ * greens, brown contours, blue water and red/black roads, perimeter red, the
+ * route's blue and the draw palette. Nearest neighbour is the purple of
+ * older hotspots (CIEDE2000 ~17-20), which are dots, not lines. Deep pink
+ * on light grounds, bright pink on dark ones. BLM "not assessed" segments
+ * draw lighter and thinner.
  */
 import type { ExpressionSpecification } from 'maplibre-gl';
 
@@ -20,11 +23,11 @@ export interface TrailPaint {
 }
 
 export const TRAIL_PAINT: Record<Ground, TrailPaint> = {
-  topo: { casing: '#ffffff', casingOpacity: 0.85, core: '#0e8f8a', halo: '#ffffff', ways: '#6f6a6b' },
-  satellite: { casing: '#06201f', casingOpacity: 0.65, core: '#3ee0d8', halo: '#06201f', ways: '#d8d2d5' },
-  'map-dark': { casing: '#0d0a0c', casingOpacity: 0.8, core: '#34d1c9', halo: '#0d0a0c', ways: '#8a8586' },
-  'map-light': { casing: '#ffffff', casingOpacity: 0.9, core: '#0e8f8a', halo: '#ffffff', ways: '#8a8586' },
-  offline: { casing: '#0d0a0c', casingOpacity: 0.8, core: '#34d1c9', halo: '#0d0a0c', ways: '#8a8586' },
+  topo: { casing: '#ffffff', casingOpacity: 0.85, core: '#d6247f', halo: '#ffffff', ways: '#6f6a6b' },
+  satellite: { casing: '#1a0710', casingOpacity: 0.65, core: '#ff79c6', halo: '#1a0710', ways: '#d8d2d5' },
+  'map-dark': { casing: '#0d0a0c', casingOpacity: 0.8, core: '#ff79c6', halo: '#0d0a0c', ways: '#8a8586' },
+  'map-light': { casing: '#ffffff', casingOpacity: 0.9, core: '#d6247f', halo: '#ffffff', ways: '#8a8586' },
+  offline: { casing: '#0d0a0c', casingOpacity: 0.8, core: '#ff79c6', halo: '#0d0a0c', ways: '#8a8586' },
 };
 
 /** Which ground the trails sit on. `offlineStyle` = the style has no

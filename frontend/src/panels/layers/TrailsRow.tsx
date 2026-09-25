@@ -7,6 +7,7 @@
 import { useStore } from '../../state/store';
 import { useFireBundle } from '../../routing/hooks';
 import { useIsDesktop } from '../../utils/useMediaQuery';
+import { TRAIL_PAINT } from '../../map/layers/trailsStyle';
 import { VegetationLegend } from '../VegetationLegend';
 
 export function TrailsRow() {
@@ -23,8 +24,8 @@ export function TrailsRow() {
       </label>
       {on && (
         <div className="rd-hist-legend" aria-hidden="true">
-          <span className="rd-hist-chip" style={{ background: '#0e8f8a' }} /> trail
-          <span className="rd-hist-chip" style={{ background: '#0e8f8a', opacity: 0.55 }} /> not
+          <span className="rd-hist-chip" style={{ background: TRAIL_PAINT.topo.core }} /> trail
+          <span className="rd-hist-chip" style={{ background: TRAIL_PAINT.topo.core, opacity: 0.55 }} /> not
           assessed (BLM)
         </div>
       )}

@@ -1,6 +1,6 @@
 /**
  * Trails overlay: USFS / BLM / NPS trails from PMTiles, drawn in our own
- * teal over any ground, with tap popups (name, number, agency, class,
+ * pink over any ground, with tap popups (name, number, agency, class,
  * allowed uses, official restrictions, source date, "Walk here").
  *
  * Self-driven (like basemapUnderlay): the archive and paint depend on
@@ -139,7 +139,7 @@ function addLayers(map: MlMap, a: TrailsArchive): void {
     id: LINE, type: 'line', source: SRC, 'source-layer': 'trails',
     layout: { ...hidden, 'line-cap': 'round', 'line-join': 'round' },
     paint: {
-      'line-color': '#0e8f8a',
+      'line-color': TRAIL_PAINT.topo.core,
       'line-width': CORE_WIDTH,
       'line-opacity': ['case', NOT_ASSESSED, 0.55, 1],
     },
@@ -154,7 +154,7 @@ function addLayers(map: MlMap, a: TrailsArchive): void {
       'text-size': 11,
       'text-font': rdLabelFont(map),
     },
-    paint: { 'text-color': '#0e8f8a', 'text-halo-color': '#ffffff', 'text-halo-width': 1.4 },
+    paint: { 'text-color': TRAIL_PAINT.topo.core, 'text-halo-color': '#ffffff', 'text-halo-width': 1.4 },
   }, LABEL);
   add({
     id: HIT, type: 'line', source: SRC, 'source-layer': 'trails', minzoom: 11,
