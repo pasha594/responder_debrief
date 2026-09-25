@@ -26,6 +26,7 @@ import { useOriginWeather } from '../api/openMeteo';
 import { HOTSPOT_BBOX_SNAP_DEG, HOTSPOT_NATIONAL_MIN_ZOOM } from '../app/config';
 import {
   boundsToLatFirst,
+  fireAreaBox,
   parseFireCoordinates,
   snapBoundsOut,
   type Bounds4326,
@@ -36,13 +37,12 @@ import type { LayerContext, LayerManager } from './layerTypes';
 
 import { firePinsLayer } from './layers/firePinsLayer';
 import { perimeterLayer } from './layers/perimeterLayer';
-import { useHistoricPerimeters, useIncidents } from '../api/queries';
+import { useFireLandStatus, useHistoricPerimeters, useIncidents } from '../api/queries';
 
 function histBoxForIncidents(
   catalogFire: { coordinates?: [number, number] | null } | null,
 ): [number, number, number, number] | null {
-  const c = catalogFire?.coordinates;
-  return c ? [c[0] - 0.6, c[1] - 0.5, c[0] + 0.6, c[1] + 0.5] : null;
+  return fireAreaBox(catalogFire?.coordinates);
 }
 import { hotspotLayer } from './layers/hotspotLayer';
 import { hotspotFlamesLayer } from './layers/hotspotFlamesLayer';
@@ -58,6 +58,7 @@ import { irHeatLayer } from './layers/irHeatLayer';
 import { historicPerimetersLayer } from './layers/historicPerimetersLayer';
 import { routeLayer } from './layers/routeLayer';
 import { trafficLayer } from './layers/trafficLayer';
+import { landStatusLayer } from './layers/landStatusLayer';
 import { incidentsLayer } from './layers/incidentsLayer';
 import { rangeLayer } from './layers/rangeLayer';
 import { trailsLayer } from './layers/trailsLayer';
@@ -76,6 +77,7 @@ const MANAGERS: LayerManager[] = [
   windArrowsLayer,
   irHeatLayer,
   trafficLayer,
+  landStatusLayer,
   historicPerimetersLayer,
   perimeterLayer,
   hotspotLayer,
@@ -177,12 +179,14 @@ export function useMapLayerSync(): boolean {
   );
 
   // Historic burn scars: lazy — the query runs only once the layer is on.
-  const histBox = useMemo<[number, number, number, number] | null>(() => {
-    const c = catalogFire?.coordinates;
-    return c ? [c[0] - 0.6, c[1] - 0.5, c[0] + 0.6, c[1] + 0.5] : null;
-  }, [catalogFire]);
+  const histBox = useMemo(() => fireAreaBox(catalogFire?.coordinates), [catalogFire]);
   const { data: historicPerimeters } = useHistoricPerimeters(
     histBox, corneaId, view.mode === 'fire' && layers.historicPerimeters.visible,
+  );
+
+  // Land status: lazy too, and shared with the legend and the pin card.
+  const { data: landStatus } = useFireLandStatus(
+    corneaId, view.mode === 'fire' && layers.land.visible,
   );
 
   // Perimeter version resolved for the scrub time, fetched via verbatim path.
@@ -223,6 +227,7 @@ export function useMapLayerSync(): boolean {
       perimeterFeature,
       hotspots,
       historicPerimeters,
+      landStatus,
       directions,
       range,
       incidents,
@@ -251,6 +256,7 @@ export function useMapLayerSync(): boolean {
       perimeterFeature,
       hotspots,
       historicPerimeters,
+      landStatus,
       directions,
       range,
       incidents,

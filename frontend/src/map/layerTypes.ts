@@ -32,6 +32,7 @@ export interface LayerContext {
   perimeterFeature: PerimeterFeature | undefined;
   hotspots: HotspotFeatureCollection | undefined;
   historicPerimeters: import('../api/nifcHistory').HistoricPerimeterFC | undefined;
+  landStatus: import('../api/nifcLandStatus').LandStatusFC | undefined;
   directions: import('../state/store').AppState['directions'];
   range: import('../state/store').AppState['range'];
   incidents: import('../api/tomtomTraffic').IncidentFC | undefined;

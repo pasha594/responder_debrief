@@ -107,6 +107,8 @@ export interface AppState {
     irFlight: { flightId: string | null };
     /** TomTom live traffic flow tiles (needs VITE_TOMTOM_KEY). */
     traffic: { visible: boolean };
+    /** NIFC land status around the fire (online only). */
+    land: { visible: boolean };
     /** TomTom road incidents/closures (needs VITE_TOMTOM_KEY). */
     incidents: { visible: boolean };
     /** USFS/BLM/NPS trails. 'auto' = on only on the offline ground (no
@@ -233,6 +235,7 @@ export interface AppState {
     setIncidentMapOpacity(opacity: number): void;
     setIrFlight(flightId: string | null): void;
     toggleTraffic(): void;
+    toggleLand(): void;
     toggleIncidents(): void;
     setTrailsMode(mode: AppState['layers']['trails']['mode']): void;
     setVegetation(patch: Partial<AppState['layers']['vegetation']>): void;
@@ -351,6 +354,7 @@ export const useStore = create<AppState>((set, get) => ({
     incidentMap: { mapId: null, series: null, opacity: 0.75 },
     irFlight: { flightId: null },
     traffic: { visible: false },
+    land: { visible: false },
     incidents: { visible: false },
     trails: { mode: 'auto' },
     vegetation: { visible: false, opacity: 0.55 },
@@ -588,6 +592,13 @@ export const useStore = create<AppState>((set, get) => ({
       track('layer_toggled', { layer: 'traffic', on: !get().layers.traffic.visible });
       set((s) => ({
         layers: { ...s.layers, traffic: { visible: !s.layers.traffic.visible } },
+      }));
+    },
+
+    toggleLand: () => {
+      track('layer_toggled', { layer: 'land', on: !get().layers.land.visible });
+      set((s) => ({
+        layers: { ...s.layers, land: { visible: !s.layers.land.visible } },
       }));
     },
 

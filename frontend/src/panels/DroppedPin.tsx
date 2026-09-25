@@ -7,9 +7,10 @@
  * on the map only dismisses the pin; the one after drops a new one. Click
  * rules live in map/pinDrop.ts.
  */
-import { useEffect, useRef } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import { Marker, type MapMouseEvent } from 'maplibre-gl';
-import { useStreetAddress } from '../api/queries';
+import { landChipStyle, landClass, landUnitAt } from '../api/nifcLandStatus';
+import { useFireLandStatus, useStreetAddress } from '../api/queries';
 import { track, trackOncePer } from '../app/analytics';
 import { useMap } from '../map/MapRoot';
 import {
@@ -61,6 +62,14 @@ export function DroppedPin() {
   const actions = useStore((s) => s.actions);
   const isDesktop = useIsDesktop();
   const { data: address } = useStreetAddress(pin, online);
+  // With the land layer on, the card also says whose land the pin is on.
+  const corneaId = useStore((s) => (s.view.mode === 'fire' ? s.view.corneaId : null));
+  const landOn = useStore((s) => s.layers.land.visible);
+  const { data: land, bbox: landBox } = useFireLandStatus(corneaId, landOn && !!corneaId);
+  const landUnit = useMemo(
+    () => (landOn && pin && land && landBox ? landUnitAt(land, landBox, pin) : null),
+    [landOn, pin, land, landBox],
+  );
   const cardRef = useRef<HTMLElement>(null);
 
   // ---- map clicks: drop / dismiss, held past the double-click window ----
@@ -182,6 +191,33 @@ export function DroppedPin() {
         </button>
       </div>
       {address?.line2 && <div className="rd-pin-card-sub">{address.line2}</div>}
+      {landUnit && (
+        <div className="rd-pin-card-sub rd-pin-card-land">
+          {landUnit === 'private' ? (
+            <>
+              <span className="rd-hist-chip rd-land-chip--private" aria-hidden="true" />
+              Private land
+            </>
+          ) : (
+            <>
+              <span
+                className="rd-hist-chip"
+                style={landChipStyle(landClass(landUnit.category))}
+                aria-hidden="true"
+              />
+              <span>
+                {landUnit.name ?? 'Public land'}
+                {[landUnit.agency, landUnit.unitId].filter(Boolean).map((t) => (
+                  <span key={t}>
+                    {' '}
+                    <span className="rd-pin-card-land-tag">· {t}</span>
+                  </span>
+                ))}
+              </span>
+            </>
+          )}
+        </div>
+      )}
       <div className="rd-pin-card-foot">
         <span className="rd-pin-card-coords">{coords}</span>
         <button type="button" className="rd-pin-card-go" onClick={directionsHere}>

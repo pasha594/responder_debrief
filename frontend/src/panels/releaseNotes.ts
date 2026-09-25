@@ -45,6 +45,11 @@ export const RELEASE_NOTES: ReleaseDay[] = [
           'Shows the grass, brush, timber and slash a cross-country walk goes through, from the same data the walking directions use.',
       },
       {
+        title: 'Land ownership layer',
+        summary:
+          "Land ownership in the Layers tab shades the land around the fire by agency (Forest Service, Park Service, BLM, state, tribal and more) from the National Interagency Fire Center's jurisdiction data, with private land left clear. With it on, a dropped pin names the unit and its ID, like Okanogan-Wenatchee National Forest, WA-OWF. Needs a connection.",
+      },
+      {
         title: 'Names on historic perimeters',
         summary: 'Each old fire scar now shows its name and year in its middle, no tap needed.',
       },

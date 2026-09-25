@@ -1,5 +1,5 @@
 /** TanStack Query hooks — the only gateway to server data. */
-import { useEffect } from 'react';
+import { useEffect, useMemo } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   fetchFire,
@@ -21,6 +21,8 @@ import {
 } from './catalogs';
 import type { PerimeterIndexItem, PyrecastRun, WeatherRun } from './types';
 import { fetchHistoricPerimeters } from './nifcHistory';
+import { fetchLandStatus } from './nifcLandStatus';
+import { fireAreaBox } from './geo';
 import { fetchIncidents } from './tomtomTraffic';
 import { reverseStreetAddress } from './geocode';
 
@@ -126,6 +128,24 @@ export const useHistoricPerimeters = (
     staleTime: Infinity,
     gcTime: 30 * 60_000,
   });
+
+/** NIFC land status around a fire — lazy (enabled only while the layer is
+ * on). The map layer, its legend and the pin card all call this with the
+ * same fire, so they share one download. Returns the query box too: the pin
+ * card only speaks for points inside it. */
+export const useFireLandStatus = (corneaId: string | null, enabled: boolean) => {
+  const { data: catalog } = useMasterCatalog();
+  const c = catalog?.fires.find((f) => f.cornea_id === corneaId)?.coordinates;
+  const bbox = useMemo(() => fireAreaBox(c), [c]);
+  const { data, isLoading, isError } = useQuery({
+    queryKey: ['nifc-land-status', bbox],
+    queryFn: () => fetchLandStatus(bbox!),
+    enabled: enabled && !!bbox,
+    staleTime: Infinity,
+    gcTime: 30 * 60_000,
+  });
+  return { data, isLoading, isError, bbox };
+};
 
 /** Street address under the dropped pin (null when there is none). Keyed on
  * the 5-decimal coordinates the pin card prints; one try — Nominatim's
