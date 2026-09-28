@@ -5,6 +5,7 @@ from responder_worker.ftp_index import parse_autoindex, parse_size_hint
 BASE_ROCKY = "https://ftp.wildfire.gov/public/incident_specific_maps/rocky_mtn/2026/"
 BASE_ELK = "https://ftp.wildfire.gov/public/incident_specific_maps/rocky_mtn/2026/2026_Elk/"
 BASE_ELK_DAILY = BASE_ELK + "Products/20260817/"
+BASE_SLOUGH = "https://ftp.wildfire.gov/public/incident_specific_maps/great_basin/2026/2026_SloughCanyon/"
 
 
 class TestRockyMtnIndex:
@@ -64,6 +65,19 @@ class TestElkDailyProducts:
         )
         assert {e.is_dir for e in elk} == {True}
         assert {e.is_dir for e in daily} == {False}
+
+
+class TestSloughCanyonAmpersand:
+    """Apache escapes '&' in href attributes; the file's URL has a bare '&'."""
+
+    def test_href_unescaped(self, fixtures):
+        html = (fixtures / "autoindex_slough_canyon.html").read_text()
+        entries = parse_autoindex(html, BASE_SLOUGH)
+        iap = next(e for e in entries if e.name.startswith("IAP 1 Pager"))
+        assert iap.name == "IAP 1 Pager Kirks&Moore 2026 828.pdf"
+        assert iap.url == BASE_SLOUGH + "IAP%201%20Pager%20Kirks&Moore%202026%20828.pdf"
+        assert not any("&amp;" in e.url or "&amp;" in e.name for e in entries)
+        assert len(entries) == 5
 
 
 class TestSizeHints:

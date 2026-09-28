@@ -6,6 +6,7 @@ last-modified stamps, and size hints — enough for change-driven descent.
 
 from __future__ import annotations
 
+import html
 import re
 import time
 import urllib.parse
@@ -47,12 +48,13 @@ def parse_size_hint(text: str) -> int | None:
     return int(float(m.group(1)) * _SIZE_MULT[m.group(2)])
 
 
-def parse_autoindex(html: str, base_url: str) -> list[Entry]:
+def parse_autoindex(page: str, base_url: str) -> list[Entry]:
     if not base_url.endswith("/"):
         base_url += "/"
     entries: list[Entry] = []
-    for m in _ROW_RE.finditer(html):
-        href = m.group("href")
+    for m in _ROW_RE.finditer(page):
+        # Attribute values are HTML-escaped ("Kirks&amp;Moore"); the URL isn't.
+        href = html.unescape(m.group("href"))
         # skip sort links (?C=N;O=D) and the parent-directory row
         if href.startswith("?") or href.startswith("/") or href.startswith(".."):
             continue

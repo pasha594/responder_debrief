@@ -40,6 +40,12 @@ export const RELEASE_NOTES: ReleaseDay[] = [
           "On narrower phones the Overview tab slid sideways under your thumb. The crew, engine, helicopter and personnel counts now fit, with a long personnel label taking two lines.",
         fix: true,
       },
+      {
+        title: 'Missing incident maps',
+        summary:
+          'A map with an "&" in its file name held up every new map for that fire. Slough Canyon’s Aug 27 operations, orthophoto and IAP maps now arrive with the next update.',
+        fix: true,
+      },
     ],
   },
   {
