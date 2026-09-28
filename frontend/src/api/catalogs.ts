@@ -54,7 +54,12 @@ export async function fetchHotspotArchive(
   };
 }
 
-/** Resolve a root-relative data URL (tiles, PDFs, previews, vectors). */
+/**
+ * Resolve a root-relative data URL (tiles, PDFs, previews, vectors). Keys keep
+ * FTP filenames, so percent-encode what a URL path can't carry raw: '#' and '?'
+ * cut the path, B2 400s on '&' ',' '[' ']' and reads '+' as a space. Tile
+ * template braces and '/' pass through.
+ */
 export function dataUrl(rootRelative: string): string {
-  return `${DATA_BASE_URL}${rootRelative}`;
+  return `${DATA_BASE_URL}${rootRelative.replace(/[#?&,+[\]]/g, encodeURIComponent)}`;
 }

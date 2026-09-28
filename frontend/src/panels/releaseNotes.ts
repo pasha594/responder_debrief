@@ -43,7 +43,7 @@ export const RELEASE_NOTES: ReleaseDay[] = [
       {
         title: 'Missing incident maps',
         summary:
-          'A map with an "&" in its file name held up every new map for that fire. Slough Canyon’s Aug 27 operations, orthophoto and IAP maps now arrive with the next update.',
+          'A map with an "&" in its file name held up every new map for that fire; Slough Canyon’s Aug 27 operations, orthophoto and IAP maps are now in. Open PDF also works for maps with "&" or "#" in the name, like one of Sinlahekin’s.',
         fix: true,
       },
     ],
