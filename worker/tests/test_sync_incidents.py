@@ -1,16 +1,18 @@
 """sync-incidents by fire ID, whole runs against a stub FTP and a dry-run
 bucket: the first run after the migration reproduces the migration's
-manifests and catalog rows, a folder re-bound to another fire splits its
-files by their names, overrides are fire GUIDs (anything else leaves the
-folder alone), a name never re-binds a folder bound by ID, and two folders
+manifests and catalog rows, an unchanged folder of an active fire is
+re-listed under its binding (no re-match) and rebuilds its fires only when
+something came in, a folder re-bound to another fire splits its files by
+their names, overrides are fire GUIDs (anything else leaves the folder
+alone), a name never re-binds a folder bound by ID, and two folders
 claiming one incident key never share a record."""
 
 import json
 
 from ftp_stub import BASE, FakeFTP
 from incident_world import (
-    AU_FK, AU_KEY, AUSTIN, CHERRY_KEY, GH_FK, GH_KEY, GRASSHOPPER, LATEST, World, freeze_clock,
-    sha16, wire_cli,
+    AU_FK, AU_KEY, AUSTIN, CHERRY_KEY, GH_FK, GH_KEY, GRASSHOPPER, LATEST, MT_FK, MT_KEY, NOW,
+    TWIN_MT, World, freeze_clock, sha16, wire_cli,
 )
 from responder_worker import cli, fire_manifests, geopdf, health
 from responder_worker.fires import fire_key
@@ -55,38 +57,54 @@ def test_first_sync_after_migration_reproduces_step_e(tmp_path, monkeypatch):
 
     # the FTP: every folder as it was at its last sync
     ftp = FakeFTP()
-    for key in (GH_KEY, AU_KEY):
-        ftp.dir(ORE, key.rpartition("/")[2], "2026-10-02 19:15")
-    ftp.dir(WASH, "2026_TwinSisters", "2026-10-02 19:15")
-    ftp.dir(f"{BASE}/n_rockies/2026/", "2026_TwinSisters", "2026-10-02 19:15")
+    bound_dirs = [ftp.dir(ORE, key.rpartition("/")[2], "2026-10-02 19:15")
+                  for key in (GH_KEY, AU_KEY)]
+    bound_dirs.append(ftp.dir(WASH, "2026_TwinSisters", "2026-10-02 19:15"))
+    bound_dirs.append(ftp.dir(f"{BASE}/n_rockies/2026/", "2026_TwinSisters", "2026-10-02 19:15"))
     ftp.dir(f"{BASE}/great_basin/2026/", "2026_Cherry", "2026-10-02 19:15")
     ftp.wire(monkeypatch)
     _no_tools(monkeypatch)
 
     def sync():
         world.storage.written.clear()
+        ftp.requests.clear()
         assert cli.main(["sync-incidents"]) == 0
         return world.storage.get_json(health.KEY)["mirror"], world.state_on_bucket()
 
+    def resynced(incidents: dict) -> dict:
+        # a refresh stamps when a bound folder was last looked at
+        return {k: dict(r, synced_at=NOW) if k != CHERRY_KEY else r
+                for k, r in incidents.items()}
+
     m, state = sync()
-    # nothing listed or downloaded, nothing re-keyed or re-stamped
-    assert [r for r in ftp.requests if r[0] != "root"] == []
+    # Each folder bound to an active fire is listed at its root (spec 3.9)
+    # and found nothing new: nothing else listed or downloaded, nothing
+    # re-matched, re-keyed or re-stamped. The unresolved one is not listed.
+    assert sorted(r for r in ftp.requests if r[0] != "root") == sorted(
+        ("list", u) for u in bound_dirs)
     assert (m["candidates"], m["unchanged_skips"], m["files_downloaded"]) == (5, 5, 0)
+    assert m["refreshed"] == 0
     assert m["unresolved"] == [CHERRY_KEY]
     assert m["rebinds"] == m["rebind_refused"] == m["override_errors"] == []
     assert m["key_collisions"] == m["raw_sha_mismatch"] == []
-    for section in ("incidents", "tiled", "ir", "incident_fires", "migrations"):
+    for section in ("tiled", "ir", "migrations"):
         assert state[section] == migrated[section], section
+    assert state["incidents"] == resynced(migrated["incidents"])
     # the manifests and catalog rows are the migration's, byte for byte
     # (a fire still owed an IR conversion is rebuilt, and with no converter
-    # this run it comes out the same)
+    # this run it comes out the same, its folders' sync time aside)
     assert _id_manifests(world.storage) == step_e
-    assert set(m["rebuilt_fires"]) <= set(migrated["incident_fires"])
+    rebuilt = set(m["rebuilt_fires"])
+    assert rebuilt <= set(migrated["incident_fires"])
     assert [k for k in world.storage.written if k.startswith("catalogs/incidents/")] == [
         fire_manifests.manifest_key(fk) for fk in m["rebuilt_fires"]]
+    assert state["incident_fires"] == {fk: dict(e, synced_at=NOW) if fk in rebuilt else e
+                                       for fk, e in migrated["incident_fires"].items()}
     catalog = world.storage.get_json("catalogs/catalog.json")
     assert catalog["version"] == state["catalog_version"] == LATEST + 2
-    assert json.dumps(catalog["fires"]) == json.dumps(rows)
+    assert json.dumps(catalog["fires"]) == json.dumps([
+        dict(r, incident_last_synced=NOW) if fire_key(r["cornea_id"]) in rebuilt else r
+        for r in rows])
     assert not [k for k in world.storage.written
                 if k.startswith(("raw/", "tiles/", "previews/", "vectors/"))]
     assert world.storage.written[-3:] == [f"catalogs/versions/catalog.{LATEST + 2}.json",
@@ -103,10 +121,12 @@ def test_first_sync_after_migration_reproduces_step_e(tmp_path, monkeypatch):
     assert sorted(k for k in world.storage.written if k.startswith("catalogs/incidents/")) == \
         sorted(step_e)
     assert _id_manifests(world.storage) == step_e
-    assert state["incident_fires"] == migrated["incident_fires"]
-    assert state["incidents"] == migrated["incidents"]
+    assert state["incident_fires"] == {fk: dict(e, synced_at=NOW)
+                                       for fk, e in migrated["incident_fires"].items()}
+    assert state["incidents"] == resynced(migrated["incidents"])
     assert json.dumps(world.storage.get_json("catalogs/catalog.json")["fires"]) == \
-        json.dumps(rows)
+        json.dumps([dict(r, incident_last_synced=NOW) if r["has_incident_maps"] else r
+                    for r in rows])
 
 
 # ---------------------------------------------------------------------------
@@ -140,13 +160,14 @@ def _gh_on_austin() -> dict:
             "synced_at": "2026-10-02T19:20:00Z", "children": {}, "files": files}
 
 
-def _bucket(tmp_path, monkeypatch, rec: dict, *, overrides=None, fires=None):
-    """A migrated bucket holding one record (its fire's manifest built),
-    and cli wired to it with no tools."""
+def _bucket(tmp_path, monkeypatch, rec: dict, *, overrides=None, fires=None, others=None):
+    """A migrated bucket holding one record (plus `others`, by key), its
+    fires' manifests built, and cli wired to it with no tools."""
     world = World(tmp_path)  # only for its spy bucket and active-fire list
     world.fires = fires or _fires()
     storage = world.storage
-    state = {"schema_version": 1, "incidents": {GH_KEY: rec}, "tiled": {}, "ir": {},
+    state = {"schema_version": 1, "incidents": {GH_KEY: rec, **(others or {})}, "tiled": {},
+             "ir": {},
              "incident_fires": {}, "migrations": {"incident_ids": FLAG}, "catalog_version": 50}
     fires_by_fk = {fire_key(f["cornea_id"]): f for f in world.fires}
     fire_manifests.publish_fire_manifests(None, storage, state, fires_by_fk, set(fires_by_fk),
@@ -205,6 +226,88 @@ def test_rebind_splits_files_by_name_and_rebuilds_both_fires(tmp_path, monkeypat
     rows = {r["fire_slug"]: r for r in world.storage.get_json("catalogs/catalog.json")["fires"]}
     assert rows["grasshopper"]["incident_map_count"] == 2
     assert rows["austin"]["incident_map_count"] == 2
+
+
+def test_unchanged_folder_with_new_child_is_refreshed(tmp_path, monkeypatch):
+    # 2026_Grasshopper, bound to Grasshopper and lending Austin its sheet:
+    # a new daily folder under Products/ leaves the folder's own mtime
+    # alone. The run re-lists it under its binding (no re-match), takes the
+    # new sheet and rebuilds the fires it shows files on, and no other. The
+    # Twin Sisters folder found nothing new and is neither listed below its
+    # root nor rebuilt.
+    gh = _gh_on_austin()
+    gh.update(cornea_id=GRASSHOPPER["cornea_id"], bound=bound_info(GRASSHOPPER, "unit_id"),
+              match={"method": "unit_id", "confidence": 1.0,
+                     "token": GRASSHOPPER["unique_fire_id"], "dir_url": GH_DIR,
+                     "cornea_id": GRASSHOPPER["cornea_id"]},
+              children={"Products": "2026-10-02 19:15"})
+    gh["files"][AU_0817].update(fk=AU_FK, fk_src="token")
+    mt_dir = f"{BASE}/n_rockies/2026/2026_TwinSisters/"
+    mt_sheet = "products/20260805/ops_twin_sisters_0805.pdf"
+    mt = {"fire_slug": "twin-sisters", "storage_prefix": "twin-sisters",
+          "cornea_id": TWIN_MT["cornea_id"], "bound": bound_info(TWIN_MT, "unit_id"),
+          "match": {"method": "unit_id", "confidence": 1.0, "token": TWIN_MT["unique_fire_id"],
+                    "dir_url": mt_dir, "cornea_id": TWIN_MT["cornea_id"]},
+          "dir_url": mt_dir, "dir_mtime": "2026-10-02 19:15",
+          "synced_at": "2026-10-02T19:20:00Z", "children": {"Products": "2026-10-02 19:15"},
+          "files": {mt_sheet: {"etag": '"e"', "lm": "Wed, 05 Aug 2026 05:00:00 GMT",
+                               "size": 9, "sha16": sha16(b"%PDF twin"), "rev": 1,
+                               "kind": "product", "url": f"{mt_dir}{mt_sheet}"}}}
+    world = _bucket(tmp_path, monkeypatch, gh, others={MT_KEY: mt},
+                    fires=_fires() + [dict(TWIN_MT, fire_slug="twin-sisters", active=True)])
+    mt_before = world.storage.get_json(fire_manifests.manifest_key(MT_FK))
+
+    def no_match(*a, **kw):
+        raise AssertionError("an unchanged bound folder is never re-matched")
+    monkeypatch.setattr(cli, "_gather_unit_tokens", no_match)
+    monkeypatch.setattr(cli, "match_candidate", no_match)
+
+    ftp = FakeFTP()
+    ftp.dir(ORE, "2026_Grasshopper", "2026-10-02 19:15")            # root unchanged
+    products = ftp.dir(GH_DIR, "Products", "2026-10-08 05:00")       # ... one level down not
+    day = ftp.dir(products, "20261008", "2026-10-08 05:00")
+    ftp.file(day, GH_1008, b"%PDF grasshopper 1008")
+    ftp.dir(f"{BASE}/n_rockies/2026/", "2026_TwinSisters", "2026-10-02 19:15")
+    ftp.dir(mt_dir, "Products", "2026-10-02 19:15")
+    ftp.wire(monkeypatch)
+    assert cli.main(["sync-incidents"]) == 0
+
+    assert sorted(r[:2] for r in ftp.requests if r[0] != "root") == sorted([
+        ("list", GH_DIR), ("list", products), ("list", day), ("get", f"{day}{GH_1008}"),
+        ("list", mt_dir)])
+    m = world.storage.get_json(health.KEY)["mirror"]
+    assert (m["refreshed"], m["unchanged_skips"], m["files_downloaded"]) == (1, 1, 1)
+    assert m["rebinds"] == m["rebind_refused"] == []
+    assert sorted(m["rebuilt_fires"]) == sorted([AU_FK, GH_FK])
+    assert sorted(k for k in world.storage.written if k.startswith("catalogs/incidents/")) == \
+        sorted(fire_manifests.manifest_key(fk) for fk in (AU_FK, GH_FK))
+    assert world.storage.get_json(fire_manifests.manifest_key(MT_FK)) == mt_before
+
+    state = world.state_on_bucket()
+    rec = state["incidents"][GH_KEY]
+    assert (rec["cornea_id"], rec["match"], rec["bound"]) == (
+        gh["cornea_id"], gh["match"], gh["bound"])
+    assert rec["dir_mtime"] == "2026-10-02 19:15"
+    assert rec["children"] == {"Products": "2026-10-08 05:00"}
+    new_rel = f"products/20261008/{GH_1008}"
+    assert "fk" not in rec["files"][new_rel]  # follows the binding
+    assert world.storage.exists(f"raw/incidents/austin-gh/{new_rel}")
+    assert state["incidents"][MT_KEY]["children"] == mt["children"]
+    gh_man = world.storage.get_json(fire_manifests.manifest_key(GH_FK))
+    au_man = world.storage.get_json(fire_manifests.manifest_key(AU_FK))
+    assert GH_1008 in {x["filename"] for x in gh_man["maps"]}
+    assert {x["filename"] for x in au_man["maps"]} == {AU_0817.rpartition("/")[2]}
+
+    # the next run finds the folder unchanged at every level: root
+    # listings only, nothing rebuilt
+    ftp.requests.clear()
+    world.storage.written.clear()
+    assert cli.main(["sync-incidents"]) == 0
+    assert sorted(r for r in ftp.requests if r[0] != "root") == sorted(
+        [("list", GH_DIR), ("list", mt_dir)])
+    m = world.storage.get_json(health.KEY)["mirror"]
+    assert (m["refreshed"], m["unchanged_skips"], m["rebuilt_fires"]) == (0, 2, [])
+    assert not [k for k in world.storage.written if k.startswith("catalogs/incidents/")]
 
 
 def test_override_must_be_a_fire_guid(tmp_path, monkeypatch):

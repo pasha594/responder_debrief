@@ -1120,6 +1120,9 @@ def cmd_sync_incidents(args) -> int:
     A folder's record is bound by cornea_id (incident_ids): a fresh match to
     another fire rebinds it with each file weighed by its own name
     (rebind_decision / apply_bind), and every fire it touched is rebuilt.
+    A folder of an active fire whose root is unchanged is still re-listed
+    under its binding, without matching, so new daily folders a level down
+    are picked up; its fires are rebuilt only when something came in.
     Upload order: raw, tiles, previews; each fire's manifest, then its
     index entry; state; then the catalog (fire_manifests.publish_catalog).
     """
@@ -1198,7 +1201,7 @@ def cmd_sync_incidents(args) -> int:
         priority = [x for x in (args.priority_fires or "").split(",") if x.strip()]
         cands = _rank_candidates(cands, fires, priority)
         unchanged_skips = 0
-        refreshed = 0  # unchanged folders of active fires re-listed (spec 3.9)
+        refreshed = 0  # unchanged folders of active fires that brought something new (3.9)
         failed_incidents: list[str] = []
         date_rejected: list[str] = []  # cached name matches dropped by the date check
         rebinds: list[dict] = []
@@ -1215,6 +1218,17 @@ def cmd_sync_incidents(args) -> int:
         # run; per-file state means nothing re-downloads.
         frames.start_deadline(int(os.environ.get(
             "MIRROR_MAX_SECONDS", str(config.MIRROR_MAX_SECONDS_DEFAULT))))
+
+        def new_mirror() -> IncidentMirror:
+            return IncidentMirror(
+                client, storage, state,
+                max_file_mb=args.max_file_mb,
+                max_files=args.max_pdfs,
+                products_keep=args.products_keep,
+                ir_keep=args.ir_keep,
+                since=args.since,
+                force=args.force,
+            )
 
         mirrors: dict[str, dict] = {}
         matched = 0
@@ -1252,9 +1266,47 @@ def cmd_sync_incidents(args) -> int:
             if (prev and not args.force and not args.since
                     and prev.get("dir_mtime") == cand.dir_mtime
                     and _override_key(prev.get("override")) == _override_key(ov)):
-                if incident_ids.prior_owner(prev):
-                    # Bound, and nothing new at the folder's root. (Keeping an
-                    # active fire's unchanged folders fresh is spec 3.9.)
+                bound_fk = incident_ids.prior_owner(prev)
+                if bound_fk in fires_by_fk and target_fk in (None, bound_fk):
+                    # Nothing new at the folder's root, but a new daily
+                    # folder lands a level down (Products/20261008) without
+                    # touching it, and a child a deferral cut short is still
+                    # unstamped. Re-list the folder under its binding, with
+                    # no re-match: unchanged children replay from state, and
+                    # the record's match, bound and region stay as they are
+                    # (a region from the crawl would change the manifest's
+                    # from the one the migration built).
+                    owners = incident_ids.owners_of(prev)
+                    try:
+                        res = new_mirror().sync_incident(
+                            incident_key=key, dir_url=cand.dir_url, match=prev["match"],
+                            cornea_id=prev["cornea_id"], bound=prev.get("bound"),
+                            dir_mtime=cand.dir_mtime, region=prev.get("region"),
+                        )
+                    except httpx.HTTPError as exc:
+                        log(f"[incidents] {key}: FAILED mid-refresh ({exc}) — "
+                            "skipping; will resume next run")
+                        failed_incidents.append(key)
+                        continue
+                    if not (res.downloads or res.synced_children):
+                        log(f"[incidents] {key}: unchanged since last sync — skipping")
+                        unchanged_skips += 1
+                        continue
+                    log(f"[incidents] {key}: refreshed under {bound_fk}: "
+                        f"listings={res.listings} children={res.synced_children} "
+                        f"downloads={res.downloads} ({res.bytes_downloaded/1e6:.1f} MB)")
+                    refreshed += 1
+                    mirrors[key] = {"candidate": cand, "match": None, "result": res,
+                                    "fk": bound_fk}
+                    # every fire the folder showed files on, before and after
+                    # (a new revision can drop a file's stamp)
+                    rebuild |= owners | incident_ids.owners_of(prev)
+                    if res.downloads:
+                        state_mod.save_state(storage, state)
+                    continue
+                if bound_fk:
+                    # Bound to a fire that is no longer active (or, with
+                    # --fire, to another fire), and nothing new at its root.
                     log(f"[incidents] {key}: unchanged since last sync — skipping")
                     unchanged_skips += 1
                     continue
@@ -1326,17 +1378,8 @@ def cmd_sync_incidents(args) -> int:
             log(f"[incidents] {key} -> {fire_key(cornea_id)} "
                 f"({m.fire_slug}, {m.method}, conf={m.confidence})")
 
-            mirror = IncidentMirror(
-                client, storage, state,
-                max_file_mb=args.max_file_mb,
-                max_files=args.max_pdfs,
-                products_keep=args.products_keep,
-                ir_keep=args.ir_keep,
-                since=args.since,
-                force=args.force,
-            )
             try:
-                res = mirror.sync_incident(
+                res = new_mirror().sync_incident(
                     incident_key=key, dir_url=cand.dir_url, match=match_record,
                     cornea_id=cornea_id, bound=bound, dir_mtime=cand.dir_mtime,
                     region=cand.region,

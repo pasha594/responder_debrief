@@ -20,7 +20,7 @@ import hashlib
 import json
 from datetime import datetime, timedelta, timezone
 
-from responder_worker import catalogs as cat, cli, health, ir_vectors, state as state_mod
+from responder_worker import catalogs as cat, cli, health, ir_vectors, mirror, state as state_mod
 from responder_worker.b2 import DryRunStorage
 from responder_worker.fires import fire_key
 from responder_worker.state import STATE_KEY
@@ -287,6 +287,7 @@ def freeze_clock(monkeypatch, now: str = NOW) -> None:
     monkeypatch.setattr(cat, "now_iso", lambda: now)
     monkeypatch.setattr(health, "now_iso", lambda: now)
     monkeypatch.setattr(state_mod, "now_iso", lambda: now)
+    monkeypatch.setattr(mirror, "now_iso", lambda: now)  # a record's synced_at
 
 
 def wire_cli(monkeypatch, world: World, *, sync_by_id: bool = True) -> None:

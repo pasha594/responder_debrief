@@ -1,7 +1,9 @@
 """The mirror on fire-ID records: every key from the record (unchanged
 files where their bytes are, new revisions under the record's own storage
 prefix), owner stamps carried over only with evidence, temp files per
-incident, pruned files never fetched, and no write under another fire."""
+incident, pruned files never fetched, and no write under another fire.
+A child dir is stamped only when nothing in it was deferred (dated dirs at
+an incident's root included), while the folder's own mtime always is."""
 
 import hashlib
 import json
@@ -200,3 +202,93 @@ def test_sync_incident_refuses_cornea_change(tmp_path, monkeypatch):
                         cornea_id=None, bound=None, dir_mtime=None)
     assert json.dumps(state, sort_keys=True) == before
     assert ftp.requests == [] and storage.written == []
+
+
+def test_deferred_child_not_stamped_but_dir_mtime_is(tmp_path, monkeypatch):
+    # The deadline passes after two downloads: QR (one file) is done and
+    # stamped; Products' second sheet is deferred, so Products keeps no
+    # stamp and is listed again next run. The folder's own mtime and
+    # synced_at are written either way (sync-incidents re-lists an unchanged
+    # folder rather than re-matching it).
+    ftp = FakeFTP()
+    qdir = ftp.dir(GH_DIR, "QR", "2026-10-08 04:00")
+    ftp.file(qdir, "Grasshopper_QR.pdf", b"%PDF qr")
+    day = ftp.dir(ftp.dir(GH_DIR, "Products", "2026-10-08 05:00"), "20261008", "2026-10-08 05:00")
+    ftp.file(day, OPS, b"%PDF ops")
+    ftp.file(day, PLAIN, b"%PDF transport")
+    ftp.wire(monkeypatch)
+    state = {"incidents": {GH_KEY: _gh_record()}}
+    m, storage = _mirror(tmp_path, state)
+    monkeypatch.setattr(frames, "deadline_passed", lambda: len(ftp.gets()) >= 2)
+    res = _sync(m, state)
+
+    rec = state["incidents"][GH_KEY]
+    assert (res.downloads, res.skipped_deferred, res.synced_children) == (2, 1, 2)
+    assert rec["children"] == {"QR": "2026-10-08 04:00"}
+    assert rec["dir_mtime"] == "2026-10-08 05:00" and rec["synced_at"]
+    assert sorted(rec["files"]) == sorted([QR, f"{DAY}/{OPS}"])
+
+    # next run: QR replays without a request, Products is listed again and
+    # the deferred sheet comes in; now Products is stamped
+    monkeypatch.setattr(frames, "deadline_passed", lambda: False)
+    ftp.requests.clear()
+    res = _sync(m, state)
+    assert (res.downloads, res.synced_children) == (1, 1)
+    assert f"{GH_DIR}QR/" not in [r[1] for r in ftp.requests]
+    assert ftp.gets() == [f"{day}{OPS}", f"{day}{PLAIN}"]  # the first one answers 304
+    assert rec["children"] == {"QR": "2026-10-08 04:00", "Products": "2026-10-08 05:00"}
+    assert sorted(rec["files"]) == sorted([QR, f"{DAY}/{OPS}", f"{DAY}/{PLAIN}"])
+
+    # a deadline at Products' named subfolders counts as a deferral too:
+    # nothing is fetched, but the subfolder is still owed
+    ftp = FakeFTP()
+    current = ftp.dir(ftp.dir(GH_DIR, "Products", "2026-10-08 06:00"), "Current Maps")
+    ftp.file(current, OPS, b"%PDF ops")
+    ftp.wire(monkeypatch)
+    state = {"incidents": {GH_KEY: _gh_record()}}
+    m, storage = _mirror(tmp_path / "named", state)
+    monkeypatch.setattr(frames, "deadline_passed", lambda: True)
+    res = _sync(m, state)
+    assert (res.downloads, res.skipped_deferred, res.synced_children) == (0, 1, 1)
+    assert ftp.gets() == [] and f"{current}" not in [r[1] for r in ftp.requests]
+    rec = state["incidents"][GH_KEY]
+    assert rec["children"] == {} and rec["dir_mtime"] == "2026-10-08 05:00"
+
+
+def test_root_dated_dirs_replayed_when_unchanged(tmp_path, monkeypatch):
+    # No Products/QR/IR: the folder itself holds the dated dirs (in either
+    # date spelling). Each is stamped like a known child, so an unchanged
+    # one replays from state instead of being re-requested every run.
+    ftp = FakeFTP()
+    d1007 = ftp.dir(GH_DIR, "20261007", "2026-10-07 05:00")
+    d1006 = ftp.dir(GH_DIR, "10062026", "2026-10-06 05:00")
+    ftp.file(d1007, OPS, b"%PDF ops 1007")
+    ftp.file(d1006, PLAIN, b"%PDF transport 1006")
+    ftp.wire(monkeypatch)
+    state = {"incidents": {GH_KEY: _gh_record()}}
+    m, storage = _mirror(tmp_path, state)
+    res = _sync(m, state)
+    rec = state["incidents"][GH_KEY]
+    assert (res.downloads, res.synced_children) == (2, 2)
+    assert rec["children"] == {"20261007": "2026-10-07 05:00", "10062026": "2026-10-06 05:00"}
+    assert sorted(rec["files"]) == [f"products/20261006/{PLAIN}", f"products/20261007/{OPS}"]
+
+    # unchanged: no listing below the root, no request, both replayed
+    ftp.requests.clear()
+    res = _sync(m, state)
+    assert ftp.requests == [("list", GH_DIR)]
+    assert (res.downloads, res.synced_children, res.skipped_unchanged) == (0, 0, 2)
+    assert sorted(f.key for f in res.files) == [
+        f"raw/incidents/grasshopper/products/20261006/{PLAIN}",
+        f"raw/incidents/grasshopper/products/20261007/{OPS}"]
+    assert all(f.local_path is None for f in res.files)
+
+    # a new dated dir: only it is listed; the others replay
+    d1008 = ftp.dir(GH_DIR, "20261008", "2026-10-08 05:00")
+    ftp.file(d1008, AU_OPS, b"%PDF austin 1008")
+    ftp.requests.clear()
+    res = _sync(m, state)
+    assert [r[1] for r in ftp.requests] == [GH_DIR, d1008, f"{d1008}{AU_OPS}"]
+    assert (res.downloads, res.synced_children) == (1, 1)
+    assert rec["children"]["20261008"] == "2026-10-08 05:00"
+    assert len(res.files) == 3

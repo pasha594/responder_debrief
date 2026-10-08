@@ -3,7 +3,8 @@ B2 raw/ uploads, per-incident checkpoints.
 
 Change detection: listed child-dir mtimes vs state (skip unchanged subtrees
 with zero requests); per-file etag/last-modified conditional GETs; QR in-place
-overwrites bump `rev`.
+overwrites bump `rev`. A subtree is stamped only once every file in it was
+handled: one with files deferred past the deadline is listed again next run.
 
 Records are bound to a fire by cornea_id (incident_ids.bind_record) and every
 key comes from the record (asset_keys): an unchanged file is where its bytes
@@ -99,6 +100,7 @@ class MirrorResult:
     skipped_too_big: int = 0
     bytes_downloaded: int = 0
     skipped_deferred: int = 0
+    synced_children: int = 0  # subtrees listed again (changed or owed), not replayed
 
 
 class IncidentMirror:
@@ -146,45 +148,56 @@ class IncidentMirror:
         for child in children:
             if not child.is_dir:
                 continue
-            cname = child.name
-            prev_mtime = inc_state["children"].get(cname)
-            unchanged = (not self.force and prev_mtime and prev_mtime == child.mtime)
-            if cname.lower() in ("products", "gis"):
-                if unchanged:
-                    res.skipped_unchanged += 1
-                    self._replay_cached(inc_state, "products/", res)
-                else:
-                    self._sync_products(child, inc_state, res)
-            elif cname.lower() == "qr":
-                if unchanged:
-                    res.skipped_unchanged += 1
-                    self._replay_cached(inc_state, "qr/", res)
-                else:
-                    self._sync_flat(child, inc_state, "qr", "qr", res)
-            elif cname.lower() == "ir":
-                if unchanged:
-                    res.skipped_unchanged += 1
-                    self._replay_cached(inc_state, "ir/", res)
-                else:
-                    self._sync_ir(child, inc_state, res)
+            cname = child.name.lower()
+            if cname in ("products", "gis"):
+                self._subtree(child, inc_state, "products/",
+                              lambda: self._sync_products(child, inc_state, res), res)
+            elif cname == "qr":
+                self._subtree(child, inc_state, "qr/",
+                              lambda: self._sync_flat(child, inc_state, "qr", "qr", res), res)
+            elif cname == "ir":
+                self._subtree(child, inc_state, "ir/",
+                              lambda: self._sync_ir(child, inc_state, res), res)
             else:
                 continue  # unknown subfolder — not a known container
             saw_known_child = True
-            inc_state["children"][cname] = child.mtime
 
         if not saw_known_child:
             # No Products/GIS/QR/IR at all: the incident dir IS the products
             # container, with dated dirs (and sometimes loose files) at its root
             # — e.g. 2026_BigGrass/20260817/. Without this the whole incident
-            # mirrored as zero files.
-            self._sync_dailies(children, inc_state, res)
+            # mirrored as zero files. Its dated dirs are stamped like known
+            # children, so an unchanged one replays instead of being
+            # re-requested on every run.
+            self._sync_dailies(children, inc_state, res, stamped=True)
             for e in children:
                 if not e.is_dir:
                     self._file(e, inc_state, "products/current", "product", res)
 
+        # Always written, deferrals or not: what a deferral still owes is
+        # held back by the child stamps, and sync-incidents re-lists an
+        # unchanged folder of an active fire (spec 3.9) rather than
+        # re-matching it.
         inc_state["dir_mtime"] = dir_mtime
         inc_state["synced_at"] = now_iso()
         return res
+
+    def _subtree(self, entry: Entry, inc_state: dict, rel_prefix: str, sync,
+                 res: MirrorResult) -> None:
+        """One child dir under its children[name] stamp: replayed from state
+        while the stamp matches its listed mtime, else synced. The new mtime
+        is stamped only when no file in it was deferred, so a subtree the
+        deadline cut short is listed again next run."""
+        prev_mtime = inc_state["children"].get(entry.name)
+        if not self.force and prev_mtime and prev_mtime == entry.mtime:
+            res.skipped_unchanged += 1
+            self._replay_cached(inc_state, rel_prefix, res)
+            return
+        deferred = res.skipped_deferred
+        sync()
+        res.synced_children += 1
+        if res.skipped_deferred == deferred:
+            inc_state["children"][entry.name] = entry.mtime
 
     # ------------------------------------------------------------------
     def _replay_cached(self, inc_state: dict, rel_prefix: str, res: MirrorResult) -> None:
@@ -221,6 +234,7 @@ class IncidentMirror:
         named = [e for e in entries if e.is_dir and _daily_key(e.name) is None]
         for sub in named[:MAX_NAMED_SUBDIRS]:
             if frames.deadline_passed():
+                res.skipped_deferred += 1  # the rest wait: Products/ stays unstamped
                 break
             sub_entries = list_dir(self.client, sub.url)
             res.listings += 1
@@ -251,12 +265,21 @@ class IncidentMirror:
         keyed = [(_daily_key(e.name), e) for e in entries if e.is_dir]
         return self._select_current([(k, e) for k, e in keyed if k], cap)
 
-    def _sync_dailies(self, entries: list[Entry], inc_state: dict, res: MirrorResult) -> None:
-        """Current-period dated dirs, keyed by normalized YYYYMMDD."""
+    def _sync_dailies(self, entries: list[Entry], inc_state: dict, res: MirrorResult, *,
+                      stamped: bool = False) -> None:
+        """Current-period dated dirs, keyed by normalized YYYYMMDD. `stamped`
+        (dated dirs at the incident root) puts each under a child stamp of
+        its own (_subtree)."""
         for key, daily in self._select_dated(entries, self.products_keep):
             # B2 path uses the NORMALIZED key so 07282026 and 20260728 land in
             # one place and manifest op_date parsing stays uniform.
-            self._sync_flat(daily, inc_state, f"products/{key}", "product", res)
+            rel_dir = f"products/{key}"
+            if stamped:
+                self._subtree(daily, inc_state, f"{rel_dir}/",
+                              lambda: self._sync_flat(daily, inc_state, rel_dir, "product", res),
+                              res)
+            else:
+                self._sync_flat(daily, inc_state, rel_dir, "product", res)
 
     def _sync_ir(self, child: Entry, inc_state: dict, res: MirrorResult) -> None:
         entries = list_dir(self.client, child.url)

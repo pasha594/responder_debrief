@@ -22,6 +22,14 @@ on:
         required: false
         type: boolean
         default: false
+      products_keep:
+        description: "Dated Products folders mirrored per incident (blank: worker default); raise to catch up"
+        required: false
+        type: string
+      ir_keep:
+        description: "IR flight folders mirrored per incident (blank: worker default); raise to catch up"
+        required: false
+        type: string
 
 concurrency:
   # Shared group: sync-catalogs and sync-incidents both read-modify-write
@@ -87,9 +95,13 @@ jobs:
           INPUT_FIRE: ${{ inputs.fire }}
           INPUT_SINCE: ${{ inputs.since }}
           INPUT_FORCE: ${{ inputs.force }}
+          INPUT_PRODUCTS_KEEP: ${{ inputs.products_keep }}
+          INPUT_IR_KEEP: ${{ inputs.ir_keep }}
         run: |
           FLAGS=()
           [ -n "$INPUT_FIRE" ] && FLAGS+=(--fire "$INPUT_FIRE")
           [ -n "$INPUT_SINCE" ] && FLAGS+=(--since "$INPUT_SINCE")
           [ "$INPUT_FORCE" = "true" ] && FLAGS+=(--force)
+          [ -n "$INPUT_PRODUCTS_KEEP" ] && FLAGS+=(--products-keep "$INPUT_PRODUCTS_KEEP")
+          [ -n "$INPUT_IR_KEEP" ] && FLAGS+=(--ir-keep "$INPUT_IR_KEEP")
           uv run python -m responder_worker.cli sync-incidents "${FLAGS[@]}"
