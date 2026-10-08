@@ -487,9 +487,11 @@ export interface HealthDoc {
   history?: { job: string; at: string; ok: boolean; note: string | null }[];
 }
 
-/** hotspots/{slug}/index.json — worker-archived daily hotspot chunks. */
+/** hotspots/{archive id}/index.json — worker-archived daily hotspot chunks,
+ * keyed by the fire's cornea_id (lowercased, no braces), never its name. */
 export interface HotspotArchiveIndex {
   schema: number;
+  cornea_id?: string;
   /** Chunk-path generation: bumps when the query box grows (fresh backfill
    * under new URLs so immutable caches are never rewritten). */
   gen?: number;

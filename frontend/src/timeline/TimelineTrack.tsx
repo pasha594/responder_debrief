@@ -15,16 +15,19 @@ import {
   useFire,
   useMasterCatalog,
   usePerimeterIndex,
+  usePerimeterVersion,
   usePyrecastRuns,
   useWeatherRuns,
 } from '../api/queries';
-import { weatherHours } from './framePlan';
+import { parseFireCoordinates } from '../api/geo';
+import { resolvePerimeterVersion, weatherHours } from './framePlan';
 import { useFireHotspots } from '../api/useFireHotspots';
 import { useIncidentManifest } from '../api/queries';
 import { seriesVersions } from '../utils/incidentMaps';
 import { useIsDesktop } from '../utils/useMediaQuery';
 import { makeLinearScale, type TimeScale } from './timeScale';
 import { activitySamples, hotspotActivity, sparklinePath } from './hotspotActivity';
+import { NEAR_FIRE_M, nearPoint, nearPolygon } from './nearFire';
 import { dayLabelStride, markPlacement } from './trackMarks';
 
 const HOUR = 3600_000;
@@ -143,7 +146,7 @@ export function TimelineTrack() {
   const corneaId = view.mode === 'fire' ? view.corneaId : null;
   const { data: fire } = useFire(corneaId);
   const tz = view.mode === 'fire' ? (fire?.timezone ?? null) : null;
-  const { data: perimeterIndex } = usePerimeterIndex(corneaId);
+  const { data: perimeterIndex, isError: perimeterIndexFailed } = usePerimeterIndex(corneaId);
   const { data: catalog } = useMasterCatalog();
   const { data: pyrecastRuns } = usePyrecastRuns();
   // Shared cache entry with useMapLayerSync — one fetch feeds map and track.
@@ -245,10 +248,29 @@ export function TimelineTrack() {
   const lane = isDesktop ? LANE.desktop : LANE.mobile;
   const laneHeight = Math.max(0, height - lane.top - lane.bottom);
 
+  // Only detections within 3 mi of the latest perimeter count (the origin's
+  // 3 mi before there is one): the fetched box also holds other fires and
+  // industrial heat. Hidden until that shape is known.
+  const latestPerimeterPath = resolvePerimeterVersion(perimeterIndex, Infinity)?.path ?? null;
+  const { data: latestPerimeter, isError: latestPerimeterFailed } =
+    usePerimeterVersion(latestPerimeterPath);
+  const origin = catalogFireEntry?.coordinates ?? parseFireCoordinates(fire?.fire_coordinates);
+  const [originLon, originLat] = origin ?? [NaN, NaN];
+  const noPerimeter =
+    perimeterIndexFailed || latestPerimeterFailed || (!!perimeterIndex && !latestPerimeterPath);
+  const nearFire = useMemo(() => {
+    const around = latestPerimeter ? nearPolygon(latestPerimeter.geometry, NEAR_FIRE_M) : null;
+    if (around) return around;
+    if ((noPerimeter || latestPerimeter) && Number.isFinite(originLon) && Number.isFinite(originLat)) {
+      return nearPoint([originLon, originLat], NEAR_FIRE_M);
+    }
+    return null;
+  }, [latestPerimeter, noPerimeter, originLon, originLat]);
+
   const sparkline = useMemo(() => {
-    if (width <= 0 || laneHeight <= 6) return null;
+    if (width <= 0 || laneHeight <= 6 || !nearFire) return null;
     const to = Math.min(now, domain[1]);
-    const days = hotspotActivity(hotspots, domain[0], to, tz);
+    const days = hotspotActivity(hotspots, domain[0], to, tz, nearFire);
     if (days.length < 1) return null;
     // 2px of headroom keeps the busiest day off the lane's ceiling.
     return sparklinePath(
@@ -256,7 +278,7 @@ export function TimelineTrack() {
       laneHeight,
       laneHeight - 2,
     );
-  }, [hotspots, domain, now, tz, scale, width, laneHeight]);
+  }, [hotspots, domain, now, tz, scale, width, laneHeight, nearFire]);
 
   const showCaption = !!sparkline && isDesktop && width >= CAPTION_MIN_TRACK_PX;
 

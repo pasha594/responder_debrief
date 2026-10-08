@@ -7,6 +7,7 @@
  * to that evening even though it is already tomorrow in UTC.
  */
 import type { HotspotFeatureCollection } from '../api/types';
+import type { NearTest } from './nearFire';
 
 const HOUR_MS = 3600_000;
 
@@ -126,16 +127,22 @@ export function enumerateFireLocalDays(
 
 // ---------- bucketing + normalization ----------
 
-/** Detections per fire-local day, keyed by fireLocalDayKey. Uses acq_ts. */
+/** Detections per fire-local day, keyed by fireLocalDayKey. Uses acq_ts.
+ * With `near`, only detections it accepts count (see nearFire.ts). */
 export function bucketHotspotsByDay(
   fc: HotspotFeatureCollection | undefined,
   tz: string | null | undefined,
+  near?: NearTest,
 ): Map<string, number> {
   const counts = new Map<string, number>();
   if (!fc?.features?.length) return counts;
   for (const f of fc.features) {
     const ts = f.properties?.acq_ts;
     if (typeof ts !== 'number' || !Number.isFinite(ts)) continue;
+    if (near) {
+      const c = f.geometry?.coordinates;
+      if (!c || !near(c[0], c[1])) continue;
+    }
     const key = fireLocalDayKey(ts, tz);
     counts.set(key, (counts.get(key) ?? 0) + 1);
   }
@@ -177,10 +184,11 @@ export function hotspotActivity(
   from: number,
   to: number,
   tz: string | null | undefined,
+  near?: NearTest,
 ): ActivityDay[] {
   const cells = enumerateFireLocalDays(from, to, tz);
   if (!cells.length) return [];
-  const counts = bucketHotspotsByDay(fc, tz);
+  const counts = bucketHotspotsByDay(fc, tz, near);
   const raw = cells.map((c) => counts.get(c.key) ?? 0);
   const norm = normalizeCounts(raw);
   if (!norm.length) return [];

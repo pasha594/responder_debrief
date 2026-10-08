@@ -40,6 +40,12 @@ export const RELEASE_NOTES: ReleaseDay[] = [
           'A pin off the trails used to join whichever trail was closest, even straight down a cliff. Walk now joins the trail with the shortest total trip over the terrain, and the cross-country part and the climb count in the time. If every way to a trail crosses a cliff, the straight line is marked and left out of the time; rivers and lakes on it aren’t checked.',
         fix: true,
       },
+      {
+        title: 'Hotspot activity counts only this fire',
+        summary:
+          'The hotspot activity line under the timeline could show a busy fire when the map had no hotspots. A fire sharing its name with an earlier fire picked up that fire’s hotspots, sometimes from states away, and nearby fires and other hot spots counted too. The line now counts only hotspots within 3 miles of the latest perimeter, or of the fire’s origin before there is one.',
+        fix: true,
+      },
     ],
   },
   {
