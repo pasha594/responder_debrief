@@ -1550,20 +1550,17 @@
   margin-left: 8px;
 }
 
-/* Source logo beside a section title, linking out as its citation. Pyregence's
-   mark is amber + dark brown for a light ground, so it sits on a light plate
-   like the PyreCast credit chip's. */
+/* Source logo beside a section title, linking out as its citation. It stands
+   as tall as the title's capitals, its foot on their baseline (the inline
+   block's baseline is its bottom edge: no line boxes inside). */
 .rd-title-logo {
   display: inline-block;
-  vertical-align: middle;
-  margin-left: 10px;
-  padding: 3px 8px;
-  background: #fdfcf9;
-  border-radius: 999px;
+  vertical-align: baseline;
+  margin-left: 8px;
   line-height: 0;
 }
 .rd-title-logo:hover {
-  box-shadow: 0 0 0 1px var(--color-accent);
+  opacity: 0.75;
 }
 .rd-title-logo:focus-visible {
   outline: 2px solid var(--color-accent);
@@ -1571,7 +1568,8 @@
 }
 .rd-title-logo img {
   display: block;
-  height: 18px; /* lettering about the title's cap height */
+  height: 0.72em; /* Open Sans cap height, where `cap` is unsupported */
+  height: 1cap;
   width: auto;
 }
 

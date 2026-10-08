@@ -34,6 +34,7 @@ import {
 import { staleBadgeLabel } from '../../spread/runMeta';
 import { PYREGENCE_CITATION, PYREGENCE_URL } from '../../spread/credit';
 import pyregenceLogo from '../../assets/pyregence-logo.svg';
+import pyregenceLogoWhite from '../../assets/pyregence-logo-white.svg';
 import { trafficAvailable } from '../../map/layers/trafficLayer';
 import { incidentsAvailable } from '../../api/tomtomTraffic';
 import { useStore, type ToaMode } from '../../state/store';
@@ -385,6 +386,7 @@ function TrafficToggles() {
 }
 
 export function ForecastTab({ corneaId }: { corneaId: string }) {
+  const theme = useStore((s) => s.ui.theme);
   return (
     <div className="rd-tab-body">
       <MapLayerToggles corneaId={corneaId} />
@@ -403,7 +405,8 @@ export function ForecastTab({ corneaId }: { corneaId: string }) {
             title={PYREGENCE_CITATION}
             aria-label={`${PYREGENCE_CITATION} — opens pyregence.org`}
           >
-            <img src={pyregenceLogo} alt="Pyregence" />
+            {/* Their all-white footer mark on dark; the amber + brown one on light. */}
+            <img src={theme === 'dark' ? pyregenceLogoWhite : pyregenceLogo} alt="Pyregence" />
           </a>
         </h3>
         <FireForecastSection corneaId={corneaId} />
