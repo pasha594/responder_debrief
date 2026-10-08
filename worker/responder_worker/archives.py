@@ -15,7 +15,8 @@ is the fallback for slugs it does not cover.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+import math
+from datetime import datetime, timedelta, timezone
 
 import httpx
 
@@ -134,7 +135,13 @@ def _norm_cornea(cid: str | None) -> str:
 
 def match_slug(slug: str, matches: dict, fires: list[dict]
                ) -> tuple[dict | None, str, float]:
-    """fire_matches.json first (slug -> cornea fire), fuzzy slug fallback."""
+    """fire_matches.json first (slug -> cornea fire), fuzzy slug fallback.
+
+    The fallback also runs when fire_matches names a fire that is no longer
+    active: its pick can be a duplicate record (id-silver went to the 8-acre
+    "Silver Dollar 2" beside the 2,593-acre Silver). A name match must then
+    pass name_match_fits, which keeps a same-name newcomer from inheriting
+    another fire's runs (Calhoun 292 took Calhoun 259's)."""
     m = (matches or {}).get(slug) or {}
     want = _norm_cornea(m.get("cornea_id"))
     if want:
@@ -142,6 +149,39 @@ def match_slug(slug: str, matches: dict, fires: list[dict]
             if _norm_cornea(f.get("cornea_id")) == want:
                 return f, "fire_matches", 1.0
     return match_pyrecast_slug(slug, fires)
+
+
+# A name-only match must also look like the same fire. Calibrated on the
+# live archive (2026-10-08): runs matched by fire ID start at most 0.65 days
+# before the fire's created_on and sit at most 21 km from it (the archive's
+# own matcher accepts up to 38 km). The two wrong name matches were 15.7 days
+# early and 160 km away.
+NAME_MATCH_MAX_KM = 40
+NAME_MATCH_EARLY_DAYS = 1
+
+
+def _km(a: list[float], b: list[float]) -> float:
+    dx = (a[0] - b[0]) * 111.32 * math.cos(math.radians((a[1] + b[1]) / 2))
+    return math.hypot(dx, (a[1] - b[1]) * 111.32)
+
+
+def name_match_fits(entry: dict, fire: dict) -> bool:
+    """Run plausibly forecasts this fire: near it, and not from well before
+    it existed. Missing data passes (the name match stands on its own)."""
+    centroid, coords = entry.get("centroid"), fire.get("coordinates")
+    if centroid and coords and _km(centroid, coords) > NAME_MATCH_MAX_KM:
+        return False
+    run_time = run_time_from_ts(entry.get("run_ts") or "")
+    created = (fire.get("created_on") or "")[:19]
+    if run_time and created:
+        try:
+            run_dt = datetime.strptime(run_time, "%Y-%m-%dT%H:%M:%SZ")
+            created_dt = datetime.strptime(created, "%Y-%m-%dT%H:%M:%S")
+        except ValueError:
+            return True
+        if run_dt < created_dt - timedelta(days=NAME_MATCH_EARLY_DAYS):
+            return False
+    return True
 
 
 def build_run(entry: dict) -> dict:
@@ -195,7 +235,9 @@ def build_pyrecast_runs(fires: list[dict], manifest: dict,
     unmatched_slugs: list[str] = []
     for slug, runs in sorted(candidate_runs(manifest).items()):
         fire, method, conf = match_slug(slug, matches, fires)
-        if fire is None:
+        if fire is not None and method != "fire_matches":
+            runs = [e for e in runs if name_match_fits(e, fire)]
+        if fire is None or not runs:
             unmatched_slugs.append(slug)
             continue
         entry = fires_out.setdefault(fire["fire_slug"], {
@@ -206,6 +248,13 @@ def build_pyrecast_runs(fires: list[dict], manifest: dict,
         })
         for e in runs[:RUNS_PER_FIRE]:
             entry["runs"].append(build_run(e))
+    # A fire can collect runs from several archive slugs (mt-san-creek and
+    # mt-sand-creek are both Sand Creek), appended in slug order; the
+    # frontend reads runs[0] as the latest.
+    for entry in fires_out.values():
+        entry["runs"].sort(key=lambda r: r["run_ts"], reverse=True)
+        del entry["runs"][RUNS_PER_FIRE:]
+        entry["pyrecast_slug"] = entry["runs"][0]["slug"]
     return {
         "schema_version": 2,
         "generated_at": now_iso(),

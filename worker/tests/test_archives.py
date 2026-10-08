@@ -267,3 +267,79 @@ class TestEtagCaching:
             archives.FIRE_MATCHES_CACHE_KEY, log=lambda *_: None)
         assert "matches" in doc
         assert calls == ['"e2"', None]  # 304 -> unconditional refetch
+
+
+# ---------------------------------------------------------------------------
+# same-name fires: runs never move to a different fire (live cases 2026-10-08)
+# ---------------------------------------------------------------------------
+
+def _run(slug, run_ts, centroid):
+    return {"slug": slug, "run_ts": run_ts, "complete": True, "centroid": centroid,
+            "files": {"50": {"ok": True}}, "vars": {}}
+
+
+def _manifest(*runs):
+    return {"runs": {f"{r['slug']}/{r['run_ts']}": r for r in runs}}
+
+
+CALHOUN_292 = {"fire_slug": "calhoun-292", "post_title": "Calhoun 292", "state": "AR",
+               "cornea_id": "{99999999-0000-4000-8000-000000000292}",
+               "coordinates": [-92.676, 33.595], "created_on": "2026-10-08T01:17:24Z"}
+
+
+class TestSameNameFires:
+    def test_slug_tied_to_an_inactive_fire_skips_a_newer_same_name_fire(self):
+        """ar-calhoun-259 is Calhoun 259's (by fire ID); its runs predate
+        Calhoun 292, so the name fallback must not hand them over."""
+        manifest = _manifest(_run("ar-calhoun-259", "20260922_075800", [-92.68, 33.60]))
+        matches = {"matches": {"ar-calhoun-259": {
+            "cornea_id": "{74E4BF13-BC6E-4015-A25F-D7C77C4ABFA8}", "post_title": "Calhoun 259"}}}
+        doc = archives.build_pyrecast_runs([CALHOUN_292], manifest, matches)
+        assert doc["fires"] == {}
+        assert doc["unmatched_slugs"] == ["ar-calhoun-259"]
+
+    def test_name_match_from_before_the_fire_existed_is_dropped(self):
+        manifest = _manifest(_run("ar-calhoun", "20260922_075800", [-92.68, 33.60]))
+        doc = archives.build_pyrecast_runs([CALHOUN_292], manifest, {"matches": {}})
+        assert doc["fires"] == {}
+
+    def test_name_match_far_from_the_fire_is_dropped(self):
+        """wa-1924's run sat 160 km from the 1924 fire; the archive had
+        refused the match, the exact-name fallback took it."""
+        fire = {"fire_slug": "1924", "post_title": "1924", "state": "WA",
+                "cornea_id": "{19241924-0000-4000-8000-000000001924}",
+                "coordinates": [-119.09, 46.14], "created_on": "2026-09-29T20:42:48Z"}
+        manifest = _manifest(_run("wa-1924", "20260929_210600", [-121.13, 45.86]))
+        doc = archives.build_pyrecast_runs([fire], manifest, {"matches": {}})
+        assert doc["fires"] == {}
+        near = _manifest(_run("wa-1924", "20260929_210600", [-119.10, 46.15]))
+        assert archives.build_pyrecast_runs([fire], near, {"matches": {}})["fires"]["1924"]
+
+    def test_runs_from_several_slugs_are_newest_first(self):
+        """Sand Creek has runs under mt-san-creek and mt-sand-creek; slug
+        order put the older pair first and the frontend reads runs[0]."""
+        cornea = "{84FD3D7E-6B04-49CD-A729-ED3178A49C42}"
+        fire = {"fire_slug": "sand-creek", "post_title": "Sand Creek", "state": "MT",
+                "cornea_id": cornea, "coordinates": [-113.33, 45.55]}
+        manifest = _manifest(
+            _run("mt-san-creek", "20260828_025500", [-113.30, 45.51]),
+            _run("mt-san-creek", "20260827_101700", [-113.30, 45.51]),
+            _run("mt-sand-creek", "20260903_014500", [-113.21, 45.52]),
+            _run("mt-sand-creek", "20260901_194900", [-113.21, 45.52]),
+        )
+        matches = {"matches": {s: {"cornea_id": cornea} for s in ("mt-san-creek", "mt-sand-creek")}}
+        entry = archives.build_pyrecast_runs([fire], manifest, matches)["fires"]["sand-creek"]
+        assert [r["run_ts"] for r in entry["runs"]] == ["20260903_014500", "20260901_194900"]
+        assert entry["pyrecast_slug"] == "mt-sand-creek"
+
+    def test_inactive_id_match_falls_back_to_the_real_fire(self):
+        """fire_matches tied id-silver to an 8-acre duplicate record
+        ("Silver Dollar 2", inactive) beside the active Silver."""
+        silver = {"fire_slug": "silver", "post_title": "Silver", "state": "ID",
+                  "cornea_id": "{68A6E77D-AC4A-4E0B-A7FB-2CB72D7ED142}",
+                  "coordinates": [-116.660, 48.629], "created_on": "2026-08-23T18:02:53Z"}
+        manifest = _manifest(_run("id-silver", "20260829_195600", [-116.67, 48.62]))
+        matches = {"matches": {"id-silver": {
+            "cornea_id": "{39CDB521-FAFC-4C0A-B011-C8ADFAA56CC5}", "post_title": "Silver Dollar 2"}}}
+        entry = archives.build_pyrecast_runs([silver], manifest, matches)["fires"]["silver"]
+        assert entry["match_method"] == "name_exact"

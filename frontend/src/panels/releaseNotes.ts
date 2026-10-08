@@ -46,6 +46,12 @@ export const RELEASE_NOTES: ReleaseDay[] = [
           'The hotspot activity line under the timeline could show a busy fire when the map had no hotspots. A fire sharing its name with an earlier fire picked up that fire’s hotspots, sometimes from states away, and nearby fires and other hot spots counted too. The line now counts only hotspots within 3 miles of the latest perimeter, or of the fire’s origin before there is one.',
         fix: true,
       },
+      {
+        title: 'Spread forecasts stay with their own fire',
+        summary:
+          'A new fire could show the spread forecast of an older fire with a similar name, from weeks earlier or 100 miles away. Those no longer carry over. A fire with forecasts filed under two names now shows its newest one.',
+        fix: true,
+      },
     ],
   },
   {
