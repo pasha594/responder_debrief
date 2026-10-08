@@ -7,6 +7,10 @@ export const FIRE_API = 'https://fire-api-prod.web.app';
 export const DATA_BASE_URL: string =
   import.meta.env.VITE_DATA_BASE_URL || `${import.meta.env.BASE_URL}data`;
 
+/** AWS Open Data terrain tiles (terrarium encoding, keyless): the 3D
+ * terrain, and the Relief map style's hillshade. */
+export const DEM_TILES = 'https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png';
+
 /**
  * Basemap style catalog — all free and keyless, straight from the provider
  * (OpenFreeMap serves the OpenMapTiles styles; CARTO's GL styles are public).

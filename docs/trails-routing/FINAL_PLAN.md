@@ -27,8 +27,13 @@ disagree, this file wins.
    the only way through is through the fire, it says that and offers to show the
    route through the perimeter as an explicit choice.
 4. Outside a fire's routing area, Walk uses today's online engines. Any part the
-   online engine can't reach (it snaps to the nearest road or path) is drawn as
-   a dotted straight line and is not counted in the time.
+   online engine can't reach is drawn as a dotted straight line. (Changed
+   2026-10-07, owner call: the engine snapped to the nearest road or path on a
+   flat map, so a pin moved 400 m flipped between a trail down a cliff and one
+   on the rim. The join is now the way with the least total time, the dotted
+   line priced on terrain tiles as unknown ground and counted in the time;
+   a line across >45° ground is flagged and not counted; water isn't seen.
+   `api/walkAttach.ts`.)
 5. "Download this fire" also stores the routing bundle and the trails copy
    (about 5 to 15 MB more per fire).
 
@@ -73,7 +78,7 @@ disagree, this file wins.
 | Perimeter | Latest perimeter by date (not the playhead). Hard block: rasterized + 60 m dilation, blocking cells, graph nodes and graph edges. Endpoint inside → avoidance off with `ENDPOINT_IN_PERIM`. No path → rerun without avoidance, return `blocked_by_perimeter` with the alternative attached; shown only if the user asks. | field + model, must-fix |
 | Endpoints | Impassable or masked cell → snap to nearest passable unmasked cell within 150 m, note `SNAP_MOVED`. | field, must-fix |
 | Headline time | Mode button and summary lead with the **slow** bound; card shows the full range and the typical value. | must-fix |
-| Online fallback | ORS→Valhalla as today; always `ONLINE_NO_PERIM`; `CROSSES_PERIM` when the line crosses the latest perimeter; untimed dotted end-gaps. Offline: Drive/Apparatus show "Needs a connection". | field, must-fix |
+| Online fallback | ORS→Valhalla as today; always `ONLINE_NO_PERIM`; `CROSSES_PERIM` when the line crosses the latest perimeter; a dotted end-gap outside a routing area joins the way with the least total time (terrain-priced line + /route time, up to 3 ways plus the engine's own) and is timed on terrain (`GAP_TERRAIN`, water not seen; `GAP_STEEP` and untimed across >45° ground; `GAP_UNTIMED` without terrain) — 2026-10-07. Offline: Drive/Apparatus show "Needs a connection". | field, must-fix |
 | Walk effect | `SearchDirectionsControl` reruns **only the hike profile** when the Walk context (bundle, perimeter, avoid flag) changes; errors stored per mode. | must-fix |
 | Clickable layers | `rd-trails-hit` joins `pinDrop.ts` `FEATURE_LAYERS` and `useMapLayerSync` `INTERACTIVE`; the popup handler also bails on an armed draw tool. | must-fix |
 | Prune | None automated. Manual-only later. | must-fix |

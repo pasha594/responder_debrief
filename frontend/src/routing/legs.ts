@@ -278,7 +278,7 @@ function fmtAbout(l: RouteLeg): string {
 }
 
 const DIRS = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
-function bearing(a: [number, number], b: [number, number]): string {
+export function bearing(a: [number, number], b: [number, number]): string {
   const dx = (b[0] - a[0]) * Math.cos((a[1] * Math.PI) / 180);
   const dy = b[1] - a[1];
   const deg = ((Math.atan2(dx, dy) * 180) / Math.PI + 360) % 360;

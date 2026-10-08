@@ -27,6 +27,17 @@ export interface ReleaseDay {
 
 export const RELEASE_NOTES: ReleaseDay[] = [
   {
+    date: '2026-10-08',
+    notes: [
+      {
+        title: 'Better trail joins for walking routes outside the routing area',
+        summary:
+          'A pin off the trails used to join whichever trail was closest, even straight down a cliff. Walk now joins the trail with the shortest total trip over the terrain, and the cross-country part and the climb count in the time. If every way to a trail crosses a cliff, the straight line is marked and left out of the time; rivers and lakes on it aren’t checked.',
+        fix: true,
+      },
+    ],
+  },
+  {
     date: '2026-09-28',
     notes: [
       {

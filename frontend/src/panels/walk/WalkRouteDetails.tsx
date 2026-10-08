@@ -63,7 +63,7 @@ export function WalkRouteDetails({ route, defaultOpen }: { route: RouteResult; d
   }
   const vegList = Object.entries(vegM).sort((a, b) => b[1] - a[1]).filter(([, m]) => m >= 20);
   const pv = route.provenance;
-  const gapM = legs.filter((l) => l.kind === 'gap').reduce((s, l) => s + l.distanceM, 0);
+  const gapM = legs.filter((l) => l.kind === 'gap' && l.durationS == null).reduce((s, l) => s + l.distanceM, 0);
   const trailPct = t.distanceM ? Math.round((100 * t.trailM) / t.distanceM) : 0;
   const raw = (route.notes ?? []).filter((n) => !HIDDEN_NOTES.has(n.code));
   const notes = raw.some((n) => PERIM_CODES.has(n.code))

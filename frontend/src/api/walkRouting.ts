@@ -7,20 +7,26 @@
  *     engines don't, so a "no path" or "blocked by the perimeter" here
  *     never falls back to them.
  *  2. Otherwise, offline → an explicit error (not the generic "no route").
- *  3. Otherwise → ORS / Valhalla, with ONLINE_NO_PERIM always, and any end
- *     the engine couldn't reach (they snap up to tens of km) drawn as a
- *     dotted, untimed straight 'gap' leg — or, when that gap lies inside the
- *     fire's routing area, modeled cross-country by the on-device router.
+ *  3. Otherwise → ORS / Valhalla, with ONLINE_NO_PERIM always. The engines
+ *     join a pin to the nearest way on a flat map (up to tens of km off), so
+ *     an end that lies inside the fire's routing area is modeled
+ *     cross-country by the on-device router, and any other far end has its
+ *     join chosen by total time over the terrain (walkAttach.ts) and is
+ *     drawn as a dotted straight 'gap' leg, timed on the terrain — untimed,
+ *     with GAP_STEEP, when that line crosses ground over 45°.
  * Either way the drawn line is checked against the latest perimeter, with
  * avoidance on or off: CROSSES_PERIM when it enters it, NEAR_PERIM within
  * 200 m, PERIM_OLD when the perimeter is over 12 h old.
  */
-import { routeHikeOnline, type RouteLeg, type RouteNote, type RouteResult } from './routing';
+import { routeHikeOnline, type RouteLeg, type RouteNote, type RouteResult, type RouteStep } from './routing';
+import { chooseJoins, type End } from './walkAttach';
 import type { PerimeterFeature } from './types';
 import { insideRoutingArea } from '../routing/bundleIndex';
 import { loadPackedBundle } from '../routing/hooks';
 import { ensureBundle, routeOffroad, setPerimeter } from '../routing/offroadClient';
+import { bearing, fmtDur, fmtFeet, fmtMiles } from '../routing/legs';
 import { ageHours, crossesPerimeter, metresBetween, nearestApproachM, polygonsOf } from '../routing/safety';
+import { Dem, priceConnector, walkable, type Connector, type TileSource } from '../routing/terrainTiles';
 import type { RoutingBundle } from '../routing/types';
 
 type LonLat = [number, number];
@@ -40,6 +46,10 @@ export interface WalkContext {
   packed: boolean;
   getPerimeter(): Promise<WalkPerimeter | null>;
   onStatus?(text: string | null): void;
+  /** True once a newer request replaced this one: stop chaining calls. */
+  isStale?(): boolean;
+  /** Terrain tiles for the cross-country ends (tests pass synthetic ones). */
+  tiles?: TileSource;
   nowMs: number;
 }
 
@@ -144,9 +154,24 @@ function sizeOf(b: RoutingBundle): number {
   return b.files.grid.bytes + b.files.dem.bytes + b.files.graph.bytes;
 }
 
-function gapLeg(from: LonLat, to: LonLat): RouteLeg {
+function gapLeg(from: LonLat, to: LonLat, c?: Connector | null): RouteLeg {
+  const timed = !!c && walkable(c);
   return { kind: 'gap', coordinates: [from, to], distanceM: metresBetween(from, to),
-    climbM: 0, descentM: 0, durationS: null };
+    climbM: c?.climbM ?? 0, descentM: c?.descentM ?? 0, durationS: timed ? c.durationS : null,
+    durationRangeS: timed ? c.rangeS : undefined };
+}
+
+/** The step for a straight cross-country end ('A' leaves the pin, 'B'
+ * reaches it); `c` null = no terrain to price it. */
+function gapStep(l: RouteLeg, who: 'A' | 'B', c: Connector | null): RouteStep {
+  const [p, q] = l.coordinates;
+  const way = `${bearing(p, q)} ${fmtMiles(l.distanceM)}`;
+  const climb = [l.climbM >= 3 ? `↑ ${fmtFeet(l.climbM)}` : '', l.descentM >= 3 ? `↓ ${fmtFeet(l.descentM)}` : '']
+    .filter(Boolean).join(' ');
+  const how = l.durationS != null ? ` — about ${fmtDur(l.durationS)}`
+    : c ? ' — crosses ground steeper than 45°, not timed' : ' — not timed (no terrain data)';
+  const text = who === 'A' ? `Head cross-country ${way} to the route` : `Leave the route; go cross-country ${way} to B`;
+  return { text: `${text}${climb ? `, ${climb}` : ''}${how}`, distanceM: l.distanceM };
 }
 
 async function online(a: LonLat, b: LonLat, ctx: WalkContext): Promise<RouteResult> {
@@ -156,31 +181,69 @@ async function online(a: LonLat, b: LonLat, ctx: WalkContext): Promise<RouteResu
   } catch {
     throw new WalkError('online-failed', WALK_ERROR_TEXT['online-failed']);
   }
-  const coords = base.geometry.coordinates;
+  const bundle = ctx.bundle;
+  const stale = () => !!ctx.isStale?.();
+  const modelable = (p: LonLat, q: LonLat) => !!bundle && insideRoutingArea(bundle, p) && insideRoutingArea(bundle, q);
+  // an end the engine joined far off, by a line nothing models: pick its
+  // join by total time over the terrain (api/walkAttach). One the bundle
+  // models keeps the engine's join — the on-device router goes round its
+  // cliffs, and a choice there would double the requests.
+  let coords = base.geometry.coordinates;
+  const ends: [End, End] = [{ pin: a, join: coords[0] }, { pin: b, join: coords[coords.length - 1] }]
+    .map((e) => ({ ...e, choose: metresBetween(e.pin, e.join) > GAP_M && !modelable(e.pin, e.join) })) as [End, End];
+  if (ends.some((e) => e.choose)) {
+    const picked = await chooseJoins(ends, base, stale, ctx.tiles).catch(() => null);
+    if (stale()) throw new WalkError('superseded', '');
+    if (picked) base = picked;
+    coords = base.geometry.coordinates;
+  }
   const notes: RouteNote[] = [{ level: 'warn', code: 'ONLINE_NO_PERIM',
     text: 'Online route — does not avoid the fire perimeter.' }];
-  const legs: RouteLeg[] = [];
   let modeled = false;
-  const bundle = ctx.bundle;
-  const gap = async (from: LonLat, to: LonLat): Promise<RouteLeg[]> => {
-    if (metresBetween(from, to) <= GAP_M) return [];
-    if (bundle && insideRoutingArea(bundle, from) && insideRoutingArea(bundle, to)) {
+  const gap = async (from: LonLat, to: LonLat, who: 'A' | 'B'): Promise<{ legs: RouteLeg[]; steps: RouteStep[] }> => {
+    if (metresBetween(from, to) <= GAP_M) return { legs: [], steps: [] };
+    if (modelable(from, to)) {
       try {
-        const r = await offroad(from, to, bundle, { ...ctx, avoidPerimeter: false }, null);
+        const r = await offroad(from, to, bundle!, { ...ctx, avoidPerimeter: false }, null);
         modeled = true;
-        return r.legs ?? [];
+        // the engine calls the route's join "A" or "B" too: not a pin that moved
+        const join = who === 'A' ? 'B ' : 'A ';
+        notes.push(...(r.notes ?? []).filter((n) => !(n.code === 'SNAP_MOVED' && n.text.startsWith(join))));
+        const steps = r.steps.slice(0, -1); // not its "Arrive at B"
+        if (who === 'B' && steps[0]) {
+          steps[0] = { ...steps[0], text: steps[0].text.replace(/^Head cross-country/, 'Leave the route; go cross-country') };
+        }
+        return { legs: r.legs ?? [], steps };
       } catch {
-        /* fall back to a straight untimed gap */
+        /* fall back to a straight line */
       }
     }
-    notes.push({ level: 'warn', code: 'GAP_UNTIMED',
-      text: `+${(metresBetween(from, to) / 1609.344).toFixed(1)} mi cross-country to a pin (straight line, not modeled, not in the time).` });
-    return [gapLeg(from, to)];
+    const c = await Dem.load([[from, to]], ctx.tiles).then((dem) => priceConnector(dem, from, to)).catch(() => null);
+    const mi = fmtMiles(metresBetween(from, to));
+    const side = who === 'A' ? 'from A to the route' : 'from the route to B';
+    if (!c) {
+      notes.push({ level: 'warn', code: 'GAP_UNTIMED',
+        text: `+${mi} cross-country ${side} (straight line, not modeled, not in the time).` });
+    } else if (!walkable(c)) {
+      notes.push({ level: 'warn', code: 'GAP_STEEP',
+        text: `The ${mi} straight line ${side} crosses ground steeper than 45° — find a way round. It is not in the time.` });
+    } else {
+      modeled = true;
+      notes.push({ level: 'warn', code: 'GAP_TERRAIN',
+        text: `+${mi} cross-country ${side}: straight line, timed as heavy going on the slope (ground cover isn't mapped here); rivers, lakes and small cliffs aren't checked.` });
+    }
+    const leg = gapLeg(from, to, c);
+    return { legs: [leg], steps: [gapStep(leg, who, c)] };
   };
-  legs.push(...(await gap(a, coords[0])));
-  legs.push({ kind: 'net', coordinates: coords, distanceM: base.distanceM, climbM: 0, descentM: 0,
-    durationS: base.durationS });
-  legs.push(...(await gap(coords[coords.length - 1], b)));
+  const ga = await gap(a, coords[0], 'A');
+  const gb = await gap(coords[coords.length - 1], b, 'B');
+  const net = base.legs?.find((l) => l.kind === 'net');
+  const legs: RouteLeg[] = [...ga.legs, { kind: 'net', coordinates: coords, distanceM: base.distanceM,
+    climbM: net?.climbM ?? 0, descentM: net?.descentM ?? 0, durationS: base.durationS }, ...gb.legs];
+  // the engine's own "arrive" comes after the leg to B
+  const steps: RouteStep[] = gb.steps.length
+    ? [...ga.steps, ...base.steps.slice(0, -1), ...gb.steps, { text: 'Arrive at B', distanceM: 0 }]
+    : [...ga.steps, ...base.steps];
   const all: LonLat[] = [];
   let dist = 0;
   let dur = 0;
@@ -202,6 +265,7 @@ async function online(a: LonLat, b: LonLat, ctx: WalkContext): Promise<RouteResu
     geometry: { type: 'LineString', coordinates: all },
     distanceM: dist,
     durationS: dur,
+    steps,
     legs,
     durationRangeS: modeled ? [fast, slow] : undefined,
     modeled,

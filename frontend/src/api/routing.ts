@@ -11,6 +11,8 @@
  * about fire closures; the UI says so.
  */
 
+import { climbOf } from '../routing/legs';
+
 export type RouteProfile = 'drive' | 'hike' | 'apparatus';
 
 /**
@@ -216,7 +218,7 @@ function osrmStepText(s: {
 async function routeOrs(a: LonLat, b: LonLat): Promise<RouteResult> {
   const d = await getJson<{
     features: {
-      geometry: { coordinates: [number, number][] };
+      geometry: { coordinates: [number, number, number?][] };
       properties: {
         summary: { distance: number; duration: number };
         segments: { steps: { instruction: string; distance: number }[] }[];
@@ -225,11 +227,14 @@ async function routeOrs(a: LonLat, b: LonLat): Promise<RouteResult> {
   }>('https://api.openrouteservice.org/v2/directions/foot-hiking/geojson', {
     method: 'POST',
     headers: { 'content-type': 'application/json', authorization: ORS_KEY! },
-    body: JSON.stringify({ coordinates: [a, b] }),
+    body: JSON.stringify({ coordinates: [a, b], elevation: true }),
   });
   const f = d.features[0];
+  // [lon, lat, metres]: the climb for Walk's net leg, 2D for the line
+  const coordinates = f.geometry.coordinates.map(([x, y]) => [x, y] as LonLat);
+  const { climb, descent } = climbOf(f.geometry.coordinates.map((c) => c[2]).filter((z) => z != null));
   return {
-    geometry: { type: 'LineString', coordinates: f.geometry.coordinates },
+    geometry: { type: 'LineString', coordinates },
     distanceM: f.properties.summary.distance,
     durationS: f.properties.summary.duration,
     trafficDelayS: null,
@@ -237,6 +242,8 @@ async function routeOrs(a: LonLat, b: LonLat): Promise<RouteResult> {
       s.steps.map((st) => ({ text: st.instruction, distanceM: st.distance })),
     ),
     engine: 'ors',
+    legs: [{ kind: 'net', coordinates, distanceM: f.properties.summary.distance, climbM: climb, descentM: descent,
+      durationS: f.properties.summary.duration }],
   };
 }
 
@@ -267,27 +274,28 @@ export function decodePolyline6(encoded: string): [number, number][] {
   return out;
 }
 
+const VALHALLA = 'https://valhalla1.openstreetmap.de';
+
+function valhalla<T>(action: string, req: object): Promise<T> {
+  return getJson<T>(`${VALHALLA}/${action}?json=${encodeURIComponent(JSON.stringify(req))}`);
+}
+
+const at = ([lon, lat]: LonLat) => ({ lat, lon });
+
+/** With the climb along the way (elevation_interval: metres every 30 m) as
+ * a 'net' leg: Walk's totals would otherwise count none of it. */
 async function routeValhalla(a: LonLat, b: LonLat): Promise<RouteResult> {
-  const req = {
-    locations: [
-      { lat: a[1], lon: a[0] },
-      { lat: b[1], lon: b[0] },
-    ],
-    costing: 'pedestrian',
-    units: 'kilometers',
-  };
-  const d = await getJson<{
+  const d = await valhalla<{
     trip: {
       summary: { length: number; time: number };
-      legs: { shape: string; maneuvers: { instruction: string; length: number }[] }[];
+      legs: { shape: string; maneuvers: { instruction: string; length: number }[]; elevation?: number[] }[];
     };
-  }>(`https://valhalla1.openstreetmap.de/route?json=${encodeURIComponent(JSON.stringify(req))}`);
+  }>('route', { locations: [at(a), at(b)], costing: 'pedestrian', units: 'kilometers', elevation_interval: 30 });
   const t = d.trip;
+  const coordinates = t.legs.flatMap((l) => decodePolyline6(l.shape));
+  const { climb, descent } = climbOf(t.legs.flatMap((l) => l.elevation ?? []));
   return {
-    geometry: {
-      type: 'LineString',
-      coordinates: t.legs.flatMap((l) => decodePolyline6(l.shape)),
-    },
+    geometry: { type: 'LineString', coordinates },
     distanceM: t.summary.length * 1000,
     durationS: t.summary.time,
     trafficDelayS: null,
@@ -295,7 +303,24 @@ async function routeValhalla(a: LonLat, b: LonLat): Promise<RouteResult> {
       l.maneuvers.map((m) => ({ text: m.instruction, distanceM: m.length * 1000 })),
     ),
     engine: 'valhalla',
+    legs: [{ kind: 'net', coordinates, distanceM: t.summary.length * 1000, climbM: climb, descentM: descent,
+      durationS: t.summary.time }],
   };
+}
+
+/** The nearest point on a walkable way to each location, and that way's
+ * OSM id (Valhalla /locate, pedestrian); null where there is none. */
+export async function locateWays(points: LonLat[]): Promise<({ at: LonLat; way: number | null } | null)[]> {
+  const d = await valhalla<{
+    edges?: { correlated_lat: number; correlated_lon: number; way_id?: number }[] | null;
+    nodes?: { lat: number; lon: number }[] | null;
+  }[]>('locate', { locations: points.map(at), costing: 'pedestrian', verbose: false });
+  return points.map((_, i) => {
+    const e = d[i]?.edges?.[0];
+    const n = d[i]?.nodes?.[0];
+    return e ? { at: [e.correlated_lon, e.correlated_lat], way: e.way_id ?? null }
+      : n ? { at: [n.lon, n.lat], way: null } : null;
+  });
 }
 
 // ---------- public entry ----------
@@ -370,12 +395,12 @@ async function rangeValhalla(origin: LonLat, budgets: number[]): Promise<RangeRi
     contours: budgets.map((m) => ({ time: m })),
     polygons: true,
   };
-  const d = await getJson<{
+  const d = await valhalla<{
     features: {
       geometry: { type: string; coordinates: [number, number][][] };
       properties: { contour: number };
     }[];
-  }>(`https://valhalla1.openstreetmap.de/isochrone?json=${encodeURIComponent(JSON.stringify(req))}`);
+  }>('isochrone', req);
   return d.features.map((f) => ({
     minutes: f.properties.contour,
     polygon: { type: 'Polygon' as const, coordinates: f.geometry.coordinates },

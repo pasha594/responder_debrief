@@ -497,7 +497,7 @@ export function SearchDirectionsControl() {
       actions.setDirectionsRoute(null);
       setRouteError(null);
     }
-    void routeWalk(a.coords, b.coords, walk.ctx())
+    void routeWalk(a.coords, b.coords, { ...walk.ctx(), isStale: () => mySeq !== walkSeq.current })
       .then((result) => {
         if (mySeq !== walkSeq.current) return;
         hikeStale.current = false;

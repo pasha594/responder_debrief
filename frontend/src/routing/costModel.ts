@@ -90,6 +90,15 @@ export const H_PACE = 0.7;
  * network, not on joining it, not on the last move into the goal cell. */
 export const LEAVE_TRAIL_PENALTY_S = 90;
 
+/** Ground steeper than this is impassable cross-country (worker
+ * cost_grid.py MAX_SLOPE). */
+export const MAX_SLOPE_DEG = 45;
+
+/** GET multiplier for ground of unknown cover (worker cost_grid.py
+ * M_UNKNOWN): how the bundles price cells LANDFIRE can't classify, and how
+ * online Walk prices the cross-country line outside a routing area. */
+export const M_UNKNOWN = 4;
+
 /** Directional grade in degrees from a rise over a horizontal run. */
 export function gradeDeg(dz: number, dh: number): number {
   return dh > 0 ? (Math.atan2(dz, dh) * 180) / Math.PI : 0;

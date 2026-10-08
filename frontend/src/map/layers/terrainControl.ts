@@ -5,10 +5,10 @@
  * (right-drag / two-finger).
  */
 import type { Map as MlMap } from 'maplibre-gl';
+import { DEM_TILES } from '../../app/config';
 import type { LayerManager } from '../layerTypes';
 
 const DEM_SRC = 'rd-dem';
-const DEM_TILES = 'https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png';
 
 let applied = false;
 
