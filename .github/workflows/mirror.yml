@@ -42,7 +42,9 @@ concurrency:
 jobs:
   sync-incidents:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    # Crawl 20 min + tiling 15 + probing 5 (config.py) + setup, manifests and
+    # publish: 45 left no slack, and a killed run publishes no manifests.
+    timeout-minutes: 60
     defaults:
       run:
         working-directory: worker

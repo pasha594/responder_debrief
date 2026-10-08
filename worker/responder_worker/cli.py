@@ -659,6 +659,9 @@ def _process_mirrored_assets(args, storage, state, mirrors) -> None:
         log("[incidents] GDAL not available — skipping tiling (degrades to raw PDFs)")
         return
     tiles_deferred = 0
+    probes_deferred = 0
+    probe_max = int(os.environ.get("PROBE_MAX_SECONDS", str(config.PROBE_MAX_SECONDS_DEFAULT)))
+    probe_started: float | None = None
     # The same sheet is often published in two places (e.g. "Current Maps/"
     # AND "Daily Products/{date}/"), and in two folders: tile it once.
     seen_sha: set[str] = set()
@@ -688,6 +691,13 @@ def _process_mirrored_assets(args, storage, state, mirrors) -> None:
                 continue
             parsed = cat.parse_product_filename(mf.filename)
             if tile_budget <= 0 or frames.deadline_passed():
+                if probe_started is None:
+                    probe_started = time.monotonic()
+                elif time.monotonic() - probe_started > probe_max:
+                    # No tiled record: _probe_backlog probes and previews it
+                    # on a later run, from our bucket.
+                    probes_deferred += 1
+                    continue
                 # Out of tiling budget, but detection is cheap: record
                 # whether this sheet is EVEN overlayable plus a preview, so
                 # the UI can offer a lightbox for flat sheets instead of an
@@ -758,6 +768,9 @@ def _process_mirrored_assets(args, storage, state, mirrors) -> None:
     if tiles_deferred:
         log(f"[geopdf] {tiles_deferred} sheets deferred (tile budget/deadline) — "
             "flagged tiling_pending, picked up next run")
+    if probes_deferred:
+        log(f"[geopdf] {probes_deferred} sheets left unprobed (probe deadline) — "
+            "the probe backlog previews them on later runs")
 
 
 def _sha_in_shard(sha: str, shard: int, shards: int) -> bool:

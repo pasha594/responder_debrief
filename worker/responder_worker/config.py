@@ -43,6 +43,11 @@ FRAMES_CONCURRENCY = 2   # max concurrent GetMap requests per geoserver
 FRAME_BUDGET_DEFAULT = 3000  # images per sync (env FRAME_BUDGET overrides)
 MIRROR_MAX_SECONDS_DEFAULT = 1200  # crawl+download phase (env MIRROR_MAX_SECONDS)
 TILE_MAX_SECONDS_DEFAULT = 900     # GeoPDF tiling phase (env TILE_MAX_SECONDS)
+# Probing + previewing this run's downloads after the tiling deadline (env
+# PROBE_MAX_SECONDS). The rest wait for the probe backlog (40 a run): the
+# first fire-ID sync caught up ~400 missed sheets, and previewing them all
+# ran the job into its timeout before any manifest was published.
+PROBE_MAX_SECONDS_DEFAULT = 300
 # 20 + 15 min leaves ~10 min of the 45-min CI timeout for manifests + catalog.
 # Both phases defer their remainder to the next scheduled run; nothing is lost.
 

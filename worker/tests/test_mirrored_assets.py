@@ -236,3 +236,24 @@ def test_probe_backlog_previews_verified_bytes_under_the_stamped_prefix(tmp_path
     assert (t["prefix"], t["preview_prefix"], t["tiler_version"]) == (
         "austin", "grasshopper", None)  # georeferenced now: tiles owed
     assert t["geo"]["preview"] is True and t["repair_at"]
+
+
+def test_probing_after_the_tile_deadline_stops_at_its_own_deadline(tmp_path, gdal, monkeypatch):
+    # The first fire-ID sync downloaded ~400 sheets it had missed; probing and
+    # previewing every one after the tiling deadline ran the job into its
+    # timeout. Past PROBE_MAX_SECONDS the rest get no tiled record, so the
+    # probe backlog picks them up on later runs.
+    monkeypatch.setenv("PROBE_MAX_SECONDS", "10")
+    clock = iter([0.0, 5.0, 11.0, 12.0])
+    # cli's clock only: frames keeps the real one for its deadlines
+    monkeypatch.setattr(cli, "time", SimpleNamespace(monotonic=lambda: next(clock)))
+    sheets = {f"products/20261008/Ops_{i}.pdf": f"%PDF {i}".encode() for i in range(4)}
+    rec = _rec(GH_FK, {rel: {"sha16": sha16(d), "kind": "product"} for rel, d in sheets.items()})
+    state = {"incidents": {GH_KEY: rec}, "tiled": {}}
+    storage = SpyStorage(tmp_path / "bucket")
+    res = MirrorResult(files=[_downloaded(tmp_path, rel, d) for rel, d in sheets.items()])
+    cli._process_mirrored_assets(SimpleNamespace(tile_budget=0, zoom_cap=None), storage,
+                                 state, {GH_KEY: {"result": res}})
+    probed = list(sheets.values())[:2]
+    assert gdal["probe"] == probed and gdal["render"] == probed
+    assert sorted(state["tiled"]) == sorted(sha16(d) for d in probed)
