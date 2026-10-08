@@ -33,6 +33,8 @@ NAME_METHODS = ("name_exact", "name_fuzzy")
 #: bindings made by ID; only these fires' names count as file evidence (a
 #: name-matched fire's name is in its files by construction)
 ID_METHODS = ("unit_id", "override")
+#: binding strength, strongest first
+METHOD_RANK = {"override": 0, "unit_id": 1, "name_exact": 2, "name_fuzzy": 3}
 
 _MIN_NAME = 4        # shorter names ("Elk") collide too often to be evidence
 _MAX_RUN = 4         # tokens a fire name may span in a file stem
@@ -282,6 +284,18 @@ def revision_stamp(prev_meta: dict, sha16: str | None) -> dict:
     return {}
 
 
+def weakens(prev_method: str | None, method: str | None) -> bool:
+    """True when a re-match to the SAME fire by `method` is weaker than the
+    binding's own: an ID-bound folder whose newest dailies carry no token
+    matches its fire by name. The binding then keeps its method. An
+    override is the exception: a re-match without it means it was removed,
+    and the new method stands."""
+    if prev_method in (None, "override"):
+        return False
+    weakest = len(METHOD_RANK)
+    return METHOD_RANK.get(method, weakest) > METHOD_RANK.get(prev_method, weakest)
+
+
 def rebind_decision(prev: dict | None, m) -> str:
     """What a fresh match `m` (method, cornea_id) does to an existing record:
     new | same | fresh | bind | rebind | refuse."""
@@ -315,8 +329,9 @@ def apply_bind(rec: dict, m, new_fire: dict, now: str, *, inc_key: str) -> str |
     ID binding ('prior'), are hidden when there was no old binding, and
     follow the new binding when the old one was only a name match. An
     override instead drops every stamp that is not evidence, so unproven
-    files follow it. `same` changes no stamps; `fresh` (a once-ignored
-    folder matching another fire) stamps nothing.
+    files follow it. `same` changes no stamps, but the binding's evidence
+    (`bound`) follows the stronger of its method and the new one; `fresh`
+    (a once-ignored folder matching another fire) stamps nothing.
     """
     decision = rebind_decision(rec, m)
     if decision not in ("same", "bind", "rebind", "fresh"):
@@ -327,8 +342,14 @@ def apply_bind(rec: dict, m, new_fire: dict, now: str, *, inc_key: str) -> str |
     prev_method = (rec.get("match") or {}).get("method")
 
     if decision == "same":
-        if not rec.get("bound"):
-            rec["bound"] = bound_info(new_fire, m.method)
+        # A folder name-bound to a fire that now carries the fire's token is
+        # bound by ID from here on, so a later rebind weighs its files by
+        # name too; a weaker re-match keeps the binding's method (cli keeps
+        # its match record as well).
+        method = prev_method if weakens(prev_method, m.method) else m.method
+        b, now_bound = rec.get("bound") or {}, bound_info(new_fire, method)
+        if not b or (b.get("method"), b.get("uid")) != (now_bound["method"], now_bound["uid"]):
+            rec["bound"] = now_bound
     else:
         if m.method == "override":
             for meta in files.values():

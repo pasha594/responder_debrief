@@ -42,6 +42,7 @@ from .asset_keys import (
 )
 from .fires import fire_key
 from .incident_ids import (
+    METHOD_RANK,
     choose_ir_source,
     contributors,
     file_owner,
@@ -50,9 +51,6 @@ from .incident_ids import (
     prior_owner,
 )
 from .matching import normalize_name
-
-#: binding strength when ordering the folders that feed one fire
-METHOD_RANK = {"override": 0, "unit_id": 1, "name_exact": 2, "name_fuzzy": 3}
 
 
 def manifest_key(fk: str) -> str:

@@ -466,6 +466,29 @@ def test_name_match_never_rebinds_an_id_bound_folder(tmp_path, monkeypatch):
     assert not world.storage.exists(fire_manifests.manifest_key(GH_FK))
 
 
+def test_name_rematch_to_its_own_fire_keeps_the_id_binding(tmp_path, monkeypatch):
+    # 2026_Grasshopper bound to Grasshopper by token; its newest daily
+    # carries no token, so the folder matches its own fire by name. The
+    # binding stays an ID binding: the same match, evidence and catalog row.
+    rec = _gh_on_grasshopper()
+    world = _bucket(tmp_path, monkeypatch, rec)
+    ftp = FakeFTP()
+    ftp.dir(ORE, "2026_Grasshopper", "2026-10-08 05:00")
+    day = ftp.dir(ftp.dir(GH_DIR, "Products"), "20261008")
+    ftp.file(day, "Ops_Grasshopper_1008.pdf", b"%PDF no token")
+    ftp.wire(monkeypatch)
+    assert cli.main(["sync-incidents"]) == 0
+
+    after = world.state_on_bucket()["incidents"][GH_KEY]
+    assert (after["match"], after["bound"]) == (rec["match"], rec["bound"])
+    m = world.storage.get_json(health.KEY)["mirror"]
+    assert m["rebinds"] == m["rebind_refused"] == []
+    assert "Ops_Grasshopper_1008.pdf" in _filenames(world.storage, GH_FK)
+    rows = {r["fire_slug"]: r for r in world.storage.get_json("catalogs/catalog.json")["fires"]}
+    assert (rows["grasshopper"]["ftp_match"]["method"],
+            rows["grasshopper"]["ftp_match"]["confidence"]) == ("unit_id", 1.0)
+
+
 def test_new_folder_gets_its_own_prefix(tmp_path, monkeypatch):
     world = _bucket(tmp_path, monkeypatch, _gh_on_austin())
     # a Grasshopper folder seen for the first time, matched by its token

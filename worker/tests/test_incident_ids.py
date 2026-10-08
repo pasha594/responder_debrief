@@ -265,6 +265,35 @@ def test_unit_to_unit_rebind_grasshopper_counts(names):
     assert (rec["fire_slug"], rec["storage_prefix"]) == ("austin", "austin")
 
 
+def test_same_fire_rematch_keeps_the_strongest_method():
+    w = ii.weakens
+    assert w("unit_id", "name_exact") and w("name_exact", "name_fuzzy")
+    assert not w("name_exact", "unit_id") and not w("unit_id", "unit_id")
+    assert not w("override", "name_exact")  # the override was removed
+    assert not w(None, "name_fuzzy")        # no binding to weaken (ignored)
+
+    # 2026_Grasshopper name-bound to Austin, then carrying Austin's token
+    # ('same'): bound by ID from then on. A later unit-to-unit rebind weighs
+    # its Austin-named sheet by name, so the stamp is evidence and stays.
+    named = "products/20260820/Ops_Austin_0820.pdf"
+    plain = "products/20260820/Transport_0820.pdf"
+    rec = _rec(AUSTIN, "name_exact", [named, plain])
+    m = match("unit_id", AUSTIN)
+    assert ii.rebind_decision(rec, m) == "same"
+    ii.apply_bind(rec, m, AUSTIN, NOW, inc_key=GRASSHOPPER_KEY)
+    assert rec["bound"] == ii.bound_info(AUSTIN, "unit_id")
+    rec["match"] = {"method": "unit_id"}  # what the mirror then records
+    ii.apply_bind(rec, match("unit_id", GRASSHOPPER), GRASSHOPPER, NOW, inc_key=GRASSHOPPER_KEY)
+    assert {r: (meta.get("fk"), meta.get("fk_src")) for r, meta in rec["files"].items()} == {
+        named: (fk(AUSTIN), "name"), plain: (fk(AUSTIN), "prior")}
+
+    # a weaker re-match keeps an ID binding's evidence, and mends a bound
+    # that lags its match
+    rec = _rec(AUSTIN, "unit_id", [named], bound=ii.bound_info(AUSTIN, "name_exact"))
+    ii.apply_bind(rec, match("name_exact", AUSTIN), AUSTIN, NOW, inc_key=GRASSHOPPER_KEY)
+    assert rec["bound"] == ii.bound_info(AUSTIN, "unit_id")
+
+
 def test_name_to_unit_rebind_unproven_files_follow_new(names):
     rec = _rec(CHERRY_ID, "name_exact", names["cherry"], slug="cherry")
     m = match("unit_id", IRON)

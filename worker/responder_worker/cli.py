@@ -1366,6 +1366,7 @@ def cmd_sync_incidents(args) -> int:
                 continue
 
             decision = incident_ids.rebind_decision(prev, m)
+            prev_method = ((prev or {}).get("match") or {}).get("method")
             if decision == "refuse":
                 # A name never outranks an ID: keep the binding and mirror
                 # under it.
@@ -1386,10 +1387,17 @@ def cmd_sync_incidents(args) -> int:
                                         "to": fk, "method": m.method})
                         log(f"[incidents] {key}: {decision} {old or '-'} -> {fk} ({m.method})")
                 cornea_id = m.cornea_id
-                match_record = {"method": m.method, "confidence": m.confidence,
-                                "token": m.token, "dir_url": cand.dir_url,
-                                "cornea_id": m.cornea_id}
-                bound = incident_ids.bound_info(fire, m.method)
+                if decision == "same" and incident_ids.weakens(prev_method, m.method):
+                    # Its own fire again, by a weaker method (an ID-bound
+                    # folder whose newest dailies carry no token, matched by
+                    # name): the binding keeps its match, so a later name
+                    # match is still refused and no date check applies.
+                    match_record, bound = prev["match"], prev.get("bound")
+                else:
+                    match_record = {"method": m.method, "confidence": m.confidence,
+                                    "token": m.token, "dir_url": cand.dir_url,
+                                    "cornea_id": m.cornea_id}
+                    bound = incident_ids.bound_info(fire, m.method)
             matched += 1
             log(f"[incidents] {key} -> {fire_key(cornea_id)} "
                 f"({m.fire_slug}, {m.method}, conf={m.confidence})")
