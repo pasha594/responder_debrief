@@ -11,7 +11,7 @@ from __future__ import annotations
 import re
 from datetime import datetime, timezone
 
-from . import config, hrrr
+from . import config, hotspots, hrrr
 from .matching import UNIT_TOKEN_RE
 
 SCHEMA_VERSION = 1
@@ -213,12 +213,12 @@ def build_catalog(
     incident_matches: dict[str, dict] | None = None,   # fire_slug -> {method, confidence, dir_url, synced_at}
     spread_index: dict | None = None,                  # fire_slug -> {"latest", "count"} (or bare latest str)
     perimeter_counts: dict[str, int] | None = None,    # fire_slug -> perimeter version count
-    hotspot_archives: dict[str, bool] | None = None,   # fire_slug -> archive exists
+    hotspot_archives: set[str] | None = None,          # hotspot archive ids ready to serve
     national_layers: dict | None = None,               # {"current_year_perimeters": {"image", "bounds", "as_of"}}
 ) -> dict:
     incident_matches = incident_matches or {}
     perimeter_counts = perimeter_counts or {}
-    hotspot_archives = hotspot_archives or {}
+    hotspot_archives = hotspot_archives or set()
     # tolerate both shapes so callers can lag behind the schema
     spread_index = {
         slug: (v if isinstance(v, dict) else {"latest": v, "count": None})
@@ -251,8 +251,9 @@ def build_catalog(
             "incident_latest_upload": (m or {}).get("latest_upload"),
             "incident_latest_upload_ts": (m or {}).get("latest_upload_ts"),
             "perimeter_count": perimeter_counts.get(slug),
-            "hotspot_archive": (f"/hotspots/{slug}/index.json"
-                                if hotspot_archives.get(slug) else None),
+            "hotspot_archive": (f"/{hotspots.index_key(aid)}"
+                                if (aid := hotspots.archive_id(f)) in hotspot_archives
+                                else None),
             "ftp_match": (
                 {"method": m["method"], "confidence": m["confidence"], "dir_url": m["dir_url"]}
                 if m else None

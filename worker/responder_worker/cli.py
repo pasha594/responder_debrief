@@ -127,12 +127,16 @@ def cmd_sync_catalogs(args) -> int:
         # converge across hourly syncs. Ordered stalest-first so no fire
         # starves behind the backfill of another.
         log("[hotspots] syncing per-fire archives ...")
-        hs_state = state.setdefault("hotspot_archive", {})
+        # Keyed by cornea_id (archives used to be keyed by name, and a new
+        # fire adopted an older same-name fire's archive). The name-keyed
+        # state is dropped; every fire re-backfills under its id.
+        state.pop("hotspot_archive", None)
+        hs_state = state.setdefault("hotspot_archive_by_id", {})
         hs_deadline = time.monotonic() + int(os.environ.get(
             "HOTSPOT_SYNC_MAX_SECONDS", "240"))
         hs_order = sorted(
-            fires,
-            key=lambda f: ((hs_state.get(f["fire_slug"]) or {}).get("last_day") or "",
+            (f for f in fires if hotspots.archive_id(f)),
+            key=lambda f: ((hs_state.get(hotspots.archive_id(f)) or {}).get("last_day") or "",
                            -(f.get("acres") or 0)),
         )
         hs_written = 0
@@ -147,7 +151,7 @@ def cmd_sync_catalogs(args) -> int:
             # run records carry a centroid, never a bbox (that is decoded
             # client-side from the tif) — the box builder rects around it
             run_centroid = runs[0].get("centroid") if runs else None
-            rec = hs_state.setdefault(slug, {})
+            rec = hs_state.setdefault(hotspots.archive_id(f), {})
             try:
                 if hotspots.sync_fire(client, storage, rec, f, run_centroid,
                                       log, deadline_passed=hs_deadline_passed):
@@ -274,10 +278,7 @@ def cmd_sync_catalogs(args) -> int:
         log(f"[catalogs] backfilled incident counts for {healed} fires from manifests")
 
     version = int(state.get("catalog_version", 0)) + 1
-    hotspot_archives = {
-        slug: True for slug, rec in state.get("hotspot_archive", {}).items()
-        if rec.get("days")
-    }
+    hotspot_archives = hotspots.advertised(state)
     catalog = cat.build_catalog(
         fires, version=version,
         incident_matches=incident_matches, spread_index=spread_index,
@@ -1450,10 +1451,7 @@ def cmd_sync_incidents(args) -> int:
             for slug, rec in (state.get("perim_counts") or {}).items()
             if rec.get("count") is not None
         }
-        hotspot_archives = {
-            slug: True for slug, rec in state.get("hotspot_archive", {}).items()
-            if rec.get("days")
-        }
+        hotspot_archives = hotspots.advertised(state)
         version = int(state.get("catalog_version", 0)) + 1
         catalog = cat.build_catalog(fires, version=version,
                                     incident_matches=incident_matches,

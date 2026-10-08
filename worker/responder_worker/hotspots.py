@@ -4,8 +4,13 @@ The fire API caps /hotspots responses at 50k features, serves them oldest
 first, and re-serves the whole history to every client. Mirroring detections
 into per-day chunks fixes both costs at once:
 
-  hotspots/{fire_slug}/g{N}/{YYYY-MM-DD}.json   day chunk (FeatureCollection)
-  hotspots/{fire_slug}/index.json               {"bbox","gen","days","updated_at"}
+  hotspots/{archive_id}/g{N}/{YYYY-MM-DD}.json  day chunk (FeatureCollection)
+  hotspots/{archive_id}/index.json              {"cornea_id","bbox","gen","days","updated_at"}
+
+The archive is keyed by the fire's cornea_id, never its name: fire_slug is
+just the slugified name, so a new "Bull" fire would adopt an earlier Bull's
+archive and grow its box to cover both (Bull NV's box once spanned −121° to
+−94°, and its timeline graph counted detections from six states).
 
 Cache semantics: a chunk may ship immutable headers ONLY if this pipeline
 will provably never rewrite that URL. Two rules make that true:
@@ -28,6 +33,7 @@ would rewrite immutable URLs with different content.
 from __future__ import annotations
 
 import math
+import re
 from datetime import datetime, timedelta, timezone
 
 from . import config
@@ -60,6 +66,34 @@ def _yesterday() -> str:
 def _day_after(day: str) -> str:
     d = datetime.strptime(day, "%Y-%m-%d").replace(tzinfo=timezone.utc)
     return (d + timedelta(days=1)).strftime("%Y-%m-%d")
+
+
+def archive_id(fire: dict) -> str | None:
+    """Path-safe archive key from the fire's cornea_id (a braced GUID):
+    "{51528708-A49A-...}" → "51528708-a49a-..."."""
+    aid = re.sub(r"[^0-9a-z-]", "", (fire.get("cornea_id") or "").lower())
+    return aid or None
+
+
+def index_key(aid: str) -> str:
+    return f"hotspots/{aid}/index.json"
+
+
+def caught_up(rec: dict) -> bool:
+    """True once the archive's backfill has reached the last two days, so it
+    holds the fire's recent detections. A partial backfill (oldest days
+    first) would show a fire with no current hotspots, so the catalog
+    leaves it unadvertised and the frontend pages the API directly
+    instead. Two days of slack, not one: the mirror job rebuilds the
+    catalog from state after midnight UTC, before the next hotspot sync."""
+    floor = (_now_utc() - timedelta(days=2)).strftime("%Y-%m-%d")
+    return bool(rec.get("days")) and (rec.get("last_day") or "") >= floor
+
+
+def advertised(state: dict) -> set[str]:
+    """Archive ids the catalog may point at."""
+    return {aid for aid, rec in (state.get("hotspot_archive_by_id") or {}).items()
+            if caught_up(rec)}
 
 
 def _snap_box(w: float, s: float, e: float, n: float) -> list[float]:
@@ -132,14 +166,17 @@ def sync_fire(client, storage, rec: dict, fire: dict,
     """Pull the increment for one fire and (re)write its changed day chunks +
     index. `rec` is this fire's slot in state and is mutated with the resume
     point. Returns True when anything was written."""
-    slug = fire["fire_slug"]
+    aid = archive_id(fire)
+    if aid is None:
+        return False
+    slug = fire.get("fire_slug") or aid  # log label only
 
     # Survive state loss: adopt the published index rather than restarting
     # generation numbering over already-immutable URLs.
     if not rec and storage is not None:
         published = None
         try:
-            published = storage.get_json(f"hotspots/{slug}/index.json")
+            published = storage.get_json(index_key(aid))
         except Exception:
             published = None
         if published:
@@ -232,12 +269,13 @@ def sync_fire(client, storage, rec: dict, fire: dict,
         # behind the resume cursor AND fully in the past. A stalled (partial)
         # day always stays revalidating.
         immutable = day < resume and day < yesterday and day != stalled_day
-        storage.put_json(f"hotspots/{slug}/g{gen}/{day}.json", fc,
+        storage.put_json(f"hotspots/{aid}/g{gen}/{day}.json", fc,
                          cache_control=CHUNK_CC if immutable else LIVE_CC)
     all_days = sorted(prev_days | set(days))
     storage.put_json(
-        f"hotspots/{slug}/index.json",
-        {"schema": 2, "gen": gen, "bbox": box, "days": all_days,
+        index_key(aid),
+        {"schema": 2, "cornea_id": fire.get("cornea_id"),
+         "gen": gen, "bbox": box, "days": all_days,
          "updated_at": _now_utc().isoformat(timespec="seconds")},
         cache_control=LIVE_CC,
     )
