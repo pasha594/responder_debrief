@@ -1,6 +1,6 @@
-"""The incident-ID migration flag as the jobs see it: sync-catalogs
-switches from the slug-keyed records to the fire-ID index, and keeps
-prune's inactivity clock by ID."""
+"""The incident-ID migration flag as the jobs see it: the pre-fire-ID
+mirror pauses on migrated state, sync-catalogs switches from the slug-keyed
+records to the fire-ID index, and keeps prune's inactivity clock by ID."""
 
 import contextlib
 import json
@@ -8,7 +8,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from responder_worker import catalogs as cat, cli
+from responder_worker import catalogs as cat, cli, health
 from responder_worker.b2 import DryRunStorage
 from responder_worker.fires import fire_key
 from responder_worker.state import STATE_KEY
@@ -82,6 +82,73 @@ def _run_sync_catalogs(monkeypatch, storage, fires, *, raw_rows=None):
                            frames_hours=None, frames_products=None)
     assert cli.cmd_sync_catalogs(args) == 0
     return storage.get_json("catalogs/catalog.json"), storage.get_json(STATE_KEY)
+
+
+# ---------------------------------------------------------------------------
+# push A's guard: the slug-keyed mirror never runs on migrated state
+# ---------------------------------------------------------------------------
+
+def _no_ftp(*a, **k):
+    raise AssertionError("the paused mirror must not reach the network")
+
+
+def _incidents_args(tmp_path):
+    return SimpleNamespace(dry_run=True, out=tmp_path, year=2026, fire=None,
+                           region=None, priority_fires="", zoom_cap=None)
+
+
+def test_push_a_guard_pauses_on_migrated_state(tmp_path, monkeypatch):
+    storage = SpyStorage(tmp_path / "out")
+    state = {"incidents": _records(), "migrations": {"incident_ids": FLAG},
+             "incident_fires": {}, "catalog_version": 845}
+    storage.put_json(STATE_KEY, state)
+    storage.put_json(health.KEY, health.merge_health(None, "mirror", {
+        "finished_at": "2026-10-08T23:00:00Z", "ok": True, "note": None,
+        "files_downloaded": 32}))
+    state_before = (tmp_path / "out" / STATE_KEY).read_bytes()
+    storage.written.clear()
+
+    monkeypatch.setattr(cli, "make_storage", lambda dry_run, out: storage)
+    monkeypatch.setattr(cli, "make_client", _no_ftp)
+    monkeypatch.setattr(cli, "fetch_active_fires", _no_ftp)
+    assert cli.cmd_sync_incidents(_incidents_args(tmp_path)) == 0
+
+    # the heartbeat is the only write: no state, manifest or catalog
+    assert storage.written == [health.KEY]
+    assert (tmp_path / "out" / STATE_KEY).read_bytes() == state_before
+    m = storage.get_json(health.KEY)["mirror"]
+    assert m["ok"] is True and m["files_downloaded"] == 32  # last run kept
+    assert m["last_failure"]["error"] == "migrated_state"
+    assert m["last_failure"]["note"] == "paused: migrated state needs the fire-ID sync code"
+    assert storage.get_json(health.KEY)["history"][-1]["ok"] is False
+
+
+def test_push_a_guard_seeds_failure_on_first_run(tmp_path, monkeypatch):
+    storage = SpyStorage(tmp_path / "out")
+    storage.put_json(STATE_KEY, {"incidents": {}, "migrations": {"incident_ids": FLAG}})
+    monkeypatch.setattr(cli, "make_storage", lambda dry_run, out: storage)
+    monkeypatch.setattr(cli, "make_client", _no_ftp)
+    assert cli.cmd_sync_incidents(_incidents_args(tmp_path)) == 0
+    m = storage.get_json(health.KEY)["mirror"]
+    assert m["ok"] is False and m["files_downloaded"] == 0
+    assert m["last_failure"]["error"] == "migrated_state"
+
+
+def test_push_a_guard_lets_unmigrated_state_through(tmp_path, monkeypatch):
+    storage = SpyStorage(tmp_path / "out")
+    storage.put_json(STATE_KEY, {"incidents": _records(), "migrations": {}})
+
+    class Reached(Exception):
+        pass
+
+    def make_client():
+        raise Reached
+    monkeypatch.setattr(cli, "make_storage", lambda dry_run, out: storage)
+    monkeypatch.setattr(cli.config, "load_match_overrides", lambda: {})
+    monkeypatch.setattr(cli, "make_client", make_client)
+    with pytest.raises(Reached):
+        cli.cmd_sync_incidents(_incidents_args(tmp_path))
+    assert health.KEY not in storage.written
 
 
 # ---------------------------------------------------------------------------
@@ -220,3 +287,17 @@ def test_index_path_never_used_before_flag():
     state = {"incident_fires": {GH_FK: {"manifest": "catalogs/incidents/id/x.json"}}}
     assert cat.catalog_incident_index(state) is None
 
+
+def test_legacy_prune_refuses_migrated_state(tmp_path, monkeypatch):
+    # The slug-prefix prune deletes raw/incidents/{slug}/ wholesale; on
+    # migrated state that prefix can hold another fire's stamped files.
+    storage = SpyStorage(tmp_path / "out")
+    storage.put_json(STATE_KEY, _migrated_state())
+    storage.put_bytes(f"raw/incidents/wildhorse/{SHEET}", b"%PDF")
+    storage.written.clear()
+    monkeypatch.setattr(cli, "make_storage", lambda dry_run, out: storage)
+    monkeypatch.setattr(cli, "make_client", _no_ftp)
+    args = SimpleNamespace(dry_run=True, out=None, days=0, confirm=True)
+    assert cli.cmd_prune(args) == 2
+    assert storage.written == []
+    assert storage.exists(f"raw/incidents/wildhorse/{SHEET}")

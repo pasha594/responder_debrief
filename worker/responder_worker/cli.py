@@ -1314,6 +1314,20 @@ def cmd_sync_incidents(args) -> int:
     job_started = cat.now_iso()
     storage = make_storage(args.dry_run, args.out)
     state = state_mod.load_state(storage)
+    if incident_ids.migrated(state):
+        # This mirror keys everything by fire_slug. Run on migrated state it
+        # would publish slug manifests and slug catalog rows over the fire-ID
+        # ones, so it pauses (visibly, as a failure) until the fire-ID sync
+        # code is deployed: no FTP, state or catalog writes.
+        log("[incidents] state is migrated to fire IDs; this sync code predates "
+            "it — pausing")
+        health.publish_failure(storage, "mirror", {
+            "started_at": job_started,
+            "finished_at": cat.now_iso(),
+            "note": "paused: migrated state needs the fire-ID sync code",
+            "error": "migrated_state",
+        }, defaults=_zero_mirror_entry(), log=log)
+        return 0
     overrides = config.load_match_overrides()
 
     with make_client() as client:
@@ -1607,6 +1621,14 @@ def cmd_prune(args) -> int:
 
     storage = make_storage(args.dry_run, args.out)
     state = state_mod.load_state(storage)
+    if incident_ids.migrated(state):
+        # Migrated prefixes hold other folders' stamped files (austin/ keeps
+        # Grasshopper's sheets), so deleting a whole slug prefix here would
+        # take another fire's maps with it.
+        log("[prune] refused: state is keyed by fire ID; this slug-prefix "
+            "prune would delete files other fires still show")
+        return 2
+
     with make_client() as client:
         fires = fetch_active_fires(client)
     active_slugs = {f["fire_slug"] for f in fires}
