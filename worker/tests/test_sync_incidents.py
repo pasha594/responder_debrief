@@ -15,7 +15,7 @@ import pytest
 from ftp_stub import BASE, FakeFTP
 from incident_world import (
     AU_FK, AU_KEY, AUSTIN, CHERRY_ID, CHERRY_KEY, GH_FK, GH_KEY, GRASSHOPPER, LATEST, MT_FK,
-    MT_KEY, NOW, TWIN_MT, World, freeze_clock, sha16, wire_cli,
+    MT_KEY, NOW, TWIN_MT, TWIN_WA, WA_FK, WA_KEY, World, freeze_clock, sha16, wire_cli,
 )
 from responder_worker import cli, fire_manifests, geopdf, health
 from responder_worker.fires import fire_key
@@ -443,6 +443,61 @@ def test_live_build_lists_sheets_as_step_e(tmp_path, monkeypatch):
     assert (m["refreshed"], m["files_downloaded"]) == (1, 0)
     assert GH_FK in m["rebuilt_fires"]
     assert world.storage.get_json(fire_manifests.manifest_key(GH_FK))["maps"] == step_e
+
+
+def test_keeper_of_a_split_prefix_never_overwrites_moved_bytes(tmp_path, monkeypatch):
+    # The twin-sisters split: Montana's folder kept the prefix, Washington's
+    # moved to one of its own and its files stayed stamped under
+    # twin-sisters/. Montana now publishes a QR sheet at the path where
+    # Washington's QR sheet sits. The new revision is held back and
+    # reported, every run, and Washington's bytes and manifest are intact.
+    mt_dir = f"{BASE}/n_rockies/2026/2026_TwinSisters/"
+    wa_dir = f"{BASE}/pacific_nw/2026_Incidents_Washington/2026_TwinSisters/"
+    qr, wa_qr = "qr/Twin_Sisters_QR.pdf", b"%PDF washington's qr"
+    key = f"raw/incidents/twin-sisters/{qr}"
+
+    def rec(fire, method, prefix, dir_url, files):
+        return {"fire_slug": prefix, "storage_prefix": prefix, "cornea_id": fire["cornea_id"],
+                "bound": bound_info(fire, method),
+                "match": {"method": method, "confidence": 1.0, "dir_url": dir_url,
+                          "token": fire["unique_fire_id"] if method == "unit_id" else None,
+                          "cornea_id": fire["cornea_id"]},
+                "dir_url": dir_url, "dir_mtime": "2026-10-02 19:15",
+                "synced_at": "2026-10-02T19:20:00Z", "children": {}, "files": files}
+
+    wa = rec(TWIN_WA, "name_exact", WA_FK, wa_dir, {qr: {
+        "etag": '"e"', "lm": "Wed, 17 Jun 2026 04:59:39 GMT", "size": len(wa_qr),
+        "sha16": sha16(wa_qr), "rev": 1, "kind": "qr", "url": f"{wa_dir}QR/Twin_Sisters_QR.pdf",
+        "prefix": "twin-sisters"}})
+    world = _bucket(tmp_path, monkeypatch, rec(TWIN_MT, "unit_id", "twin-sisters", mt_dir, {}),
+                    key=MT_KEY, others={WA_KEY: wa},
+                    fires=[dict(TWIN_MT, fire_slug="twin-sisters", active=True),
+                           dict(TWIN_WA, fire_slug="twin-sisters-wa", active=True)])
+    world.storage.put_bytes(key, wa_qr)
+    wa_manifest = world.storage.get_json(fire_manifests.manifest_key(WA_FK))
+    ftp = FakeFTP()
+    ftp.dir(f"{BASE}/n_rockies/2026/", "2026_TwinSisters", "2026-10-02 19:15")
+    day = ftp.dir(ftp.dir(mt_dir, "Products", "2026-10-08 05:00"), "20261008", "2026-10-08 05:00")
+    ftp.file(day, "ops_twin_1008.pdf", b"%PDF montana ops")
+    ftp.file(ftp.dir(mt_dir, "QR", "2026-10-08 05:00"), "Twin_Sisters_QR.pdf", b"%PDF montana qr")
+    ftp.wire(monkeypatch)
+
+    for run in range(2):
+        world.storage.written.clear()
+        assert cli.main(["sync-incidents"]) == 0
+        m = world.storage.get_json(health.KEY)["mirror"]
+        assert m["raw_key_collisions"] == [key] and "held back" in m["note"]
+        assert world.storage.get_file(key, tmp_path / "qr.pdf")
+        assert (tmp_path / "qr.pdf").read_bytes() == wa_qr
+        assert key not in world.storage.written
+        state = world.state_on_bucket()
+        assert qr not in state["incidents"][MT_KEY]["files"]
+        assert state["incidents"][WA_KEY] == wa
+        # QR is listed again next run; Products, done, replays
+        assert state["incidents"][MT_KEY]["children"] == {"Products": "2026-10-08 05:00"}
+        assert m["files_downloaded"] == (1 if run == 0 else 0)
+        assert world.storage.get_json(fire_manifests.manifest_key(WA_FK))["maps"] == \
+            wa_manifest["maps"]
 
 
 def test_override_must_be_a_fire_guid(tmp_path, monkeypatch):

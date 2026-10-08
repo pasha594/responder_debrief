@@ -4,11 +4,14 @@ B2 raw/ uploads, per-incident checkpoints.
 Change detection: listed child-dir mtimes vs state (skip unchanged subtrees
 with zero requests); per-file etag/last-modified conditional GETs; QR in-place
 overwrites bump `rev`. A subtree is stamped only once every file in it was
-handled: one with files deferred past the deadline is listed again next run.
+handled: one with files deferred past the deadline, or a new revision held
+back by a raw-key collision, is listed again next run.
 
 Records are bound to a fire by cornea_id (incident_ids.bind_record) and every
 key comes from the record (asset_keys): an unchanged file is where its bytes
-are, a new revision goes under the record's own storage prefix.
+are, a new revision goes under the record's own storage prefix, unless
+another record's stamped bytes sit at that key (the keeper of a split legacy
+prefix): then it is not written, and is reported (raw_key_collisions).
 """
 
 from __future__ import annotations
@@ -101,6 +104,8 @@ class MirrorResult:
     bytes_downloaded: int = 0
     skipped_deferred: int = 0
     synced_children: int = 0  # subtrees listed again (changed or owed), not replayed
+    # new revisions not written: another record's bytes are at that raw key
+    raw_key_collisions: list[str] = field(default_factory=list)
 
 
 class IncidentMirror:
@@ -123,6 +128,7 @@ class IncidentMirror:
         self.ir_keep = ir_keep
         self.since = since  # YYYYMMDD: backfill floor for Products dailies
         self.force = force
+        self._foreign: set[str] = set()  # per incident, set by sync_incident
 
     # ------------------------------------------------------------------
     def sync_incident(self, *, incident_key: str, dir_url: str, match: dict,
@@ -140,6 +146,15 @@ class IncidentMirror:
         # downloads land in a folder of their own per incident, so two
         # folders sharing a file path never share a temp file
         self._tmp = self.work_dir / hashlib.sha1(incident_key.encode()).hexdigest()[:12]
+        # Raw keys holding another record's bytes. A prefix split leaves the
+        # keeper writing under the legacy prefix where the moved records'
+        # files are still stamped, so its new revision of such a rel would
+        # overwrite their bytes (their stamps would then name a key whose
+        # bytes no longer hash to their sha).
+        self._foreign = {raw_key(r, rel)
+                         for k, r in self.state["incidents"].items() if k != incident_key
+                         for rel, m in (r.get("files") or {}).items()
+                         if m.get("prefix") and not m.get("pruned_at")}
 
         children = list_dir(self.client, dir_url)
         res.listings += 1
@@ -193,10 +208,10 @@ class IncidentMirror:
             res.skipped_unchanged += 1
             self._replay_cached(inc_state, rel_prefix, res)
             return
-        deferred = res.skipped_deferred
+        owed = (res.skipped_deferred, len(res.raw_key_collisions))
         sync()
         res.synced_children += 1
-        if res.skipped_deferred == deferred:
+        if (res.skipped_deferred, len(res.raw_key_collisions)) == owed:
             inc_state["children"][entry.name] = entry.mtime
 
     # ------------------------------------------------------------------
@@ -365,6 +380,12 @@ class IncidentMirror:
         # New bytes always go under the record's own prefix: a file stamped
         # elsewhere (files[rel].prefix) moves home and loses the stamp.
         key = new_raw_key(inc_state, rel)
+        if key in self._foreign:
+            # Another record's bytes are there. Hiding this revision is
+            # safer than breaking that record's file: state is left as it
+            # was, and the collision is reported for an operator.
+            res.raw_key_collisions.append(key)
+            return
         # Keyed by the bytes too: one rel can be downloaded twice in a run
         # (Products/20261008/ and Products/Daily Products/20261008/ are both
         # products/20261008), and each MirroredFile keeps its own bytes.

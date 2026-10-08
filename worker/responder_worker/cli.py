@@ -1120,6 +1120,7 @@ def _zero_mirror_entry() -> dict:
         "rebuilt_fires": [],
         "raw_sha_mismatch": [],
         "ir_mixed_hidden": [],
+        "raw_key_collisions": [],
     }
 
 
@@ -1217,6 +1218,8 @@ def cmd_sync_incidents(args) -> int:
         rebinds: list[dict] = []
         rebind_refused: list[dict] = []
         override_errors: list[dict] = []
+        # new revisions not written over another record's raw bytes
+        raw_key_collisions: list[str] = []
         log(f"[incidents] candidate incident dirs: {len(cands)}"
             + (f" (priority: {', '.join(priority)})" if priority else "")
             + " — ordered priority, then acreage desc")
@@ -1314,6 +1317,7 @@ def cmd_sync_incidents(args) -> int:
                             "skipping; will resume next run")
                         failed_incidents.append(key)
                         continue
+                    raw_key_collisions += res.raw_key_collisions
                     if not (res.downloads or res.synced_children):
                         log(f"[incidents] {key}: unchanged since last sync — skipping")
                         unchanged_skips += 1
@@ -1446,6 +1450,7 @@ def cmd_sync_incidents(args) -> int:
                     "skipping; will resume next run")
                 failed_incidents.append(key)
                 continue
+            raw_key_collisions += res.raw_key_collisions
             rec = state["incidents"][key]
             rec["dir_url"] = cand.dir_url
             rec.pop("id_unresolved", None)
@@ -1510,6 +1515,8 @@ def cmd_sync_incidents(args) -> int:
                 f"{len(key_collisions)} incident key collision(s)" if key_collisions else None,
                 f"{len(raw_sha_mismatch)} raw object(s) failed their hash check"
                 if raw_sha_mismatch else None,
+                f"{len(set(raw_key_collisions))} new revision(s) held back: another "
+                "folder's raw object is at that key" if raw_key_collisions else None,
             ])) or None,
             "catalog_version": version,
             "candidates": len(cands),
@@ -1530,6 +1537,7 @@ def cmd_sync_incidents(args) -> int:
             "rebuilt_fires": sorted(built),
             "raw_sha_mismatch": raw_sha_mismatch,
             "ir_mixed_hidden": stats.get("ir_mixed_hidden") or [],
+            "raw_key_collisions": sorted(set(raw_key_collisions)),
         }, log=log)
     return 0
 
