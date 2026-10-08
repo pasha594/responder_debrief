@@ -1,6 +1,6 @@
 """CLI: python -m responder_worker.cli
 {sync-catalogs|sync-incidents|tile-worker|backfill|prune|cleanup-spread-frames|
- audit-incident-keys|reassign-files|restore-state-backup|
+ migrate-incident-ids|audit-incident-keys|reassign-files|restore-state-backup|
  sync-trails|routing-plan|routing-build|routing-one|routing-index}
 
 --dry-run everywhere: no B2 needed; outputs land under ./out/ mirroring the B2
@@ -58,6 +58,11 @@ from .matching import (
 from .mirror import IncidentMirror, MirroredFile, MirrorResult
 
 DEFAULT_OUT = Path(__file__).resolve().parent.parent / "out"
+
+#: True once sync-incidents keys records by fire ID. Until then nothing can
+#: keep migrated state current (this sync-incidents pauses on it), so the
+#: incident-ID migration may report but not apply.
+INCIDENT_SYNC_BY_ID = False
 
 
 def log(msg: str) -> None:
@@ -1687,6 +1692,27 @@ def cmd_cleanup_spread_frames(args) -> int:
 # incident-ID maintenance (maint.yml)
 # ===========================================================================
 
+def cmd_migrate_incident_ids(args) -> int:
+    """Re-key incident state by fire ID (migrate_ids). --report computes
+    everything and writes only the report; --apply needs the expected
+    report and the fire-ID sync code, and writes only when every guard
+    passes."""
+    if args.apply and not args.expect:
+        log("[migrate] refused: --apply needs --expect REPORT (the report run it must reproduce)")
+        return 2
+    if args.apply and not INCIDENT_SYNC_BY_ID:
+        log("[migrate] refused: this sync-incidents still keys by fire slug and would pause "
+            "on migrated state; apply once the fire-ID sync code is deployed")
+        return 2
+    from . import migrate_ids
+
+    storage = make_storage(args.dry_run, args.out)
+    with make_client() as client:
+        return migrate_ids.run(
+            storage, fetch_fires=lambda meta: fetch_active_fires(client, meta=meta),
+            apply=args.apply, expect=args.expect, report_out=args.report_out, log=log)
+
+
 def cmd_audit_incident_keys(args) -> int:
     log("[audit] audit-incident-keys is not yet implemented (spec 5.1)")
     return 2
@@ -1792,6 +1818,14 @@ def build_parser() -> argparse.ArgumentParser:
         g.add_argument(apply_flag, dest="apply", action="store_true")
         sp.add_argument("--report-out", type=Path, default=None,
                         help="write the JSON report here")
+
+    sp = sub.add_parser("migrate-incident-ids",
+                        help="one-off: key incident records by fire ID instead of slug")
+    common(sp)
+    mode_args(sp)
+    sp.add_argument("--expect", type=Path, default=None,
+                    help="with --apply: the report run whose results the apply must reproduce")
+    sp.set_defaults(func=cmd_migrate_incident_ids)
 
     sp = sub.add_parser("audit-incident-keys",
                         help="check every incident key against the bucket (not yet implemented)")

@@ -1,0 +1,165 @@
+name: Maintenance
+
+# Operator-run incident-state maintenance (spec 3.12). Every command writes
+# report.json, uploaded with the log as the `report` artifact (30 days).
+#
+#   migrate-incident-ids  report: compute the fire-ID migration, write nothing.
+#                         apply: needs expect_run_id (a report run); downloads
+#                         its report and aborts unless this run reproduces it.
+#   audit-incident-keys   report | repair (Phase 4)
+#   reassign-files        key, rel (regex), to (fire GUID | binding | hidden):
+#                         state only
+#   restore-state-backup  apply only: the migration's rollback
+#   prune                 report only. Destructive prune is CLI-only, with the
+#                         writer workflows disabled (spec 5.2).
+#
+# Runs in the writer group, so it waits for any mirror, catalogs or adopt
+# run in progress. Queuing a run in a group cancels a run of that group that
+# is still PENDING, this one included when a writer is queued behind it:
+# confirm the run completed, and dispatch it again if it was cancelled.
+on:
+  workflow_dispatch:
+    inputs:
+      command:
+        description: "Maintenance command"
+        required: true
+        type: choice
+        options:
+          - migrate-incident-ids
+          - audit-incident-keys
+          - reassign-files
+          - restore-state-backup
+          - prune
+      mode:
+        description: "report writes nothing; apply writes"
+        required: true
+        type: choice
+        default: report
+        options:
+          - report
+          - apply
+      expect_run_id:
+        description: "migrate apply: the run ID of the report run to reproduce"
+        required: false
+        type: string
+      key:
+        description: "reassign-files: incident key, e.g. pacific_nw/2026/2026_Grasshopper"
+        required: false
+        type: string
+      rel:
+        description: "reassign-files: regex over the folder's file paths"
+        required: false
+        type: string
+      to:
+        description: "reassign-files: a fire's cornea_id, binding or hidden"
+        required: false
+        type: string
+      days:
+        description: "prune (report only): inactivity threshold in days"
+        required: false
+        type: string
+
+concurrency:
+  # Same group as every job that writes state/state.json or catalog.json.
+  group: worker-b2-writes
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  actions: read   # download-artifact from the expected report run
+
+jobs:
+  maint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: worker
+    steps:
+      - name: Refuse destructive prune
+        if: inputs.command == 'prune' && inputs.mode == 'apply'
+        working-directory: /
+        run: |
+          echo "::error::prune runs in report mode only here; destructive prune is CLI-only, with mirror/tile/catalogs disabled (spec 5.2)"
+          exit 1
+
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+          enable-cache: true
+          cache-dependency-glob: "worker/uv.lock"
+
+      - name: Install dependencies
+        run: uv sync
+
+      - name: Fetch the expected report
+        if: inputs.command == 'migrate-incident-ids' && inputs.mode == 'apply'
+        uses: actions/download-artifact@v4
+        with:
+          name: report
+          path: worker/expect
+          run-id: ${{ inputs.expect_run_id }}
+          github-token: ${{ github.token }}
+
+      - name: Run
+        env:
+          B2_KEY_ID: ${{ secrets.B2_KEY_ID }}
+          B2_APP_KEY: ${{ secrets.B2_APP_KEY }}
+          B2_BUCKET: responder-debrief-data
+          B2_S3_ENDPOINT: ${{ vars.B2_S3_ENDPOINT }}
+          INPUT_COMMAND: ${{ inputs.command }}
+          INPUT_MODE: ${{ inputs.mode }}
+          INPUT_EXPECT_RUN_ID: ${{ inputs.expect_run_id }}
+          INPUT_KEY: ${{ inputs.key }}
+          INPUT_REL: ${{ inputs.rel }}
+          INPUT_TO: ${{ inputs.to }}
+          INPUT_DAYS: ${{ inputs.days }}
+        run: |
+          set -o pipefail
+          ARGS=()
+          case "$INPUT_COMMAND" in
+            migrate-incident-ids)
+              if [ "$INPUT_MODE" = "apply" ]; then
+                if [ -z "$INPUT_EXPECT_RUN_ID" ] || [ ! -f expect/report.json ]; then
+                  echo "::error::apply needs expect_run_id: the run ID of a report run"
+                  exit 1
+                fi
+                ARGS+=(--apply --expect expect/report.json)
+              else
+                ARGS+=(--report)
+              fi
+              ;;
+            audit-incident-keys)
+              if [ "$INPUT_MODE" = "apply" ]; then ARGS+=(--repair); else ARGS+=(--report); fi
+              ;;
+            reassign-files)
+              ARGS+=(--key "$INPUT_KEY" --rel "$INPUT_REL" --to "$INPUT_TO")
+              if [ "$INPUT_MODE" = "apply" ]; then ARGS+=(--apply); else ARGS+=(--report); fi
+              ;;
+            restore-state-backup)
+              if [ "$INPUT_MODE" != "apply" ]; then
+                echo "::error::restore-state-backup is apply only"
+                exit 1
+              fi
+              ARGS+=(--apply)
+              ;;
+            prune)
+              ARGS+=(--report)
+              if [ -n "$INPUT_DAYS" ]; then ARGS+=(--days "$INPUT_DAYS"); fi
+              ;;
+          esac
+          uv run python -m responder_worker.cli "$INPUT_COMMAND" "${ARGS[@]}" \
+            --report-out report.json 2>&1 | tee maint.log
+
+      - name: Upload the report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: report
+          path: |
+            worker/report.json
+            worker/maint.log
+          retention-days: 30
+          if-no-files-found: warn

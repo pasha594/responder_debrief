@@ -102,6 +102,13 @@ def names_fire(stem: str, name: str | None) -> bool:
     return not _name_forms(name).isdisjoint(_stem_runs(stem))
 
 
+def names_in(filename: str, names) -> set[str]:
+    """The names (name_norms) among `names` that the file name spells as
+    whole tokens, as names_fire reads them. Used for reports only."""
+    runs = _stem_runs(_stem(filename))
+    return {n for n in names if n and not _name_forms(n).isdisjoint(runs)}
+
+
 def file_evidence(filename: str, year: int, cands: dict) -> tuple[str | None, str | None]:
     """Which candidate fire the file name proves, and how.
 
