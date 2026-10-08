@@ -149,14 +149,13 @@ class CatalogHistory:
         return by_loc, slugs
 
 
-def legacy_ir_choice(rels: list[str], slug: str,
-                     fire_name: str) -> tuple[tuple[str, str, str] | None, bool]:
-    """What the slug-keyed manifest build chose for one IR folder (`rels`,
-    state order) shown under `slug` on a fire named `fire_name`
-    (stem_name): ((vectors key, source rel, flight_id) or None when it
-    converted nothing, ambiguous). That build's file order was not
-    recorded, so the choice is computed in state order and in sorted order;
-    when the two differ it is ambiguous and nothing is chosen."""
+def legacy_ir_picks(rels: list[str], slug: str,
+                    fire_name: str) -> set[tuple[str, str, str] | None]:
+    """Every choice the slug-keyed manifest build could have made for one IR
+    folder (`rels`, state order) shown under `slug` on a fire named
+    `fire_name` (stem_name): (vectors key, source rel, flight_id), or None
+    when it converted nothing. That build's file order was not recorded, so
+    the choice is computed in state order and in sorted order."""
     picks = set()
     rel_dir = rels[0].rpartition("/")[0] if rels else ""
     for order in (rels, sorted(rels)):
@@ -170,6 +169,14 @@ def legacy_ir_choice(rels: list[str], slug: str,
                        f"{rel_dir}/{(zips or kmzs)[0]}", flight_id))
         else:
             picks.add(None)
+    return picks
+
+
+def legacy_ir_choice(rels: list[str], slug: str,
+                     fire_name: str) -> tuple[tuple[str, str, str] | None, bool]:
+    """(the one choice of legacy_ir_picks or None, ambiguous): when the two
+    orders differ nothing is chosen."""
+    picks = legacy_ir_picks(rels, slug, fire_name)
     if len(picks) > 1:
         return None, True
     return picks.pop(), False
@@ -564,21 +571,56 @@ class Migration:
                     {"key": key, "location": self.legacy.get(key), "owner_fk": fk,
                      "by_src": dict(sorted(by_src.items())), "step": "D2"})
 
+    def _ir_eras(self) -> dict[str, list[tuple[str | None, str | None]]]:
+        """Per record, each slug its IR files were shown under and the fire
+        name that build stripped from flight IDs (None: unknown). Era 0 is
+        the legacy slug, which showed every file of the folder; later eras
+        showed only the files at their location. A resolved folder has
+        step D's eras; any other its legacy slug under its candidate row's
+        fire. Locations holding IR files that no era names come last, with
+        no name."""
+        cand_names = {u["key"]: u.get("candidate_name")
+                      for u in self.report["records"]["unresolved"]}
+        out: dict[str, list[tuple[str | None, str | None]]] = {}
+        for key, rec in sorted(self.state["incidents"].items()):
+            eras = list(self.eras.get(key) or [])
+            if not eras:
+                cand = fire_key((rec.get("id_unresolved") or {}).get("candidate"))
+                eras = [(self.legacy.get(key), cand_names.get(key)
+                         or (self.fires_by_fk.get(cand) or {}).get("post_title"))]
+            named = {slug for slug, _title in eras}
+            for rel, meta in (rec.get("files") or {}).items():
+                if meta.get("kind", rel.split("/", 1)[0]) == "ir":
+                    loc = file_location(rec, rel)
+                    if loc not in named:
+                        eras.append((loc, None))
+                        named.add(loc)
+            out[key] = eras
+        return out
+
     def legacy_ir_stamps(self) -> None:
         """D3: keep a legacy conversion (vectors/ir/{slug}/{flight}.geojson)
         only for the source file that produced it, and only while that file
         shows on an active fire. The slug-keyed build is recomputed for
         each era the folder was shown under: its current slug with its own
-        fire's name, and each foreign prefix with that fire's name."""
+        fire's name, and each foreign prefix with that fire's name.
+
+        Every folder that was shown under a slug claims the keys it
+        recomputes there, whether or not its source can be stamped (an
+        inactive fire, a hidden source, an unresolved folder): a key that
+        two sources' bytes could have made is kept by none. An era with no
+        fire name to recompute under contests every key of its slug made
+        from a folder of the same name."""
         ir_state = self.state.get("ir") or {}
         rep = self.report["ir"]
-        chosen: list[tuple[str, str, str, str, str]] = []  # (inc_key, src, key, flight_id, sha)
-        for key, eras in sorted(self.eras.items()):
+        claims: dict[str, set[str]] = {}         # legacy key -> source bytes that could have made it
+        contested: set[tuple[str, str]] = set()  # (slug, IR folder) shown with no known name
+        options: dict[tuple[str, str], list[tuple]] = {}  # (inc_key, src) -> eras' picks
+        for key, eras in self._ir_eras().items():
             rec = self.state["incidents"][key]
             files = rec.get("files") or {}
-            options: dict[str, list[tuple]] = {}
             for i, (slug, title) in enumerate(eras):
-                if not slug or not title:
+                if not slug:
                     continue
                 dirs: dict[str, list[str]] = {}
                 for rel, meta in files.items():
@@ -589,9 +631,20 @@ class Migration:
                         continue
                     dirs.setdefault(rel.rpartition("/")[0], []).append(rel)
                 for rel_dir, rels in sorted(dirs.items()):
-                    pick, ambiguous = legacy_ir_choice(rels, slug, fire_manifests.stem_name(title))
-                    if ambiguous:
+                    if not title:
+                        contested.add((slug, rel_dir))
+                        continue
+                    picks = legacy_ir_picks(rels, slug, fire_manifests.stem_name(title))
+                    for vkey, src, _fid in filter(None, picks):
+                        # bytes unknown: a claim no other source shares
+                        claims.setdefault(vkey, set()).add(
+                            files[src].get("sha16") or f"{key}/{src}")
+                    if key not in self.eras:
+                        continue  # never stamped: it claims only
+                    if len(picks) > 1:
                         rep["order_ambiguous"].append({"key": key, "rel_dir": rel_dir, "slug": slug})
+                        continue
+                    pick = next(iter(picks))
                     if pick is None:
                         continue
                     vkey, src, flight_id = pick
@@ -599,28 +652,21 @@ class Migration:
                     if conv.get("failed") or not conv.get("heat_types"):
                         continue
                     current = conv.get("v") == ir_vectors.IR_CONVERTER_VERSION
-                    options.setdefault(src, []).append((not current, i, vkey, flight_id))
-            for src, opts in sorted(options.items()):
-                meta = files.get(src) or {}
-                if file_owner(rec, meta) not in self.fires_by_fk or not meta.get("sha16"):
-                    continue
-                # eras disagreeing: the current converter, then the current binding
-                _old, _era, vkey, flight_id = min(opts)
-                chosen.append((key, src, vkey, flight_id, meta["sha16"]))
-        # Two folders that once shared a slug can both recompute one legacy
-        # key; it was converted from only one of their sources, unknowably
-        # which, so a key claimed by different source bytes is kept by none.
-        claims: dict[str, set[str]] = {}
-        for _key, _src, vkey, _fid, sha in chosen:
-            claims.setdefault(vkey, set()).add(sha)
-        for key, src, vkey, flight_id, sha in chosen:
-            if len(claims[vkey]) > 1:
+                    options.setdefault((key, src), []).append(
+                        (not current, i, vkey, flight_id, slug, rel_dir))
+        for (key, src), opts in sorted(options.items()):
+            rec = self.state["incidents"][key]
+            meta = rec["files"][src]
+            if file_owner(rec, meta) not in self.fires_by_fk or not meta.get("sha16"):
+                continue
+            # eras disagreeing: the current converter, then the current binding
+            _old, _era, vkey, flight_id, slug, rel_dir = min(opts)
+            if len(claims[vkey]) > 1 or (slug, rel_dir) in contested:
                 rep["key_collisions"].append({"key": key, "src": src, "ir_key": vkey})
                 continue
-            rec = self.state["incidents"][key]
-            stamp_ir(rec, src, vkey, flight_id, sha)
+            stamp_ir(rec, src, vkey, flight_id, meta["sha16"])
             rep["stamped"].append({"key": key, "src": src, "ir_key": vkey,
-                                   "owner": file_owner(rec, rec["files"][src])})
+                                   "owner": file_owner(rec, meta)})
         self.log(f"[migrate] D3: {len(rep['stamped'])} legacy IR conversions kept")
 
     def suspects(self) -> None:

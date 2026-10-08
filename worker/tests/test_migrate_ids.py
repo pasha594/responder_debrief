@@ -481,20 +481,50 @@ def test_legacy_ir_stamp_only_when_source_owned(tmp_path):
     assert flights[AU_FK]["2026-09-29"]["geojson_url"] == f"/{IR_GH_0929}"
 
 
-def test_legacy_ir_key_claimed_by_two_sources_is_kept_by_none(tmp_path):
+@pytest.mark.parametrize("wa, mt_keeps", [
+    ("active", False),
+    ("inactive", False),           # WA's fire left the active list: its claim still counts
+    ("hidden_source", False),      # WA's KMZ shows on no fire
+    ("unresolved", False),         # WA's token names no fire: its candidate's name recomputes
+    ("unresolved_unnamed", False),  # no candidate row: the folder name contests the key
+    ("inactive_same_bytes", True),  # both KMZs are one file: either made the same key
+])
+def test_legacy_ir_key_claimed_by_two_sources_is_kept_by_none(tmp_path, wa, mt_keeps):
     # Both Twin Sisters folders wrote under twin-sisters/: each recomputes
     # the same legacy key from its own KMZ, and only one of them made it
     world = World(tmp_path)
     for key in (MT_KEY, WA_KEY):
         world.file(key, "ir/20260801/20260801_IR_Topo.pdf")
-        world.file(key, "ir/20260801/20260801_IR.kmz")
-    world.state["ir"]["vectors/ir/twin-sisters/20260801_IR_Topo.geojson"] = {
-        "v": ir_vectors.IR_CONVERTER_VERSION, "heat_types": ["Perimeter"]}
+        world.file(key, "ir/20260801/20260801_IR.kmz",
+                   data=b"one kmz" if wa == "inactive_same_bytes" else None)
+    vkey = "vectors/ir/twin-sisters/20260801_IR_Topo.geojson"
+    world.state["ir"][vkey] = {"v": ir_vectors.IR_CONVERTER_VERSION, "heat_types": ["Perimeter"]}
+    wa_rec = world.state["incidents"][WA_KEY]
+    if wa.startswith("inactive"):
+        world.fires = [f for f in world.fires if f["cornea_id"] != TWIN_WA["cornea_id"]]
+    elif wa == "hidden_source":
+        wa_rec["files"]["ir/20260801/20260801_IR.kmz"].update(fk=None, fk_src="hidden")
+    elif wa == "unresolved":
+        wa_rec["match"] = dict(wa_rec["match"], method="unit_id", token="2026-WAWFS-000001")
+    elif wa == "unresolved_unnamed":
+        wa_rec["synced_at"] = None
     mig = _migration(world)
     mig.run()
-    for key in (MT_KEY, WA_KEY):
-        assert "ir_keys" not in mig.state["incidents"][key]
-    assert sorted(c["key"] for c in mig.report["ir"]["key_collisions"]) == [MT_KEY, WA_KEY]
+
+    if wa.startswith("unresolved"):
+        assert WA_KEY in {u["key"] for u in mig.report["records"]["unresolved"]}
+    else:
+        assert mig.state["incidents"][WA_KEY]["cornea_id"] == TWIN_WA["cornea_id"]
+    mt = mig.state["incidents"][MT_KEY]
+    assert "ir_keys" not in mig.state["incidents"][WA_KEY]
+    if mt_keeps:
+        assert mt["ir_keys"]["ir/20260801/20260801_IR.kmz"]["key"] == vkey
+        assert mig.report["ir"]["key_collisions"] == []
+        return
+    assert "ir_keys" not in mt
+    # only a source that could be stamped is reported
+    assert sorted(c["key"] for c in mig.report["ir"]["key_collisions"]) == \
+        ([MT_KEY, WA_KEY] if wa == "active" else [MT_KEY])
 
 
 # ---------------------------------------------------------------------------
