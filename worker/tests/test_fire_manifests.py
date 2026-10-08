@@ -2,6 +2,7 @@
 files it owns from every folder feeding it, its index entry written only
 after its PUT, and IR flights chosen per owner. All on migrated state."""
 
+import dataclasses
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -12,7 +13,10 @@ from incident_world import (
     AU_FK, AU_KEY, AUSTIN, GH_FK, GH_KEY, GRASSHOPPER, MT_KEY, NOW, TWIN_MT, TWIN_WA, WA_FK,
     WA_KEY, api_fire, dir_of, sha16,
 )
-from responder_worker import catalogs as cat, fire_manifests as fm, frames, geopdf, ir_vectors
+from responder_worker import (
+    catalogs as cat, config, fire_manifests as fm, frames, geopdf, ir_vectors,
+)
+from responder_worker.asset_keys import replay_file
 from responder_worker.fires import fire_key
 from responder_worker.incident_ids import DEFAULT_CONFIDENCE, bound_info
 from responder_worker.mirror import MirroredFile, MirrorResult
@@ -87,6 +91,28 @@ class Bucket:
         raise AssertionError("delete")
 
     delete_prefix = delete_keys
+
+
+class RawBucket(Bucket):
+    """A Bucket holding raw bytes to download (`raw`) and recording file
+    uploads (`uploaded`)."""
+
+    def __init__(self, state, raw: dict[str, bytes]):
+        super().__init__(state)
+        self.raw, self.uploaded = raw, []
+
+    def get_file(self, key, dest):
+        if key not in self.raw:
+            return False
+        Path(dest).write_bytes(self.raw[key])
+        return True
+
+    def put_file(self, key, path, **kw):
+        self.uploaded.append(key)
+
+
+def _forbidden(*a, **k):
+    raise AssertionError("not expected here")
 
 
 def _publish(state, fires_by_fk, rebuild=None, *, storage=None, mirrors=None, replay_only=True,
@@ -306,6 +332,117 @@ def test_replay_only_never_converts_renders_or_downloads(tmp_path, monkeypatch):
     assert out[GH_FK]["ir_flights"][0]["geojson_url"] == f"/{key}"
     assert gh["ir_keys"][kmz] == {"key": key, "flight_id": "20260929_IR",
                                   "src_sha16": meta["sha16"]}
+
+
+def test_ir_flights_uses_frozen_key_for_same_source_bytes(monkeypatch):
+    monkeypatch.setattr(fm.shutil, "which", lambda _: "/usr/bin/ogr2ogr")
+    monkeypatch.setattr(ir_vectors, "process_ir_kmz", _forbidden)
+    monkeypatch.setattr(ir_vectors, "kmz_flight_time", lambda p: {"flown_at": None,
+                                                                   "flown_date": "2026-08-17"})
+    frames.start_deadline(0)  # disarmed: a conversion is possible on every build below
+    kmz = "ir/20260817/20260817_Grasshopper_IR.kmz"
+    pdf = "ir/20260817/20260817_Grasshopper_IR_11x17_Topo.pdf"
+    gh = _rec(GRASSHOPPER, "unit_id", GH_KEY, "grasshopper", [kmz, pdf])
+    for meta in gh["files"].values():
+        meta["prefix"] = "austin"  # mirrored while the folder showed on Austin
+    frozen = "vectors/ir/austin/20260817_IR_11x17_Topo.geojson"
+    gh["ir_keys"] = {kmz: {"key": frozen, "flight_id": "20260817_IR_11x17_Topo",
+                           "src_sha16": gh["files"][kmz]["sha16"]}}
+    v = ir_vectors.IR_CONVERTER_VERSION
+    state = _state(pacific_nw__2026__2026_Grasshopper=gh)
+    state["ir"] = {frozen: {"v": v, "flown_at": "2026-08-17T06:00:00Z", "flown_date": None,
+                            "heat_types": ["Perimeter"]}}
+    fires = _fires(GRASSHOPPER)
+
+    # (a) the stamped source, same bytes, current converter: served from its
+    # key outside replay too, with no download, conversion or upload
+    out, _ = _publish(state, fires, replay_only=False)
+    [f] = out[GH_FK]["ir_flights"]
+    assert (f["geojson_url"], f["flight_id"]) == (f"/{frozen}", "20260817_IR_11x17_Topo")
+    assert f["flown_at"] == "2026-08-17T06:00:00Z"
+    assert gh["ir_keys"][kmz]["key"] == frozen
+
+    # (b) a new revision of the KMZ: the old stamp is for other bytes, so the
+    # new ones are fetched, verified and converted into a new key under the
+    # record's prefix; the frozen key is never written
+    rev2 = b"kmz rev 2"
+    gh["files"][kmz].update(sha16=sha16(rev2), rev=2)
+    raw = f"raw/incidents/austin/{kmz}"
+    converted = []
+
+    def convert(src, out_path, *, flight_id):
+        converted.append((Path(src).read_bytes(), flight_id))
+        Path(out_path).write_text('{"features": []}')
+        return {"heat_types": ["Perimeter", "Intense"], "feature_count": 2}
+
+    monkeypatch.setattr(ir_vectors, "process_ir_kmz", convert)
+    storage = RawBucket(state, {raw: rev2})
+    out, _ = _publish(state, fires, storage=storage, replay_only=False)
+    new = f"vectors/ir/grasshopper/{sha16(rev2)}.v{v}.geojson"
+    assert storage.uploaded == [new]
+    assert converted == [(rev2, "20260817_IR_11x17_Topo")]
+    assert out[GH_FK]["ir_flights"][0]["geojson_url"] == f"/{new}"
+    assert gh["ir_keys"][kmz] == {"key": new, "flight_id": "20260817_IR_11x17_Topo",
+                                  "src_sha16": sha16(rev2)}
+    assert state["ir"][new]["heat_types"] == ["Perimeter", "Intense"]
+    assert state["ir"][frozen]["heat_types"] == ["Perimeter"]  # left as it was
+
+    # (c) the bytes at the key are another folder's: nothing converted or
+    # uploaded, the attempt is failed and the mismatch counted
+    monkeypatch.setattr(ir_vectors, "process_ir_kmz", _forbidden)
+    gh["files"][kmz].update(sha16=sha16(b"kmz rev 3"), rev=3)
+    storage = RawBucket(state, {raw: b"another folder's kmz"})
+    stats: dict = {}
+    out, _ = _publish(state, fires, storage=storage, replay_only=False, stats=stats)
+    rev3 = f"vectors/ir/grasshopper/{sha16(b'kmz rev 3')}.v{v}.geojson"
+    assert storage.uploaded == []
+    assert state["ir"][rev3]["failed"] is True and "heat_types" not in state["ir"][rev3]
+    assert stats["raw_sha_mismatch"] == [raw]
+    assert out[GH_FK]["ir_flights"][0]["geojson_url"] is None
+
+
+def test_ir_preview_url_uses_sha_prefix(tmp_path, monkeypatch):
+    monkeypatch.setattr(geopdf, "gdal_available", lambda: True)
+    monkeypatch.setattr(geopdf, "render_preview", _forbidden)
+    rel = "ir/20260817/20260817_Grasshopper_IR_11x17_Topo.pdf"
+    # a folder with its own prefix after the split (fire key), its sheet's
+    # tiles and preview written earlier under other prefixes
+    gh = _rec(GRASSHOPPER, "unit_id", GH_KEY, GH_FK, [rel])
+    state = _state(pacific_nw__2026__2026_Grasshopper=gh)
+    pdf = replay_file(gh, rel, gh["files"][rel])
+    sha = pdf.sha16
+    storage = RawBucket(state, {})
+
+    def url(mf):
+        return fm.ir_preview_url(storage, state, gh, mf, replay_only=False, log=lambda *_: None)
+
+    state["tiled"][sha] = {"tiler_version": 1, "prefix": "austin",
+                           "preview_prefix": "grasshopper", "geo": {"preview": True}}
+    assert url(pdf) == f"/previews/incidents/grasshopper/{sha}.png"
+    del state["tiled"][sha]["preview_prefix"]
+    assert url(pdf) == f"/previews/incidents/austin/{sha}.png"
+    # tried before without a preview: left to the probe backlog
+    state["tiled"][sha]["geo"]["preview"] = False
+    assert url(pdf) is None
+    assert storage.uploaded == []
+
+    # a sha first seen in this run's download: rendered under the record's
+    # prefix, and the sha stamped there (marked done for the tiler)
+    del state["tiled"][sha]
+    local = tmp_path / "ir.pdf"
+    local.write_bytes(b"%PDF")
+
+    def render(pdf_path, out_png, **kw):
+        Path(out_png).write_bytes(b"png")
+        return out_png
+
+    monkeypatch.setattr(geopdf, "render_preview", render)
+    fresh = dataclasses.replace(pdf, local_path=local, changed=True)
+    assert url(fresh) == f"/previews/incidents/{GH_FK}/{sha}.png"
+    assert storage.uploaded == [f"previews/incidents/{GH_FK}/{sha}.png"]
+    t = state["tiled"][sha]
+    assert t["prefix"] == GH_FK and "preview_prefix" not in t
+    assert t["geo"]["preview"] is True and t["tiler_version"] == config.TILER_VERSION
 
 
 def test_unit_incident_strips_any_year():
