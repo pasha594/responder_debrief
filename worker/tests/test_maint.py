@@ -74,6 +74,8 @@ def test_reassign_files_state_only_and_marks_rebuild(tmp_path, monkeypatch):
     ("austin", "Ops", "--to takes a fire GUID"),              # a slug is a name, not an ID
     ("{49D1FB0B-74D1-4A95-B8DF-066DCC5F06E1", "(", "not a regular expression"),
     ("hidden", "nothing-matches", "no file of"),
+    ("hidden", "", "empty regex"),                            # would select the whole folder
+    ("binding", "  ", "empty regex"),
 ])
 def test_reassign_files_refusals_write_nothing(tmp_path, monkeypatch, to, rel, why):
     storage = SpyStorage(tmp_path / "bucket")
@@ -97,7 +99,9 @@ def test_restore_backup_refuses_migrated_backup(tmp_path, monkeypatch):
     backup_key = "state/backups/state.pre-incident-ids.20261009T020000Z.json"
     pre = {"updated_at": "2026-10-08T17:00:02Z", "incidents": {GH_KEY: {"fire_slug": "grasshopper"}},
            "catalog_version": 844}
-    migrated = dict(_migrated(), migrations={"incident_ids": NOW, "backup": backup_key})
+    # catalog runs after the migration moved the counter past the backup's
+    migrated = dict(_migrated(), migrations={"incident_ids": NOW, "backup": backup_key},
+                    catalog_version=851)
     storage.put_json(STATE_KEY, migrated)
     storage.put_json(backup_key, dict(pre, migrations={"incident_ids": NOW}))  # not pre-migration
     storage.written.clear()
@@ -118,8 +122,14 @@ def test_restore_backup_refuses_migrated_backup(tmp_path, monkeypatch):
     out = tmp_path / "r.json"
     assert cli.main(["restore-state-backup", "--apply", "--report-out", str(out)]) == 0
     assert storage.written == [STATE_KEY]
-    assert storage.get_json(STATE_KEY) == pre
-    assert json.loads(out.read_text())["restored"] is True
+    # everything comes back but the counter: catalogs/versions/catalog.{845..851}.json
+    # are immutable, so the next catalog run must publish 852
+    restored = storage.get_json(STATE_KEY)
+    assert restored["catalog_version"] == 851
+    assert dict(restored, catalog_version=844) == pre
+    report = json.loads(out.read_text())
+    assert report["restored"] is True
+    assert (report["backup_catalog_version"], report["kept_catalog_version"]) == (844, 851)
 
 
 def test_maint_parsers_registered(tmp_path, monkeypatch):

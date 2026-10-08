@@ -56,6 +56,8 @@ def reassign_files(storage, *, key: str, rel: str, to: str, apply: bool,
     rec = state["incidents"].get(key)
     if rec is None:
         return refuse(f"no incident folder {key!r}")
+    if not rel.strip():
+        return refuse("--rel must name the files (an empty regex matches every file)")
     try:
         rx = re.compile(rel)
     except re.error as exc:
@@ -103,8 +105,9 @@ def reassign_files(storage, *, key: str, rel: str, to: str, apply: bool,
 def restore_state_backup(storage, *, apply: bool, report_out: Path | None = None,
                          log=print) -> int:
     """Copy the backup named by migrations.backup over state/state.json,
-    once it parses as a state document without the incident_ids flag.
-    Apply only (it is the rollback; run it with the writers disabled)."""
+    once it parses as a state document without the incident_ids flag, but
+    keep the later of the two catalog_version counters. Apply only (it is
+    the rollback; run it with the writers disabled)."""
     doc: dict = {"command": "restore-state-backup", "mode": "apply" if apply else "report"}
 
     def refuse(why: str) -> int:
@@ -129,6 +132,13 @@ def restore_state_backup(storage, *, apply: bool, report_out: Path | None = None
     if migrated(backup):
         return refuse(f"{backup_key} carries the incident_ids flag: it is not a "
                       "pre-migration state")
+    # catalogs/versions/catalog.{N}.json are immutable (cached a year, and
+    # the migration reads them as history), so the counter only moves
+    # forward: a restored N would make the next catalog run rewrite N+1..
+    backup_version = int(backup.get("catalog_version") or 0)
+    kept_version = max(backup_version, int(state.get("catalog_version") or 0))
+    backup = dict(backup, catalog_version=kept_version)
+    doc.update(backup_catalog_version=backup_version, kept_catalog_version=kept_version)
     storage.put_json(STATE_KEY, backup, cache_control="private, no-store")
     if migrated(storage.get_json(STATE_KEY) or {}):
         log("[restore] state/state.json still carries the flag after the write")
@@ -138,6 +148,6 @@ def restore_state_backup(storage, *, apply: bool, report_out: Path | None = None
     doc.update(restored=True, backup_updated_at=backup.get("updated_at"),
                replaced_updated_at=state.get("updated_at"))
     log(f"[restore] state/state.json restored from {backup_key} "
-        f"(state of {backup.get('updated_at')})")
+        f"(state of {backup.get('updated_at')}, catalog_version {kept_version})")
     write_report(report_out, doc)
     return 0

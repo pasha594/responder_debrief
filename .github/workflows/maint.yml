@@ -47,7 +47,7 @@ on:
         required: false
         type: string
       rel:
-        description: "reassign-files: regex over the folder's file paths"
+        description: "reassign-files: regex over the folder's file paths (. for every file)"
         required: false
         type: string
       to:
@@ -135,6 +135,10 @@ jobs:
               if [ "$INPUT_MODE" = "apply" ]; then ARGS+=(--repair); else ARGS+=(--report); fi
               ;;
             reassign-files)
+              if [ -z "$INPUT_REL" ]; then
+                echo "::error::reassign-files needs rel: a regex naming the files"
+                exit 1
+              fi
               ARGS+=(--key "$INPUT_KEY" --rel "$INPUT_REL" --to "$INPUT_TO")
               if [ "$INPUT_MODE" = "apply" ]; then ARGS+=(--apply); else ARGS+=(--report); fi
               ;;
