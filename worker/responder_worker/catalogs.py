@@ -16,6 +16,10 @@ from .fires import fire_key
 from .matching import UNIT_TOKEN_RE
 
 SCHEMA_VERSION = 1
+#: Version of the fire-ID manifests (catalogs/incidents/id/{fk}.json) as
+#: recorded in each state["incident_fires"] entry. Bumping it rebuilds every
+#: active fire's manifest once.
+INCIDENT_MANIFEST_V = 1
 
 _ANCHOR_RE = re.compile(r"_(?P<date>\d{8})_(?P<time>\d{4})_")
 _ORIENTATIONS = {"port", "land"}
@@ -242,6 +246,22 @@ def _incident_fields_by_id(m: dict | None) -> dict:
             if m else None
         ),
     }
+
+
+def migrate_perim_counts(state: dict, fires: list[dict]) -> dict:
+    """The perimeter-count cache, keyed by fire ID (perim_counts_by_id).
+    The old name-keyed cache carries over once, and only where its cached
+    poly_last_updated still equals that fire's, so a fire never inherits a
+    same-name fire's count; then it is dropped."""
+    by_id = state.setdefault("perim_counts_by_id", {})
+    legacy = state.pop("perim_counts", None) or {}
+    for f in fires:
+        fk = fire_key(f.get("cornea_id"))
+        old = legacy.get(f.get("fire_slug"))
+        if (fk and fk not in by_id and old and old.get("count") is not None
+                and old.get("poly") and old["poly"] == f.get("poly_last_updated")):
+            by_id[fk] = old
+    return by_id
 
 
 def catalog_incident_index(state: dict) -> dict[str, dict] | None:
