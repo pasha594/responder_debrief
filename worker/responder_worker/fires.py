@@ -56,6 +56,17 @@ def fire_key(cornea_id: str | None) -> str | None:
     return k or None
 
 
+_FIRE_ID_RE = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
+
+
+def is_fire_id(value: str | None) -> bool:
+    """True for a cornea_id GUID in any spelling (braces, case). A fire slug
+    or name is not one: names are shared between fires."""
+    if not value or not re.fullmatch(r"\{?[0-9A-Fa-f-]+\}?", value.strip()):
+        return False
+    return bool(_FIRE_ID_RE.fullmatch(fire_key(value) or ""))
+
+
 def slugify(name: str) -> str:
     """Lowercase, non-alnum runs -> single dash, trimmed."""
     s = re.sub(r"[^a-z0-9]+", "-", (name or "").lower())

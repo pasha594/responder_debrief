@@ -1,5 +1,6 @@
 """CLI: python -m responder_worker.cli
 {sync-catalogs|sync-incidents|tile-worker|backfill|prune|cleanup-spread-frames|
+ audit-incident-keys|reassign-files|restore-state-backup|
  sync-trails|routing-plan|routing-build|routing-one|routing-index}
 
 --dry-run everywhere: no B2 needed; outputs land under ./out/ mirroring the B2
@@ -1599,6 +1600,16 @@ def cmd_prune(args) -> int:
     without BOTH --days and --confirm, and is never invoked by CI."""
     from datetime import datetime, timedelta, timezone
 
+    from .maint import write_report
+
+    if getattr(args, "report", False):
+        # maint.yml runs prune in report mode only; the fire-ID prune
+        # report comes with the key audit (spec 5.2)
+        note = "prune report is not implemented yet (fire-ID prune, spec 5.2); nothing deleted"
+        log(f"[prune] {note}")
+        write_report(getattr(args, "report_out", None),
+                     {"command": "prune", "mode": "report", "deleted": [], "note": note})
+        return 2
     if args.days is None or not args.confirm:
         log("[prune] refused: incident data is kept indefinitely by policy. "
             "To delete anyway, pass BOTH --days N and --confirm.")
@@ -1670,6 +1681,30 @@ def cmd_cleanup_spread_frames(args) -> int:
         log(f"[cleanup] {prefix}: {n} objects removed")
     log(f"[cleanup] done: {total} objects removed")
     return 0
+
+
+# ===========================================================================
+# incident-ID maintenance (maint.yml)
+# ===========================================================================
+
+def cmd_audit_incident_keys(args) -> int:
+    log("[audit] audit-incident-keys is not yet implemented (spec 5.1)")
+    return 2
+
+
+def cmd_reassign_files(args) -> int:
+    from . import maint
+
+    return maint.reassign_files(make_storage(args.dry_run, args.out), key=args.key,
+                                rel=args.rel, to=args.to, apply=args.apply,
+                                report_out=args.report_out, log=log)
+
+
+def cmd_restore_state_backup(args) -> int:
+    from . import maint
+
+    return maint.restore_state_backup(make_storage(args.dry_run, args.out), apply=args.apply,
+                                      report_out=args.report_out, log=log)
 
 
 # ===========================================================================
@@ -1745,7 +1780,41 @@ def build_parser() -> argparse.ArgumentParser:
                     help="inactivity threshold; required (policy: keep forever)")
     sp.add_argument("--confirm", action="store_true",
                     help="required second flag to actually delete")
+    sp.add_argument("--report", action="store_true",
+                    help="report only, never delete (maint.yml)")
+    sp.add_argument("--report-out", type=Path, default=None, help="write a JSON report here")
     sp.set_defaults(func=cmd_prune)
+
+    def mode_args(sp, report_flag="--report", apply_flag="--apply"):
+        g = sp.add_mutually_exclusive_group()
+        g.add_argument(report_flag, dest="report", action="store_true",
+                       help="compute and report; write nothing (default)")
+        g.add_argument(apply_flag, dest="apply", action="store_true")
+        sp.add_argument("--report-out", type=Path, default=None,
+                        help="write the JSON report here")
+
+    sp = sub.add_parser("audit-incident-keys",
+                        help="check every incident key against the bucket (not yet implemented)")
+    common(sp)
+    mode_args(sp, apply_flag="--repair")
+    sp.add_argument("--refetch-missing", action="store_true")
+    sp.set_defaults(func=cmd_audit_incident_keys)
+
+    sp = sub.add_parser("reassign-files",
+                        help="state only: show files of one folder on another fire, "
+                             "hide them, or return them to the folder's binding")
+    common(sp)
+    mode_args(sp)
+    sp.add_argument("--key", required=True, help="incident key, e.g. pacific_nw/2026/2026_Grasshopper")
+    sp.add_argument("--rel", required=True, help="regex over the folder's file paths")
+    sp.add_argument("--to", required=True, help="a fire's cornea_id, 'binding' or 'hidden'")
+    sp.set_defaults(func=cmd_reassign_files)
+
+    sp = sub.add_parser("restore-state-backup",
+                        help="rollback: put the pre-migration state backup back (apply only)")
+    common(sp)
+    mode_args(sp)
+    sp.set_defaults(func=cmd_restore_state_backup)
 
     sp = sub.add_parser("cleanup-spread-frames",
                         help="one-time: delete the dead pre-rendered spread "
