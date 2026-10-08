@@ -83,8 +83,16 @@ export function OfflineCard({ corneaId }: { corneaId: string }) {
             <button
               type="button"
               className="rd-mini-btn"
-              disabled={!online || busy || otherDownloadActive}
-              title={online ? 'Re-download with the newest data' : 'Reconnect to update'}
+              disabled={!online || busy || otherDownloadActive || !inCatalog}
+              title={
+                !online
+                  ? 'Reconnect to update'
+                  : !inCatalog
+                    ? catalog
+                      ? 'Not in the catalog right now'
+                      : 'Waiting for the catalog'
+                    : 'Re-download with the newest data'
+              }
               onClick={start}
             >
               Update
