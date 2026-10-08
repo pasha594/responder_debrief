@@ -63,6 +63,12 @@ export const RELEASE_NOTES: ReleaseDay[] = [
           'A fire sharing its name with another fire could show that fire’s incident maps, and two fires with the same name in one state could trade sit report numbers or forecasts. Each fire now shows only its own.',
         fix: true,
       },
+      {
+        title: 'Offline downloads of same-name fires stay separate',
+        summary:
+          'Downloading two fires with the same name for offline use saved both into one copy, so the second download replaced the first. Each fire now keeps its own offline copy, and copies already on your device keep working.',
+        fix: true,
+      },
     ],
   },
   {
