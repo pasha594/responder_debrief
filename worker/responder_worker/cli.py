@@ -25,6 +25,7 @@ import httpx
 
 from . import archives, hotspots, catalogs as cat, health, imsr
 from . import config, frames, geopdf, hrrr, ir_vectors, pyrecast, state as state_mod
+from .asset_keys import tile_meta_key
 from .b2 import make_storage
 from .fires import fetch_active_fires, fetch_perimeter_count, fire_key
 from .ftp_index import list_dir
@@ -940,12 +941,6 @@ def _ir_preview_url(storage, state, fire_slug: str, pdf) -> str | None:
         "geo": {"georeferenced": False, "projection": None, "tiles": None, "preview": ok},
     }
     return f"/{key}" if ok else None
-
-
-def tile_meta_key(fire_slug: str, sha: str) -> str:
-    """Completion marker a stateless tile worker writes LAST: its existence
-    means the full tile tree for this sheet is on the bucket."""
-    return f"tiles/incidents/{fire_slug}/{sha}/meta.json"
 
 
 def _sha_in_shard(sha: str, shard: int, shards: int) -> bool:

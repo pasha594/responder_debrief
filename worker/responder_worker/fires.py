@@ -66,18 +66,29 @@ def fire_slug(fire: dict) -> str:
     return slugify(fire.get("post_title") or fire.get("cornea_id") or "unknown")
 
 
-def fetch_active_fires(client: httpx.Client) -> list[dict]:
-    """GET /fires?active=true&limit=500&fields=... -> wildfires with parsed coords."""
+#: One page of the active-fires index. The fetch is not paginated, so a page
+#: this full may be truncated: jobs that act on a fire's ABSENCE (migration,
+#: prune) refuse to run on one.
+ACTIVE_FIRES_LIMIT = 500
+
+
+def fetch_active_fires(client: httpx.Client, meta: dict | None = None) -> list[dict]:
+    """GET /fires?active=true&limit=500&fields=... -> wildfires with parsed coords.
+
+    `meta`, when given, receives `raw_rows`: how many rows the API returned
+    before the wildfire filter (compare with ACTIVE_FIRES_LIMIT)."""
     resp = get(
         client,
         f"{config.FIRE_API}/fires",
         params={
             "active": "true",
-            "limit": 500,
+            "limit": ACTIVE_FIRES_LIMIT,
             "fields": ",".join(FIRE_FIELDS),
         },
     )
     fires = resp.json().get("fires", [])
+    if meta is not None:
+        meta["raw_rows"] = len(fires)
     out: list[dict] = []
     seen_slugs: dict[str, int] = {}
     for f in fires:

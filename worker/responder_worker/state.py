@@ -22,6 +22,13 @@ def empty_state() -> dict:
         "archives": {},
         "prune": {"inactive_since": {}},
         "catalog_version": 0,
+        # fire key -> that fire's ID manifest entry (built from every folder
+        # feeding the fire)
+        "incident_fires": {},
+        # one-off data migrations, e.g. {"incident_ids": ISO} once records
+        # are keyed by fire ID. Never pre-fill a flag here: load_state merges
+        # these defaults into existing state.
+        "migrations": {},
     }
 
 
