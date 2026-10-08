@@ -32,7 +32,9 @@
  *   downloading there writes a duplicate into packs/{fire_slug}, which this
  *   version resolves by newest download;
  * - an older tab on WI Chipmunk's page can still overwrite FL Chipmunk's
- *   packs/chipmunk, as before.
+ *   packs/chipmunk, as before. This version re-reads a legacy folder's
+ *   owner before an update writes or prunes it, so it never does the
+ *   reverse to WI's pack.
  */
 import { DATA_BASE_URL, FIRE_API } from '../app/config';
 import { dataUrl } from '../api/catalogs';
@@ -239,26 +241,46 @@ export async function initOfflinePacks(): Promise<void> {
   }
 }
 
+/** A folder's pack.json, or null when it is missing (an interrupted
+ * download: its files stay for resume) or unusable. */
+async function readPackMeta(folder: string): Promise<PackMeta | null> {
+  const raw = await readPackFile(folder, 'pack.json');
+  if (!raw) return null;
+  try {
+    const meta = JSON.parse(new TextDecoder().decode(raw)) as PackMeta;
+    // files/prefixes checked here so a malformed pack.json is skipped
+    // rather than breaking the index for every pack.
+    if (meta.version === 1 && fireKey(meta.corneaId) && meta.files && meta.prefixes) {
+      return { ...meta, slug: folder };
+    }
+  } catch {
+    /* corrupt meta — ignore; re-download rewrites it */
+  }
+  return null;
+}
+
 /** Read every folder's pack.json. Read-only: a fire's second folder stays
  * on disk (newest download serves), and nothing is renamed. */
 async function hydratePacks(): Promise<void> {
   if (!opfsSupported()) return;
   onDisk.clear();
   for (const folder of await listPackFolders()) {
-    const raw = await readPackFile(folder, 'pack.json');
-    if (!raw) continue; // interrupted download — files stay for resume
-    try {
-      const meta = JSON.parse(new TextDecoder().decode(raw)) as PackMeta;
-      // files/prefixes checked here so a malformed pack.json is skipped
-      // rather than breaking the index for every pack.
-      if (meta.version === 1 && fireKey(meta.corneaId) && meta.files && meta.prefixes) {
-        onDisk.set(folder, { ...meta, slug: folder });
-      }
-    } catch {
-      /* corrupt meta — ignore; re-download rewrites it */
-    }
+    const meta = await readPackMeta(folder);
+    if (meta) onDisk.set(folder, meta);
   }
   rebuildIndex();
+}
+
+/** True when another fire's pack now sits in `folder`. This tab read the
+ * folders at boot; since then an older app version on a same-name fire's
+ * page can have saved that fire into packs/{fire_slug}. The index learns
+ * the new owner, so the next downloadFolder() moves on. */
+async function takenByOtherFire(folder: string, fk: string): Promise<boolean> {
+  const meta = await readPackMeta(folder);
+  if (!meta || fireKey(meta.corneaId) === fk) return false;
+  onDisk.set(folder, meta);
+  rebuildIndex();
+  return true;
 }
 
 // ---------- download ----------
@@ -341,7 +363,12 @@ async function runDownload(corneaId: string, abort: AbortSignal): Promise<PackMe
     if (!entry) throw new PackDownloadError('Fire not in the catalog yet');
     const fk = fireKey(corneaId)!;
     const legacySlug = entry.fire_slug ?? null;
-    const folder = downloadFolder(winners, corneaId)!;
+    // A legacy folder is re-checked on disk before it is overwritten and
+    // pruned; packs/{fk} is never written by an older app version.
+    let folder = downloadFolder(winners, corneaId)!;
+    while (folder !== fk && await takenByOtherFire(folder, fk)) {
+      folder = downloadFolder(winners, corneaId)!;
+    }
 
     const perimeterIndex = await rawJson<PerimeterIndexItem[]>(
       `${FIRE_API}/fires/${encodeURIComponent(corneaId)}/perimeters`, abort);
@@ -472,6 +499,11 @@ async function runDownload(corneaId: string, abort: AbortSignal): Promise<PackMe
             bytes: plan.routingBytes }
         : undefined,
     };
+    // Checked again: the other fire's tab can have finished while this ran.
+    // Its pack.json stays and nothing is pruned; a retry writes elsewhere.
+    if (folder !== fk && await takenByOtherFire(folder, fk)) {
+      throw new PackDownloadError('Another fire was saved in this folder');
+    }
     await writePackFile(folder, 'pack.json', JSON.stringify(meta));
 
     // Prune files the new plan no longer references (rotated-out sheets,
