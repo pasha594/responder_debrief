@@ -19,7 +19,8 @@ import {
   fetchPyrecastRuns,
   fetchWeatherRuns,
 } from './catalogs';
-import type { PerimeterIndexItem, PyrecastRun, WeatherRun } from './types';
+import type { IncidentManifest, PerimeterIndexItem, PyrecastRun, WeatherRun } from './types';
+import { entryForFire, sameFire } from './fireKey';
 import { fetchHistoricPerimeters } from './nifcHistory';
 import { fetchLandStatus } from './nifcLandStatus';
 import { fireAreaBox } from './geo';
@@ -216,14 +217,24 @@ export const useWeatherRuns = () =>
     retry: 1,
   });
 
-export const useIncidentManifest = (manifestPath: string | null) =>
+/**
+ * A fire's incident-map manifest, or undefined when the file belongs to a
+ * different fire: manifests are still filed by name, and a stale record
+ * once put Idaho's Sawmill maps on three later Sawmill fires.
+ */
+export const useIncidentManifest = (manifestPath: string | null, corneaId: string | null) =>
   useQuery({
     queryKey: ['incident-manifest', manifestPath],
     queryFn: () => fetchIncidentManifest(manifestPath!),
     enabled: !!manifestPath,
     staleTime: 300_000,
     retry: 1,
+    select: (m) => (manifestBelongsTo(m, corneaId) ? m : undefined),
   });
+
+export function manifestBelongsTo(m: IncidentManifest, corneaId: string | null): boolean {
+  return !m.cornea_id || sameFire(m.cornea_id, corneaId);
+}
 
 /**
  * Run-rotation detector: call on any WMS frame 404/502 — pyrecast workspaces
@@ -240,13 +251,17 @@ export function useInvalidateForecasts() {
 
 // ---------- Derived helpers (pure) ----------
 
-/** Latest spread run for a fire slug, or null. */
+/** Latest spread run for a fire, found by its cornea_id (the worker's
+ * fire_slug only for files from before entries carried the id), or null. */
 export function latestRun(
-  runsCatalog: { fires: Record<string, { runs: PyrecastRun[] }> } | undefined,
-  fireSlug: string | null | undefined,
+  runsCatalog:
+    | { fires: Record<string, { cornea_id?: string | null; runs: PyrecastRun[] }> }
+    | undefined,
+  corneaId: string | null | undefined,
+  legacySlug?: string | null,
 ): PyrecastRun | null {
-  if (!runsCatalog || !fireSlug) return null;
-  const entry = runsCatalog.fires[fireSlug];
+  if (!runsCatalog) return null;
+  const entry = entryForFire(runsCatalog.fires, corneaId, legacySlug);
   if (!entry?.runs?.length) return null;
   // Only schema-v2 (archive) runs are renderable: they carry `toa`. A stale
   // v1 catalog (CDN-cached during a deploy overlap) must degrade to the

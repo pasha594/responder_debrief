@@ -35,7 +35,7 @@ import type {
   PyrecastRunsCatalog,
   WeatherRunsCatalog,
 } from '../api/types';
-import { isRenderableWeatherRun, latestRun } from '../api/queries';
+import { isRenderableWeatherRun, latestRun, manifestBelongsTo } from '../api/queries';
 import { setSpreadArchiveBase } from '../api/wmsUrls';
 import {
   buildPackPlan,
@@ -334,9 +334,11 @@ async function runDownload(corneaId: string, abort: AbortSignal): Promise<PackMe
 
     const perimeterIndex = await rawJson<PerimeterIndexItem[]>(
       `${FIRE_API}/fires/${encodeURIComponent(corneaId)}/perimeters`, abort);
-    const manifest = entry.incident_manifest
+    const fetched = entry.incident_manifest
       ? await rawJson<IncidentManifest>(dataUrl(entry.incident_manifest), abort)
       : null;
+    // Manifests are still filed by name; never pack another fire's maps.
+    const manifest = fetched && manifestBelongsTo(fetched, corneaId) ? fetched : null;
     const hotspotIndex = entry.hotspot_archive
       ? await rawJson<HotspotArchiveIndex>(dataUrl(entry.hotspot_archive), abort)
       : null;
@@ -344,7 +346,7 @@ async function runDownload(corneaId: string, abort: AbortSignal): Promise<PackMe
       `${DATA_BASE_URL}/catalogs/pyrecast_runs.json`, abort);
     // Same base the app uses at runtime, so planned ToA URLs match exactly.
     setSpreadArchiveBase(runsCatalog.archive_base);
-    const spreadRun = latestRun(runsCatalog, slug);
+    const spreadRun = latestRun(runsCatalog, corneaId, slug);
     const weatherCatalog = await rawJson<WeatherRunsCatalog>(
       `${DATA_BASE_URL}/catalogs/weather_runs.json`, abort);
     const hrrr = weatherCatalog.models?.hrrr;
@@ -368,7 +370,7 @@ async function runDownload(corneaId: string, abort: AbortSignal): Promise<PackMe
     const inputs: PackInputs = {
       corneaId,
       slug,
-      manifestPath: entry.incident_manifest,
+      manifestPath: manifest ? entry.incident_manifest : null,
       hotspotIndexPath: entry.hotspot_archive ?? null,
       manifest,
       hotspotIndex,

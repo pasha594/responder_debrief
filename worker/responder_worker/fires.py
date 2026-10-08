@@ -46,6 +46,16 @@ def parse_fire_coordinates(value: str | None) -> list[float] | None:
     return [lon, lat]
 
 
+def fire_key(cornea_id: str | None) -> str | None:
+    """A fire's identity as a path-safe key: its cornea_id lowercased with
+    the braces dropped ("{5152…-C13CE748EC08}" → "5152…-c13ce748ec08").
+    The API writes the same id braced or bare, upper or lower case, so
+    compare ids only through this. fire_slug is just the name, shared by
+    unrelated fires and swapped between active ones; never key on it."""
+    k = re.sub(r"[^0-9a-z-]", "", (cornea_id or "").lower())[:64]
+    return k or None
+
+
 def slugify(name: str) -> str:
     """Lowercase, non-alnum runs -> single dash, trimmed."""
     s = re.sub(r"[^a-z0-9]+", "-", (name or "").lower())

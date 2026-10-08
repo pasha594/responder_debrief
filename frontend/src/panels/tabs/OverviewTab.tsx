@@ -2,6 +2,7 @@
 import { useFire } from '../../api/queries';
 import type { StructureExposureBuffer } from '../../api/types';
 import { useImsr, useMasterCatalog } from '../../api/queries';
+import { entryForFire } from '../../api/fireKey';
 import { Markdown } from '../../utils/markdown';
 import { OfflineCard } from '../OfflineCard';
 
@@ -25,9 +26,9 @@ function KvRow({ label, value }: { label: string; value: string | null | undefin
  * ICS-209 numbers responders asked for: resource types, personnel trend,
  * estimated containment, plus the narrative (team, behavior, threats).
  */
-function ImsrSection({ fireSlug }: { fireSlug: string | null }) {
+function ImsrSection({ corneaId, fireSlug }: { corneaId: string; fireSlug: string | null }) {
   const { data: imsr } = useImsr();
-  const entry = fireSlug ? imsr?.fires?.[fireSlug] : undefined;
+  const entry = entryForFire(imsr?.fires, corneaId, fireSlug);
   if (!entry) return null;
   const stat = (v: number | null) => (v == null ? '—' : v.toLocaleString('en-US'));
   const delta =
@@ -127,7 +128,7 @@ export function OverviewTab({ corneaId }: { corneaId: string }) {
         <KvRow label="Complexity" value={fire.complexity_type} />
       </div>
 
-      <ImsrSection fireSlug={fireSlug} />
+      <ImsrSection corneaId={corneaId} fireSlug={fireSlug} />
 
       {fire.structure_exposure && <ExposureTable buffers={fire.structure_exposure.buffers} />}
 

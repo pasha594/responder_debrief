@@ -52,6 +52,12 @@ export const RELEASE_NOTES: ReleaseDay[] = [
           'A new fire could show the spread forecast of an older fire with a similar name, from weeks earlier or 100 miles away. Those no longer carry over. A fire with forecasts filed under two names now shows its newest one.',
         fix: true,
       },
+      {
+        title: 'Incident maps and sit report numbers stay with their own fire',
+        summary:
+          'A fire sharing its name with another fire could show that fire’s incident maps, and two fires with the same name in one state could trade sit report numbers or forecasts. Each fire now shows only its own.',
+        fix: true,
+      },
     ],
   },
   {

@@ -260,7 +260,7 @@ describe('latestRun v1-catalog tolerance', () => {
         },
       },
     } as never;
-    expect(latestRun(v1, 'sinlahekin')).toBeNull();
+    expect(latestRun(v1, '{SINLAHEKIN}', 'sinlahekin')).toBeNull();
   });
   it('accepts v2 runs with toa.percentiles', () => {
     const v2 = {
@@ -272,6 +272,6 @@ describe('latestRun v1-catalog tolerance', () => {
         },
       },
     } as never;
-    expect(latestRun(v2, 'sinlahekin')?.workspace).toBe('wa-sinlahekin_20260817_100500');
+    expect(latestRun(v2, '{SINLAHEKIN}', 'sinlahekin')?.workspace).toBe('wa-sinlahekin_20260817_100500');
   });
 });

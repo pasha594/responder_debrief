@@ -237,7 +237,9 @@ export interface PyrecastRunsCatalog {
   source?: string;
   /** Public archive origin; prepended to the runs' relative templates. */
   archive_base?: string;
-  fires: Record<string, { pyrecast_slug: string; runs: PyrecastRun[] }>;
+  /** Keyed by fire_slug (a name; can change hands) — find entries by
+   * cornea_id via entryForFire. Files before 2026-10-08 lack cornea_id. */
+  fires: Record<string, { cornea_id?: string | null; pyrecast_slug: string; runs: PyrecastRun[] }>;
   unmatched_slugs?: string[];
 }
 
@@ -395,6 +397,8 @@ export interface IncidentManifest {
 // ---------- catalogs/imsr.json (NIFC daily sit report, per-fire) ----------
 
 export interface ImsrEntry {
+  /** The matched fire; absent in files before 2026-10-08. */
+  cornea_id?: string | null;
   name: string;
   unit: string;
   acres: number | null;
@@ -420,6 +424,7 @@ export interface ImsrCatalog {
   schema_version: number;
   generated_at: string;
   source_url: string;
+  /** Keyed by fire_slug — find entries by cornea_id via entryForFire. */
   fires: Record<string, ImsrEntry>;
 }
 

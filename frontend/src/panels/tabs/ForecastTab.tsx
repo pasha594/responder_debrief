@@ -72,8 +72,8 @@ const TOA_MODE_LABELS: Record<ToaMode, string> = {
 };
 
 /**
- * Latest spread run for the selected fire — the same slug resolution
- * useMapLayerSync uses (catalog fire_slug, falling back to unique_slug).
+ * Latest spread run for the selected fire, by fire ID (the catalog
+ * fire_slug only for forecast files written before entries carried it).
  */
 export function useSpreadRunForFire(corneaId: string | null): PyrecastRun | null {
   const { data: catalog } = useMasterCatalog();
@@ -88,7 +88,7 @@ export function useSpreadRunForFire(corneaId: string | null): PyrecastRun | null
       catalog?.fires.find((f) => f.cornea_id === corneaId)?.fire_slug ??
       fire?.unique_slug ??
       null;
-    return latestRun(runs, slug);
+    return latestRun(runs, corneaId, slug);
   }, [catalog, fire, runs, corneaId]);
 }
 

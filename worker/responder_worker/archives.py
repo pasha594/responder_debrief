@@ -240,7 +240,10 @@ def build_pyrecast_runs(fires: list[dict], manifest: dict,
         if fire is None or not runs:
             unmatched_slugs.append(slug)
             continue
+        # Keyed by fire_slug for app versions still cached on devices; the
+        # site finds entries by cornea_id (a slug can change hands).
         entry = fires_out.setdefault(fire["fire_slug"], {
+            "cornea_id": fire.get("cornea_id"),
             "pyrecast_slug": slug,
             "match_method": method,
             "match_confidence": conf,

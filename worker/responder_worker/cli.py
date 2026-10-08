@@ -26,7 +26,7 @@ import httpx
 from . import archives, hotspots, catalogs as cat, health, imsr
 from . import config, frames, geopdf, hrrr, ir_vectors, pyrecast, state as state_mod
 from .b2 import make_storage
-from .fires import fetch_active_fires, fetch_perimeter_count
+from .fires import fetch_active_fires, fetch_perimeter_count, fire_key
 from .ftp_index import list_dir
 from .http import get_optional, make_client
 from .matching import (
@@ -93,28 +93,30 @@ def cmd_sync_catalogs(args) -> int:
         # refetch fires whose perimeter actually changed. Wall-clock capped:
         # stragglers keep their cached count until a later run.
         log("[catalogs] refreshing perimeter version counts ...")
-        pc_state = state.setdefault("perim_counts", {})
+        pc_state = migrate_perim_counts(state, fires)
         perimeter_counts: dict[str, int] = {}
         pc_deadline = time.monotonic() + 240
         pc_fetched = 0
         for f in fires:
-            slug = f["fire_slug"]
-            cached = pc_state.get(slug)
+            fk = fire_key(f.get("cornea_id"))
+            if fk is None:
+                continue
+            cached = pc_state.get(fk)
             poly = f.get("poly_last_updated")
             if cached and cached.get("poly") == poly and cached.get("count") is not None:
-                perimeter_counts[slug] = cached["count"]
+                perimeter_counts[fk] = cached["count"]
                 continue
             if time.monotonic() > pc_deadline:
                 if cached and cached.get("count") is not None:
-                    perimeter_counts[slug] = cached["count"]
+                    perimeter_counts[fk] = cached["count"]
                 continue
             n = fetch_perimeter_count(client, f.get("cornea_id") or "")
             pc_fetched += 1
             if n is not None:
-                perimeter_counts[slug] = n
-                pc_state[slug] = {"count": n, "poly": poly}
+                perimeter_counts[fk] = n
+                pc_state[fk] = {"count": n, "poly": poly}
             elif cached and cached.get("count") is not None:
-                perimeter_counts[slug] = cached["count"]
+                perimeter_counts[fk] = cached["count"]
         log(f"[catalogs] perimeter counts: {len(perimeter_counts)} fires "
             f"({pc_fetched} fetched, rest cached)")
 
@@ -141,13 +143,14 @@ def cmd_sync_catalogs(args) -> int:
         )
         hs_written = 0
         hs_deadline_passed = lambda: time.monotonic() > hs_deadline  # noqa: E731
+        runs_by_fire = {fire_key(e.get("cornea_id")): e.get("runs") or []
+                        for e in pyre["fires"].values()}
         for f in hs_order:
             if hs_deadline_passed():
                 log("[hotspots] wall-clock reached — remaining fires next run")
                 break
             slug = f["fire_slug"]
-            entry = pyre["fires"].get(slug) or {}
-            runs = entry.get("runs") or []
+            runs = runs_by_fire.get(fire_key(f.get("cornea_id"))) or []
             # run records carry a centroid, never a bbox (that is decoded
             # client-side from the tif) — the box builder rects around it
             run_centroid = runs[0].get("centroid") if runs else None
@@ -197,8 +200,9 @@ def cmd_sync_catalogs(args) -> int:
                 "drawable run forward so weather layers stay live")
 
     spread_index = {
-        slug: {"latest": entry["runs"][0]["run_time"], "count": len(entry["runs"])}
-        for slug, entry in pyre["fires"].items()
+        fire_key(entry.get("cornea_id")): {"latest": entry["runs"][0]["run_time"],
+                                           "count": len(entry["runs"])}
+        for entry in pyre["fires"].values()
         if entry["runs"]
     }
 
@@ -512,6 +516,22 @@ def _gather_unit_tokens(client, cand: IncidentCandidate) -> Counter:
             tokens += extract_unit_tokens([f.name for f in files if not f.is_dir],
                                           year=cand.year)
     return tokens
+
+
+def migrate_perim_counts(state: dict, fires: list[dict]) -> dict:
+    """The perimeter-count cache, keyed by fire ID (perim_counts_by_id).
+    The old name-keyed cache carries over once, and only where its cached
+    poly_last_updated still equals that fire's, so a fire never inherits a
+    same-name fire's count; then it is dropped."""
+    by_id = state.setdefault("perim_counts_by_id", {})
+    legacy = state.pop("perim_counts", None) or {}
+    for f in fires:
+        fk = fire_key(f.get("cornea_id"))
+        old = legacy.get(f.get("fire_slug"))
+        if (fk and fk not in by_id and old and old.get("count") is not None
+                and old.get("poly") and old["poly"] == f.get("poly_last_updated")):
+            by_id[fk] = old
+    return by_id
 
 
 def _cached_match_predates_fire(rec: dict, fires_by_slug: dict) -> str | None:
@@ -1440,15 +1460,17 @@ def cmd_sync_incidents(args) -> int:
         # Preserve forecast fields owned by sync-catalogs: rebuild them from the
         # previously published catalog so this job never blanks them.
         prev_catalog = storage.get_json("catalogs/catalog.json") or {}
+        # By fire ID: this job's slugs can differ from that catalog's when
+        # two active fires share a name and one updated in between.
         spread_index = {
-            f["fire_slug"]: {"latest": f["spread_latest_run"],
-                             "count": f.get("spread_run_count")}
+            fire_key(f.get("cornea_id")): {"latest": f["spread_latest_run"],
+                                           "count": f.get("spread_run_count")}
             for f in prev_catalog.get("fires", [])
             if f.get("has_spread_forecast") and f.get("spread_latest_run")
         }
         perimeter_counts = {
-            slug: rec["count"]
-            for slug, rec in (state.get("perim_counts") or {}).items()
+            fk: rec["count"]
+            for fk, rec in migrate_perim_counts(state, fires).items()
             if rec.get("count") is not None
         }
         hotspot_archives = hotspots.advertised(state)

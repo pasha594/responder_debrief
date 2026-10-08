@@ -158,8 +158,8 @@ export function useMapLayerSync(): boolean {
   const selectedFireSlug = catalogFire?.fire_slug ?? selectedFire?.unique_slug ?? null;
 
   const spreadRun = useMemo(
-    () => latestRun(pyrecastRuns, selectedFireSlug),
-    [pyrecastRuns, selectedFireSlug],
+    () => latestRun(pyrecastRuns, corneaId, selectedFireSlug),
+    [pyrecastRuns, corneaId, selectedFireSlug],
   );
   const weatherRun = useMemo(() => latestWeatherRun(weatherRuns), [weatherRuns]);
 
@@ -170,6 +170,7 @@ export function useMapLayerSync(): boolean {
 
   const { data: incidentManifest } = useIncidentManifest(
     catalogFire?.incident_manifest ?? null,
+    corneaId,
   );
 
   // Road incidents: lazy, short-lived (closures change), same box family.

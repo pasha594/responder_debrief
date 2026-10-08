@@ -105,7 +105,7 @@ export function LegendBar() {
       catalog?.fires.find((f) => f.cornea_id === corneaId)?.fire_slug ??
       fire?.unique_slug ??
       null;
-    return latestRun(pyrecastRuns, slug);
+    return latestRun(pyrecastRuns, corneaId, slug);
   }, [catalog, fire, pyrecastRuns, corneaId]);
 
   const showSpread = spreadVisible && !!run;

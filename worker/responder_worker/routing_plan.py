@@ -19,15 +19,14 @@ from __future__ import annotations
 
 import hashlib
 import math
-import re
 from datetime import datetime, timedelta
 
 from . import config, utm
+from .fires import fire_key as _fire_key
 
 
 def fire_key(cornea_id: str) -> str:
-    k = re.sub(r"[^0-9a-z-]", "", (cornea_id or "").lower())[:64]
-    return k or hashlib.sha1((cornea_id or "").encode()).hexdigest()[:16]
+    return _fire_key(cornea_id) or hashlib.sha1((cornea_id or "").encode()).hexdigest()[:16]
 
 
 def in_conus(point) -> bool:

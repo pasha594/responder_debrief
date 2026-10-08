@@ -118,24 +118,38 @@ def _state_of_unit(unit: str) -> str:
     return unit.split("-", 1)[0]
 
 
+def _unit_of_fire(fire: dict) -> str:
+    """"2026-MEMES-000123" → "MEMES" (an IMSR unit "ME-MES" without the dash)."""
+    parts = (fire.get("unique_fire_id") or "").split("-")
+    return parts[1].upper() if len(parts) == 3 else ""
+
+
 def match_imsr(rows: list[dict], narratives: dict[str, str],
                fires: list[dict]) -> dict[str, dict]:
     """fire_slug -> imsr entry. Name must match exactly (normalized) AND the
     unit's state must equal the fire's state — duplicate incident names in
-    different states are common."""
-    by_key: dict[tuple[str, str], dict] = {}
+    different states are common. Two active fires with one name in one
+    state go by the row's unit; still ambiguous, the row is skipped rather
+    than given to whichever came first. Entries carry the fire's cornea_id,
+    which the site matches on (slugs can change hands between syncs)."""
+    by_key: dict[tuple[str, str], list[dict]] = {}
     for f in fires:
         key = (normalize_name(f.get("post_title") or ""), f.get("state") or "")
-        by_key.setdefault(key, f)
+        by_key.setdefault(key, []).append(f)
 
     out: dict[str, dict] = {}
     for row in rows:
         norm = normalize_name(row["name"])
-        fire = by_key.get((norm, _state_of_unit(row["unit"])))
-        if fire is None:
+        cands = by_key.get((norm, _state_of_unit(row["unit"]))) or []
+        if len(cands) > 1:
+            unit = row["unit"].replace("-", "").upper()
+            cands = [f for f in cands if _unit_of_fire(f) == unit]
+        if len(cands) != 1:
             continue
+        fire = cands[0]
         entry = dict(row)
         entry["narrative"] = narratives.get(norm)
+        entry["cornea_id"] = fire.get("cornea_id")
         out[fire["fire_slug"]] = entry
     return out
 

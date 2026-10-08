@@ -182,6 +182,7 @@ export function TimelineTrack() {
   const catalogFireEntry = catalog?.fires.find((f) => f.cornea_id === corneaId) ?? null;
   const { data: incidentManifest } = useIncidentManifest(
     incidentSeries ? (catalogFireEntry?.incident_manifest ?? null) : null,
+    corneaId,
   );
 
   // Map-version pins (the Maps tab's "Timeline" button): one per overlayable
@@ -231,7 +232,10 @@ export function TimelineTrack() {
   // ---- spread-forecast publication mark (resolved exactly as the map does) ----
   const fireSlug =
     catalog?.fires.find((f) => f.cornea_id === corneaId)?.fire_slug ?? fire?.unique_slug ?? null;
-  const spreadRun = useMemo(() => latestRun(pyrecastRuns, fireSlug), [pyrecastRuns, fireSlug]);
+  const spreadRun = useMemo(
+    () => latestRun(pyrecastRuns, corneaId, fireSlug),
+    [pyrecastRuns, corneaId, fireSlug],
+  );
 
   const forecastMark = useMemo(() => {
     if (!spreadRun || width <= 0) return null;

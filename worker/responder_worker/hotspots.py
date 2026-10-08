@@ -33,10 +33,10 @@ would rewrite immutable URLs with different content.
 from __future__ import annotations
 
 import math
-import re
 from datetime import datetime, timedelta, timezone
 
 from . import config
+from .fires import fire_key
 
 PAGE_LIMIT = 50000
 # One run advances a backfill by at most this many pages per fire; a mega
@@ -71,8 +71,7 @@ def _day_after(day: str) -> str:
 def archive_id(fire: dict) -> str | None:
     """Path-safe archive key from the fire's cornea_id (a braced GUID):
     "{51528708-A49A-...}" → "51528708-a49a-..."."""
-    aid = re.sub(r"[^0-9a-z-]", "", (fire.get("cornea_id") or "").lower())
-    return aid or None
+    return fire_key(fire.get("cornea_id"))
 
 
 def index_key(aid: str) -> str:

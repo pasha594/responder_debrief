@@ -38,7 +38,10 @@ export function useFireHotspotQuery(corneaId: string | null): HotspotQuery | nul
     [catalog, corneaId],
   );
   const slug = catalogFire?.fire_slug ?? fire?.unique_slug ?? null;
-  const spreadRun = useMemo(() => latestRun(pyrecastRuns, slug), [pyrecastRuns, slug]);
+  const spreadRun = useMemo(
+    () => latestRun(pyrecastRuns, corneaId, slug),
+    [pyrecastRuns, corneaId, slug],
+  );
 
   return useMemo(() => {
     if (!corneaId) return null;

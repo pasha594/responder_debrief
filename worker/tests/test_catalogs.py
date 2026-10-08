@@ -4,6 +4,7 @@ spread flags fed by the archives doc, filename parsing on real names."""
 import json
 
 from responder_worker import archives, catalogs
+from responder_worker.fires import fire_key
 from responder_worker.catalogs import (
     build_catalog,
     build_weather_runs_hrrr,
@@ -172,8 +173,8 @@ class TestCatalogContract:
         matches = json.loads(
             (fixtures / "archive_fire_matches_excerpt.json").read_text())
         pyre = archives.build_pyrecast_runs(_fires(), manifest, matches)
-        spread_index = {slug: e["runs"][0]["run_time"]
-                        for slug, e in pyre["fires"].items() if e["runs"]}
+        spread_index = {fire_key(e["cornea_id"]): e["runs"][0]["run_time"]
+                        for e in pyre["fires"].values() if e["runs"]}
         matches = {"elk": {
             "method": "unit_id", "confidence": 1.0,
             "dir_url": "https://ftp.wildfire.gov/.../2026_Elk/",
@@ -403,8 +404,8 @@ def test_build_catalog_counts_and_legacy_spread_index():
     fires = [{"fire_slug": "a", "cornea_id": "{X}", "post_title": "A"}]
     out = cat.build_catalog(
         fires, version=1,
-        spread_index={"a": {"latest": "2026-08-20T00:00:00Z", "count": 4}},
-        perimeter_counts={"a": 79},
+        spread_index={"x": {"latest": "2026-08-20T00:00:00Z", "count": 4}},
+        perimeter_counts={"x": 79},
         incident_matches={"a": {"method": "unit_id", "confidence": 1.0,
                                 "dir_url": "u", "synced_at": None,
                                 "map_count": 86, "ir_count": 2,
@@ -418,7 +419,60 @@ def test_build_catalog_counts_and_legacy_spread_index():
     assert f["incident_latest_upload_ts"] == "2026-08-20T21:48:00Z"
 
     legacy = cat.build_catalog(fires, version=2,
-                               spread_index={"a": "2026-08-19T00:00:00Z"})
+                               spread_index={"x": "2026-08-19T00:00:00Z"})
     g = legacy["fires"][0]
     assert g["spread_latest_run"] == "2026-08-19T00:00:00Z"
     assert g["spread_run_count"] is None
+
+
+# ---------------------------------------------------------------------------
+# identity by fire ID: two active fires named Chipmunk swap the bare slug
+# whenever the other one updates (live 2026-10-08)
+# ---------------------------------------------------------------------------
+
+FL = {"fire_slug": "chipmunk", "post_title": "Chipmunk", "state": "FL",
+      "cornea_id": "{961F6E41-0000-4000-8000-00000000000F}",
+      "poly_last_updated": "2026-09-01T00:00:00Z"}
+WI = {"fire_slug": "chipmunk-wi", "post_title": "Chipmunk", "state": "WI",
+      "cornea_id": "{0C1D2E3F-0000-4000-8000-0000000000A1}",
+      "poly_last_updated": None}
+
+
+def test_slug_swap_keeps_each_fires_forecast_and_count():
+    spread_index = {fire_key(FL["cornea_id"]): {"latest": "2026-08-24T15:41:00Z", "count": 2}}
+    counts = {fire_key(FL["cornea_id"]): 3, fire_key(WI["cornea_id"]): 0}
+    swapped = [{**WI, "fire_slug": "chipmunk"}, {**FL, "fire_slug": "chipmunk-fl"}]
+    doc = catalogs.build_catalog(swapped, version=1, spread_index=spread_index,
+                                 perimeter_counts=counts)
+    by_state = {f["state"]: f for f in doc["fires"]}
+    assert by_state["FL"]["spread_latest_run"] == "2026-08-24T15:41:00Z"
+    assert by_state["FL"]["perimeter_count"] == 3
+    assert not by_state["WI"]["has_spread_forecast"]
+    assert by_state["WI"]["perimeter_count"] == 0
+
+
+def test_perim_counts_migrate_only_when_the_perimeter_matches():
+    from responder_worker.cli import migrate_perim_counts
+    state = {"perim_counts": {
+        # FL held "chipmunk" when cached; WI holds it now, with no perimeter
+        "chipmunk": {"count": 3, "poly": "2026-09-01T00:00:00Z"},
+        "chipmunk-fl": {"count": 9, "poly": "2026-08-01T00:00:00Z"},  # stale
+    }}
+    fires = [{**WI, "fire_slug": "chipmunk"}, {**FL, "fire_slug": "chipmunk-fl"}]
+    by_id = migrate_perim_counts(state, fires)
+    assert "perim_counts" not in state
+    assert by_id == {}  # WI's poly differs; FL's slug-keyed record is stale
+    fires = [{**FL, "fire_slug": "chipmunk"}]
+    state = {"perim_counts": {"chipmunk": {"count": 3, "poly": "2026-09-01T00:00:00Z"}}}
+    assert migrate_perim_counts(state, fires) == {
+        fire_key(FL["cornea_id"]): {"count": 3, "poly": "2026-09-01T00:00:00Z"}}
+
+
+def test_fire_keys_agree_across_id_spellings():
+    from responder_worker import hotspots, routing_plan
+    braced = "{51528708-A49A-42FA-8855-C13CE748EC08}"
+    for spelling in (braced, braced.strip("{}"), braced.lower(), braced.strip("{}").lower()):
+        assert fire_key(spelling) == "51528708-a49a-42fa-8855-c13ce748ec08"
+        assert hotspots.archive_id({"cornea_id": spelling}) == fire_key(spelling)
+        assert routing_plan.fire_key(spelling) == fire_key(spelling)
+    assert fire_key("") is None and fire_key(None) is None

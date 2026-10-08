@@ -50,7 +50,10 @@ export function usePlayback(): void {
     selectedFire?.unique_slug ??
     null;
 
-  const spreadRun = useMemo(() => latestRun(pyrecastRuns, fireSlug), [pyrecastRuns, fireSlug]);
+  const spreadRun = useMemo(
+    () => latestRun(pyrecastRuns, corneaId, fireSlug),
+    [pyrecastRuns, corneaId, fireSlug],
+  );
   const weatherRun = useMemo(() => latestWeatherRun(weatherRuns), [weatherRuns]);
 
   const spreadActive = view.mode === 'fire' && spread.visible && !!spreadRun;

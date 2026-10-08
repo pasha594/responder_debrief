@@ -31,7 +31,7 @@ export function useManifestForFire(corneaId: string | null) {
     () => catalog?.fires.find((f) => f.cornea_id === corneaId) ?? null,
     [catalog, corneaId],
   );
-  return useIncidentManifest(catalogFire?.incident_manifest ?? null);
+  return useIncidentManifest(catalogFire?.incident_manifest ?? null, corneaId);
 }
 
 function Thumb({ previewUrl }: { previewUrl: string | null | undefined }) {

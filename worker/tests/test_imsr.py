@@ -68,3 +68,19 @@ class TestMatch:
         assert out["big-grass"]["crews"] == 17
         assert "NW Team 10" in (out["big-grass"]["narrative"] or "")
         assert out["sinlahekin"]["personnel"] == 1731
+
+
+def test_same_name_same_state_goes_by_unit_or_is_skipped():
+    """Two active ME fires both named Cat-Con: the row goes to the one whose
+    unique_fire_id unit matches; with no way to tell, nobody gets it."""
+    row = {"name": "Cat-Con", "unit": "ME-MES", "acres": 3}
+    a = {"fire_slug": "cat-con", "post_title": "Cat-Con", "state": "ME",
+         "cornea_id": "{A}", "unique_fire_id": "2026-MEMFS-000111"}
+    b = {"fire_slug": "cat-con-me", "post_title": "Cat-Con", "state": "ME",
+         "cornea_id": "{B}", "unique_fire_id": "2026-MEMES-000222"}
+    out = match_imsr([row], {}, [a, b])
+    assert list(out) == ["cat-con-me"] and out["cat-con-me"]["cornea_id"] == "{B}"
+    assert match_imsr([row], {}, [{**a, "unique_fire_id": None},
+                                  {**b, "unique_fire_id": None}]) == {}
+    # a single candidate is matched as before, and carries its id
+    assert match_imsr([row], {}, [a])["cat-con"]["cornea_id"] == "{A}"

@@ -45,7 +45,7 @@ export function useTimelineDomain(): void {
 
     const created = fire ? Date.parse(fire.created_on) : NaN;
     const start = Number.isFinite(created) ? created : now - NATIONAL_PAST_MS;
-    const run = latestRun(pyrecastRuns, fireSlug);
+    const run = latestRun(pyrecastRuns, corneaId, fireSlug);
     const cov = spreadCoverage(run);
     const spreadEnd = cov ? cov[1] : NaN;
     const end = Math.max(
@@ -54,7 +54,7 @@ export function useTimelineDomain(): void {
       now + MIN_FUTURE_MS,
     );
     return [start, end];
-  }, [view.mode, fire, fireSlug, pyrecastRuns, weatherRuns, now]);
+  }, [view.mode, fire, corneaId, fireSlug, pyrecastRuns, weatherRuns, now]);
 
   useEffect(() => {
     setDomain(domain);
