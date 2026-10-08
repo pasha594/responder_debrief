@@ -7,6 +7,7 @@ their names, overrides are fire GUIDs (anything else leaves the folder
 alone), a name never re-binds a folder bound by ID, and two folders
 claiming one incident key never share a record."""
 
+import hashlib
 import json
 
 import pytest
@@ -404,6 +405,44 @@ def test_unchanged_folder_with_new_child_is_refreshed(tmp_path, monkeypatch):
     m = world.storage.get_json(health.KEY)["mirror"]
     assert (m["refreshed"], m["unchanged_skips"], m["rebuilt_fires"]) == (0, 2, [])
     assert not [k for k in world.storage.written if k.startswith("catalogs/incidents/")]
+
+
+def test_live_build_lists_sheets_as_step_e(tmp_path, monkeypatch):
+    # A folder whose dated dirs sit at its root and whose daily sheet is
+    # also published loose (products/current), the same bytes. After the
+    # migration its dated dir has no child stamp, so the first sync lists
+    # it again (in FTP order: the daily dir, then the loose file) and
+    # rebuilds the fire. The manifest must keep the copy and order the
+    # migration's build (state order) kept.
+    def sheet(rel: str, data: bytes) -> dict:
+        etag = '"' + hashlib.sha256(data).hexdigest()[:12] + '"'  # FakeFTP's: a 304
+        return {"etag": etag, "lm": "Thu, 08 Oct 2026 05:00:00 GMT", "size": len(data),
+                "sha16": sha16(data), "rev": 1, "kind": "product", "url": f"{GH_DIR}{rel}",
+                "first_seen": "2026-10-08T05:10:00Z"}
+
+    x, y = b"%PDF ops", b"%PDF transport"
+    rec = _gh_on_grasshopper()
+    rec["files"] = {"products/current/Ops_1008.pdf": sheet("Ops_1008.pdf", x),
+                    "products/20261008/Transport_1008.pdf": sheet("20261008/Transport_1008.pdf", y),
+                    "products/20261008/Ops_1008.pdf": sheet("20261008/Ops_1008.pdf", x)}
+    world = _bucket(tmp_path, monkeypatch, rec)
+    step_e = world.storage.get_json(fire_manifests.manifest_key(GH_FK))["maps"]
+    assert [e["pdf_url"].rpartition("/products/")[2] for e in step_e] == [
+        "current/Ops_1008.pdf", "20261008/Transport_1008.pdf"]
+
+    ftp = FakeFTP()
+    ftp.dir(ORE, "2026_Grasshopper", "2026-10-02 19:15")       # root unchanged
+    day = ftp.dir(GH_DIR, "20261008", "2026-10-08 05:00")
+    ftp.file(day, "Ops_1008.pdf", x)
+    ftp.file(day, "Transport_1008.pdf", y)
+    ftp.file(GH_DIR, "Ops_1008.pdf", x)
+    ftp.wire(monkeypatch)
+    assert cli.main(["sync-incidents"]) == 0
+
+    m = world.storage.get_json(health.KEY)["mirror"]
+    assert (m["refreshed"], m["files_downloaded"]) == (1, 0)
+    assert GH_FK in m["rebuilt_fires"]
+    assert world.storage.get_json(fire_manifests.manifest_key(GH_FK))["maps"] == step_e
 
 
 def test_override_must_be_a_fire_guid(tmp_path, monkeypatch):

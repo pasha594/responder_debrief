@@ -137,6 +137,28 @@ def test_304_and_replay_use_stamped_location(tmp_path, monkeypatch):
     assert state["incidents"][GH_KEY]["files"][QR]["prefix"] == "austin"
 
 
+def test_same_rel_twice_in_a_run_keeps_each_downloads_bytes(tmp_path, monkeypatch):
+    # Products/20261008/ and Products/Daily Products/20261008/ both land in
+    # products/20261008: one rel, downloaded twice with different bytes.
+    # Each download keeps its own local copy, and state (and the raw key)
+    # end with the last.
+    first, last = b"%PDF from Products/20261008", b"%PDF from Daily Products/20261008"
+    ftp = _ftp({OPS: first})
+    daily = ftp.dir(f"{GH_DIR}Products/", "Daily Products", "2026-10-08 05:00")
+    ftp.file(ftp.dir(daily, "20261008", "2026-10-08 05:00"), OPS, last)
+    ftp.wire(monkeypatch)
+    state = {"incidents": {GH_KEY: _gh_record()}}
+    m, storage = _mirror(tmp_path, state)
+    res = _sync(m, state)
+
+    assert [f.sha16 for f in res.files] == [sha16(first), sha16(last)]
+    for f in res.files:
+        assert f.local_path.read_bytes() == (first if f.sha16 == sha16(first) else last)
+    assert state["incidents"][GH_KEY]["files"][f"{DAY}/{OPS}"]["sha16"] == sha16(last)
+    assert storage.get_file(f"raw/incidents/grasshopper/{DAY}/{OPS}", tmp_path / "x")
+    assert (tmp_path / "x").read_bytes() == last
+
+
 def test_temp_path_keyed_by_incident(tmp_path, monkeypatch):
     # Two folders publishing the same file path with different bytes: each
     # download keeps its own temp copy (keyed by incident, not by slug or
@@ -154,8 +176,8 @@ def test_temp_path_keyed_by_incident(tmp_path, monkeypatch):
 
     [fa], [fb] = a.files, b.files
     assert fa.local_path == (tmp_path / "work" / hashlib.sha1(GH_KEY.encode()).hexdigest()[:12]
-                             / DAY / OPS)
-    assert fb.local_path.parent.parent.parent.name == hashlib.sha1(
+                             / fa.sha16 / DAY / OPS)
+    assert fb.local_path.parent.parent.parent.parent.name == hashlib.sha1(
         other_key.encode()).hexdigest()[:12]
     assert fa.local_path.read_bytes() == b"%PDF grasshopper's"
     assert fb.local_path.read_bytes() == b"%PDF the complex's"

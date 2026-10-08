@@ -299,7 +299,7 @@ def test_replay_only_never_converts_renders_or_downloads(tmp_path, monkeypatch):
     state = _state(pacific_nw__2026__2026_Grasshopper=gh)
     # this run downloaded the KMZ: even its local copy is not converted
     local = tmp_path / "x.kmz"
-    local.write_bytes(b"kmz")
+    local.write_bytes(kmz.encode())  # the bytes its sha16 names (_file)
     meta = gh["files"][kmz]
     res = MirrorResult(files=[MirroredFile(
         kind="ir", filename=kmz.rpartition("/")[2], key=f"raw/incidents/grasshopper/{kmz}",
@@ -426,11 +426,16 @@ def test_ir_preview_url_uses_sha_prefix(tmp_path, monkeypatch):
     assert url(pdf) is None
     assert storage.uploaded == []
 
-    # a sha first seen in this run's download: rendered under the record's
-    # prefix, and the sha stamped there (marked done for the tiler)
+    # a local copy that does not hash to the sha is never rendered under it
     del state["tiled"][sha]
     local = tmp_path / "ir.pdf"
-    local.write_bytes(b"%PDF")
+    local.write_bytes(b"%PDF other bytes")
+    assert url(dataclasses.replace(pdf, local_path=local, changed=True)) is None
+    assert state["tiled"] == {} and storage.uploaded == []
+
+    # a sha first seen in this run's download: rendered under the record's
+    # prefix, and the sha stamped there (marked done for the tiler)
+    local.write_bytes(rel.encode())  # the bytes its sha16 names (_file)
 
     def render(pdf_path, out_png, **kw):
         Path(out_png).write_bytes(b"png")

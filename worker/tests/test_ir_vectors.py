@@ -355,6 +355,7 @@ def test_ir_flights_keeps_an_older_result_when_it_cannot_reconvert(monkeypatch):
 
 def test_ir_preview_url_reuses_renders_and_never_queues_tiling(tmp_path, monkeypatch):
     import dataclasses
+    import hashlib
     from types import SimpleNamespace
 
     from responder_worker import config, fire_manifests as fm, geopdf
@@ -385,8 +386,10 @@ def test_ir_preview_url_reuses_renders_and_never_queues_tiling(tmp_path, monkeyp
     # a PDF downloaded this run: rendered now, recorded as done for the tiler
     local = tmp_path / "ir.pdf"
     local.write_bytes(b"%PDF")
+    sha = hashlib.sha256(b"%PDF").hexdigest()[:16]  # the downloaded bytes'
+    key = f"previews/incidents/sisi/{sha}.png"
     state = {"tiled": {}}
-    assert url(dataclasses.replace(pdf, local_path=local), state) == f"/{key}"
+    assert url(dataclasses.replace(pdf, local_path=local, sha16=sha), state) == f"/{key}"
     assert rendered == [local] and put[key] == b"png"
     assert state["tiled"][sha]["tiler_version"] == config.TILER_VERSION
     assert state["tiled"][sha]["geo"]["preview"] is True

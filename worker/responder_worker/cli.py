@@ -33,6 +33,7 @@ from .asset_keys import (
     raw_key,
     raw_key_candidates,
     record_prefix,
+    sha16_file,
     tile_meta_key,
     tile_root,
     tiles_prefix,
@@ -637,12 +638,14 @@ def _cached_match_predates_fire(rec: dict, fires_by_fk: dict) -> str | None:
 def _process_mirrored_assets(args, storage, state, mirrors) -> None:
     """GeoPDF tiles and previews for the sheets this run downloaded.
 
-    Only files with a local copy: their bytes were hashed by the mirror as
-    they landed, so they are tiled under their sha with no further check.
-    Each sha is done once, under the prefix its tiles already have (or the
-    first owning record's); files that show on no fire and files with no
-    sha are skipped. Replayed sheets are the backlogs' job, and manifests
-    are built afterwards from state (fire_manifests).
+    Only files with a local copy that holds the bytes state names for the
+    file: a rel downloaded twice in one run keeps only its last bytes, and
+    an earlier copy is superseded. The local bytes are hashed once more
+    before anything is written under their sha. Each sha is done once,
+    under the prefix its tiles already have (or the first owning
+    record's); files that show on no fire and files with no sha are
+    skipped. Replayed sheets are the backlogs' job, and manifests are built
+    afterwards from state (fire_manifests).
     """
     tile_budget = args.tile_budget
     # Re-arm the wall-clock for the tiling phase (and the IR conversions of
@@ -670,12 +673,19 @@ def _process_mirrored_assets(args, storage, state, mirrors) -> None:
                     or not mf.filename.lower().endswith(".pdf")):
                 continue
             meta = files.get(f"{mf.rel_dir}/{mf.filename}")
-            if meta is None or incident_ids.file_owner(rec, meta) is None:
-                continue
+            if (meta is None or meta.get("sha16") != sha
+                    or incident_ids.file_owner(rec, meta) is None):
+                continue  # superseded later this run, or shown on no fire
             seen_sha.add(sha)
             tiled_state = state["tiled"].get(sha)
             if tiled_state and tiled_state.get("tiler_version") == config.TILER_VERSION:
                 continue  # already tiled
+            if sha16_file(mf.local_path) != sha:
+                # tiles and previews are keyed by this sha: never from
+                # other bytes (another copy of the sheet may still verify)
+                log(f"[geopdf] {mf.filename}: local copy does not hash to {sha} — skipped")
+                seen_sha.discard(sha)
+                continue
             parsed = cat.parse_product_filename(mf.filename)
             if tile_budget <= 0 or frames.deadline_passed():
                 # Out of tiling budget, but detection is cheap: record

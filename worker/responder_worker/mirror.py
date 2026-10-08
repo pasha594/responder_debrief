@@ -365,7 +365,10 @@ class IncidentMirror:
         # New bytes always go under the record's own prefix: a file stamped
         # elsewhere (files[rel].prefix) moves home and loses the stamp.
         key = new_raw_key(inc_state, rel)
-        local = self._tmp / rel
+        # Keyed by the bytes too: one rel can be downloaded twice in a run
+        # (Products/20261008/ and Products/Daily Products/20261008/ are both
+        # products/20261008), and each MirroredFile keeps its own bytes.
+        local = self._tmp / sha / rel
         local.parent.mkdir(parents=True, exist_ok=True)
         local.write_bytes(body)
         self.storage.put_file(key, local)

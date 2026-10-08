@@ -37,6 +37,7 @@ from .asset_keys import (
     raw_key,
     record_prefix,
     replay_file,
+    sha16_file,
     stamp_ir,
     tiles_prefix,
 )
@@ -155,17 +156,21 @@ def _source(rec: dict, fk: str) -> dict:
 
 
 def _record_files(rec: dict, bundle: dict | None) -> list[tuple]:
-    """(rel, meta, MirroredFile) for every file of the record: this run's
-    downloads (with local copies) first, then the rest replayed from state."""
+    """(rel, meta, MirroredFile) for every file of the record in state
+    order, the order the migration's build uses, so a live build lists
+    sheets and keeps the copy of a sheet published twice the same way. A
+    file mirrored this run is its last MirroredFile for that rel (state
+    holds a rel's last download), with any local copy, unless its bytes are
+    not the ones state names; every other file replays from state."""
     files = rec.get("files") or {}
-    out, seen = [], set()
-    for mf in (bundle["result"].files if bundle else ()):
-        rel = f"{mf.rel_dir}/{mf.filename}"
-        if rel in files and rel not in seen:
-            out.append((rel, files[rel], mf))
-            seen.add(rel)
-    out += [(rel, meta, replay_file(rec, rel, meta))
-            for rel, meta in files.items() if rel not in seen]
+    mirrored = ({f"{mf.rel_dir}/{mf.filename}": mf for mf in bundle["result"].files}
+                if bundle else {})
+    out = []
+    for rel, meta in files.items():
+        mf = mirrored.get(rel)
+        if mf is None or mf.sha16 != meta.get("sha16"):
+            mf = replay_file(rec, rel, meta)
+        out.append((rel, meta, mf))
     return out
 
 
@@ -388,8 +393,8 @@ def _convert(storage, rec: dict, src: tuple, kmz: tuple | None, key: str, flight
 
             def local(f: tuple) -> Path:
                 rel, mf = f
-                if mf.local_path is not None:
-                    return mf.local_path  # hashed by the mirror as it landed
+                if mf.local_path is not None and sha16_file(mf.local_path) == mf.sha16:
+                    return mf.local_path  # downloaded this run
                 dest = tdp / Path(mf.filename).name
                 if fetch_verified(storage, [raw_key(rec, rel)], mf.sha16, dest, log,
                                   mismatches=stats.setdefault("raw_sha_mismatch", [])) is None:
@@ -437,6 +442,8 @@ def ir_preview_url(storage, state: dict, rec: dict, pdf, *, replay_only: bool,
         return f"/{key}"
     if replay_only or t is not None or pdf.local_path is None or not geopdf.gdal_available():
         return None  # tried before, not here yet, or no GDAL this run
+    if sha16_file(pdf.local_path) != sha:
+        return None  # never a preview under this sha from other bytes
     ok = False
     try:
         with tempfile.TemporaryDirectory(prefix="irprev_") as td:
