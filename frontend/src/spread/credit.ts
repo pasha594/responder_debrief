@@ -18,3 +18,9 @@ export const PYRECAST_CITATION =
   'Fire forecast data: PyreCast Wildfire Forecasting Platform (pyrecast.org)';
 
 export const PYRECAST_URL = 'https://pyrecast.org';
+
+/** Pyregence, the consortium behind PyreCast: cited by the Fire Forecast heading. */
+export const PYREGENCE_CITATION =
+  'Fire forecasts from Pyregence Open-Source Fire Science (pyregence.org)';
+
+export const PYREGENCE_URL = 'https://www.pyregence.org';

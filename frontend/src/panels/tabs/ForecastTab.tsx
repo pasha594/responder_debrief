@@ -32,6 +32,8 @@ import {
   toaWithinStops,
 } from '../../spread/toaBands';
 import { staleBadgeLabel } from '../../spread/runMeta';
+import { PYREGENCE_CITATION, PYREGENCE_URL } from '../../spread/credit';
+import pyregenceLogo from '../../assets/pyregence-logo.svg';
 import { trafficAvailable } from '../../map/layers/trafficLayer';
 import { incidentsAvailable } from '../../api/tomtomTraffic';
 import { useStore, type ToaMode } from '../../state/store';
@@ -391,7 +393,19 @@ export function ForecastTab({ corneaId }: { corneaId: string }) {
         <WeatherSection />
       </section>
       <section className="rd-section">
-        <h3 className="rd-section-title">Fire Forecast</h3>
+        <h3 className="rd-section-title">
+          Fire Forecast
+          <a
+            className="rd-title-logo"
+            href={PYREGENCE_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            title={PYREGENCE_CITATION}
+            aria-label={`${PYREGENCE_CITATION} — opens pyregence.org`}
+          >
+            <img src={pyregenceLogo} alt="Pyregence" />
+          </a>
+        </h3>
         <FireForecastSection corneaId={corneaId} />
       </section>
     </div>

@@ -30,6 +30,11 @@ export const RELEASE_NOTES: ReleaseDay[] = [
     date: '2026-10-08',
     notes: [
       {
+        title: 'Fire forecast source',
+        summary:
+          'The Fire Forecast heading in the Forecast tab now carries the Pyregence logo. Tap it to visit pyregence.org, the fire science group behind the spread forecasts.',
+      },
+      {
         title: 'Relief map style',
         summary:
           'A new dark map style in Settings: shaded terrain on a slate ground, with no roads or place names, so ridges, drainages and slopes stand out. Pick Map (not Topo or Satellite) on the map to see it.',
