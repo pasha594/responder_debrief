@@ -8,10 +8,14 @@
  * hourly point-weather strip, and incident-map tile pyramids + previews for
  * sheets dated within the last 2 days. Weather raster frames (CONUS-wide),
  * PDFs, and the basemap are deliberately out of v1.
+ *
+ * Also the pure half of pack storage: which stored pack each fire serves
+ * from, the url -> stored-file serving index, and where a download goes.
  */
 import { DATA_BASE_URL, FIRE_API } from '../app/config';
 import { firesIndexUrl } from '../api/fireApi';
 import { dataUrl } from '../api/catalogs';
+import { fireKey } from '../api/fireKey';
 import { spreadToaUrl, toaPercentiles, weatherImageUrl, windUvUrl } from '../api/wmsUrls';
 import { routingIndexUrl } from '../routing/bundleIndex';
 import type { RoutingBundle, RoutingIndexEntry } from '../routing/types';
@@ -111,8 +115,7 @@ export function sheetTileUrls(tiles: {
 
 export interface PackInputs {
   corneaId: string;
-  slug: string;
-  /** Root-relative manifest path from the catalog entry, e.g. /catalogs/incidents/x.json */
+  /** Root-relative manifest path from the catalog entry, e.g. /catalogs/incidents/id/{fk}.json */
   manifestPath: string | null;
   /** Root-relative hotspot index path from the catalog entry. */
   hotspotIndexPath: string | null;
@@ -283,4 +286,152 @@ export function formatBytes(bytes: number): string {
   if (bytes >= 1_000_000_000) return `${(bytes / 1_000_000_000).toFixed(1)} GB`;
   if (bytes >= 1_000_000) return `${Math.round(bytes / 1_000_000)} MB`;
   return `${Math.max(1, Math.round(bytes / 1000))} KB`;
+}
+
+// ---------- stored packs ----------
+
+/** A pack's pack.json. */
+export interface PackMeta {
+  version: 1;
+  /** The OPFS folder the pack lives in (packs/{slug}/), whatever its name:
+   * older app versions read packs/{slug}, so it must equal the folder. */
+  slug: string;
+  corneaId: string;
+  name: string;
+  state: string;
+  downloadedAt: string; // ISO
+  bytes: number;
+  fileCount: number;
+  /** url -> stored file name (content-type derived from extension). */
+  files: Record<string, string>;
+  /** Prefix fallbacks for URLs that vary with time (open-meteo). */
+  prefixes: { prefix: string; file: string }[];
+  /** URLs of immutable files (served pack-first). Absent on older packs. */
+  immutable?: string[];
+  /** The routing bundle this pack holds, when the fire had one. */
+  routing?: { descriptor: string; bundleId: string; bytes: number };
+}
+
+/** Where a packed URL is stored. */
+export interface PackHit {
+  folder: string;
+  file: string;
+}
+
+function savedAt(m: PackMeta): number {
+  const t = Date.parse(m.downloadedAt);
+  return Number.isNaN(t) ? -Infinity : t;
+}
+
+/** Winner first: the newest download (an unparseable date is oldest), then
+ * the folder named for the fire's key, then the alphabetically first folder. */
+function packOrder(a: PackMeta, b: PackMeta): number {
+  const ta = savedAt(a);
+  const tb = savedAt(b);
+  if (ta !== tb) return tb > ta ? 1 : -1;
+  const ida = a.slug === fireKey(a.corneaId);
+  const idb = b.slug === fireKey(b.corneaId);
+  if (ida !== idb) return ida ? -1 : 1;
+  return a.slug < b.slug ? -1 : a.slug > b.slug ? 1 : 0;
+}
+
+/**
+ * The pack each fire serves from, keyed by fire key, from every stored
+ * pack by folder. One fire can hold two folders (its old fire_slug folder
+ * and its fire-key folder, or a copy an older app version wrote): the
+ * newest download wins and `claimants` lists them all, winner first.
+ */
+export function choosePacks(found: Iterable<readonly [folder: string, meta: PackMeta]>): {
+  packs: Record<string, PackMeta>;
+  claimants: Record<string, string[]>;
+} {
+  const byFire = new Map<string, PackMeta[]>();
+  for (const [folder, meta] of found) {
+    const fk = fireKey(meta.corneaId);
+    if (!fk) continue;
+    const list = byFire.get(fk) ?? [];
+    list.push({ ...meta, slug: folder });
+    byFire.set(fk, list);
+  }
+  const packs: Record<string, PackMeta> = {};
+  const claimants: Record<string, string[]> = {};
+  for (const [fk, list] of byFire) {
+    list.sort(packOrder);
+    packs[fk] = list[0];
+    claimants[fk] = list.map((m) => m.slug);
+  }
+  return { packs, claimants };
+}
+
+/** A fire's pack, found by any spelling of its cornea_id. */
+export function packForFire(
+  packs: Record<string, PackMeta>,
+  corneaId: string | null | undefined,
+): PackMeta | null {
+  const fk = fireKey(corneaId);
+  return fk && Object.hasOwn(packs, fk) ? packs[fk] : null;
+}
+
+/** The folder a download of this fire writes: the folder its pack already
+ * lives in (an update keeps a legacy fire_slug folder), else its fire key. */
+export function downloadFolder(
+  packs: Record<string, PackMeta>,
+  corneaId: string | null | undefined,
+): string | null {
+  return packForFire(packs, corneaId)?.slug ?? fireKey(corneaId);
+}
+
+export interface ServingIndex {
+  urls: Map<string, PackHit>;
+  /** Newest pack first, so the first prefix match is the newest copy. */
+  prefixes: (PackHit & { prefix: string })[];
+  /** URLs whose served copy is immutable (served pack-first even online). */
+  immutable: Set<string>;
+}
+
+/**
+ * The url -> stored-file index over every complete pack, shadowed copies
+ * included: a URL two packs hold (catalog.json, or a manifest URL a name
+ * passed between fires) serves the newest pack's copy, and removing one
+ * pack keeps every URL another pack still holds.
+ */
+export function servingIndex(metas: Iterable<PackMeta>): ServingIndex {
+  const newestFirst = [...metas].sort(packOrder);
+  const urls = new Map<string, PackHit>();
+  for (const m of [...newestFirst].reverse()) {
+    for (const [url, file] of Object.entries(m.files)) urls.set(url, { folder: m.slug, file });
+  }
+  const immutable = new Set<string>();
+  for (const m of newestFirst) {
+    for (const url of m.immutable ?? []) {
+      if (urls.get(url)?.folder === m.slug) immutable.add(url);
+    }
+  }
+  const prefixes = newestFirst.flatMap((m) =>
+    m.prefixes.map((p) => ({ prefix: p.prefix, folder: m.slug, file: p.file })),
+  );
+  return { urls, prefixes, immutable };
+}
+
+/**
+ * A request for a fire's ID manifest (/catalogs/incidents/id/{fk}.json)
+ * served from that fire's own pack when the pack predates ID manifests and
+ * holds its manifest under the old name-filed URL. Read from the fire's own
+ * pack, never through the shared index: a newer pack of a same-name fire
+ * can hold that same legacy URL with the other fire's manifest.
+ */
+export function aliasHit(
+  url: string,
+  packs: Record<string, PackMeta>,
+  dataBase: string,
+): PackHit | null {
+  const head = `${dataBase}/catalogs/incidents/id/`;
+  if (!url.startsWith(head)) return null;
+  const m = /^([0-9a-z-]{1,64})\.json$/.exec(url.slice(head.length));
+  const pack = m && Object.hasOwn(packs, m[1]) ? packs[m[1]] : null;
+  if (!pack) return null;
+  const manifests = Object.keys(pack.files).filter((k) =>
+    k.startsWith(`${dataBase}/catalogs/incidents/`),
+  );
+  return manifests.length === 1 ? { folder: pack.slug, file: pack.files[manifests[0]] } : null;
 }

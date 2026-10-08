@@ -15,9 +15,28 @@
  * field wifi would otherwise cost the 8 s patience per file. Any request
  * carrying a Range header goes straight to the network: a pack serves whole
  * files, which a range reader (pmtiles) rejects.
+ *
+ * Packs are keyed by fire key (fireKey(cornea_id)), never by fire_slug: two
+ * active fires can share a name, and the slug moves between them. A new
+ * download goes to packs/{fk}/; a pack saved under its fire_slug keeps
+ * updating that folder. PackMeta.slug is always the folder. When one fire
+ * has two folders the newest download wins; both stay on disk until Remove,
+ * and nothing in OPFS is moved or deleted at load. A pack saved before the
+ * catalog moved to ID manifests (/catalogs/incidents/id/{fk}.json) holds its
+ * manifest under the old name-filed URL; aliasHit serves the ID URL from
+ * that file in the fire's own pack.
+ *
+ * Older app versions (slug-keyed packs) against packs saved here:
+ * - they read packs/{meta.slug}, which is the folder, so they serve them;
+ * - their Offline card shows "Download" for a pack in an ID folder, and
+ *   downloading there writes a duplicate into packs/{fire_slug}, which this
+ *   version resolves by newest download;
+ * - an older tab on WI Chipmunk's page can still overwrite FL Chipmunk's
+ *   packs/chipmunk, as before.
  */
 import { DATA_BASE_URL, FIRE_API } from '../app/config';
 import { dataUrl } from '../api/catalogs';
+import { fireKey, sameFire } from '../api/fireKey';
 import { useStore } from '../state/store';
 import { track } from '../app/analytics';
 import { routingIndexUrl } from '../routing/bundleIndex';
@@ -38,9 +57,17 @@ import type {
 import { isRenderableWeatherRun, latestRun, manifestBelongsTo } from '../api/queries';
 import { setSpreadArchiveBase } from '../api/wmsUrls';
 import {
+  aliasHit,
   buildPackPlan,
+  choosePacks,
+  downloadFolder,
   formatBytes,
+  packForFire,
+  servingIndex,
+  type PackHit,
   type PackInputs,
+  type PackMeta,
+  type ServingIndex,
 } from './packModel';
 import {
   deletePack as opfsDeletePack,
@@ -48,60 +75,35 @@ import {
   fileNameForUrl,
   getPackFile,
   listPackFiles,
-  listPackSlugs,
+  listPackFolders,
   opfsSupported,
   packFileSize,
   readPackFile,
   writePackFile,
 } from './opfs';
 
-export interface PackMeta {
-  version: 1;
-  slug: string;
-  corneaId: string;
-  name: string;
-  state: string;
-  downloadedAt: string; // ISO
-  bytes: number;
-  fileCount: number;
-  /** url -> stored file name (content-type derived from extension). */
-  files: Record<string, string>;
-  /** Prefix fallbacks for URLs that vary with time (open-meteo). */
-  prefixes: { prefix: string; file: string }[];
-  /** URLs of immutable files (served pack-first). Absent on older packs. */
-  immutable?: string[];
-  /** The routing bundle this pack holds, when the fire had one. */
-  routing?: { descriptor: string; bundleId: string; bytes: number };
-}
-
-export { formatBytes, opfsSupported };
+export type { PackMeta };
+export { formatBytes, opfsSupported, packForFire };
 
 // ---------- in-memory serving index ----------
 
-const urlIndex = new Map<string, { slug: string; file: string }>();
-const prefixIndex: { prefix: string; slug: string; file: string }[] = [];
-const immutableUrls = new Set<string>();
+/** Every complete pack on this device by OPFS folder, a fire's second
+ * folder included. */
+const onDisk = new Map<string, PackMeta>();
+/** The pack each fire serves from, by fire key (what the store holds). */
+let winners: Record<string, PackMeta> = {};
+let urlIndex: ServingIndex['urls'] = new Map();
+let prefixIndex: ServingIndex['prefixes'] = [];
+let immutableUrls: ServingIndex['immutable'] = new Set();
 
-function indexPack(meta: PackMeta): void {
-  for (const [url, file] of Object.entries(meta.files)) {
-    urlIndex.set(url, { slug: meta.slug, file });
-  }
-  for (const url of meta.immutable ?? []) immutableUrls.add(url);
-  for (const p of meta.prefixes) {
-    prefixIndex.push({ prefix: p.prefix, slug: meta.slug, file: p.file });
-  }
-}
-
-function unindexPack(slug: string): void {
-  for (const [url, v] of urlIndex) {
-    if (v.slug === slug) {
-      urlIndex.delete(url);
-      immutableUrls.delete(url);
-    }
-  }
-  for (let i = prefixIndex.length - 1; i >= 0; i--) {
-    if (prefixIndex[i].slug === slug) prefixIndex.splice(i, 1);
-  }
+/** Recompute the winners and the serving index from onDisk, and hand the
+ * winners to the store. */
+function rebuildIndex(): void {
+  winners = choosePacks(onDisk).packs;
+  ({ urls: urlIndex, prefixes: prefixIndex, immutable: immutableUrls } = servingIndex(
+    onDisk.values(),
+  ));
+  useStore.getState().actions.setOfflinePacks(winners);
 }
 
 function contentTypeFor(name: string): string {
@@ -114,8 +116,8 @@ function contentTypeFor(name: string): string {
   return 'application/json';
 }
 
-async function serveFromPack(hit: { slug: string; file: string }): Promise<Response | null> {
-  const buf = await readPackFile(hit.slug, hit.file);
+async function serveFromPack(hit: PackHit): Promise<Response | null> {
+  const buf = await readPackFile(hit.folder, hit.file);
   if (!buf) return null;
   return new Response(buf, {
     status: 200,
@@ -123,10 +125,13 @@ async function serveFromPack(hit: { slug: string; file: string }): Promise<Respo
   });
 }
 
-/** Look up a URL in the downloaded packs (exact, then time-varying prefixes). */
+/** Look up a URL in the downloaded packs (exact, then a fire's ID manifest
+ * from its own older pack, then time-varying prefixes). */
 async function packResponse(url: string): Promise<Response | null> {
   const exact = urlIndex.get(url);
   if (exact) return serveFromPack(exact);
+  const alias = aliasHit(url, winners, DATA_BASE_URL);
+  if (alias) return serveFromPack(alias);
   for (const p of prefixIndex) {
     if (url.startsWith(p.prefix)) return serveFromPack(p);
   }
@@ -159,7 +164,10 @@ export function installOfflineFetch(): void {
     if (method !== 'GET' || urlIndex.size + prefixIndex.length === 0 || hasRange(input, init)) {
       return rawFetch(input, init);
     }
-    const packed = urlIndex.has(url) || prefixIndex.some((p) => url.startsWith(p.prefix));
+    const packed =
+      urlIndex.has(url)
+      || prefixIndex.some((p) => url.startsWith(p.prefix))
+      || aliasHit(url, winners, DATA_BASE_URL) !== null;
     if (packed && (!navigator.onLine || immutableUrls.has(url))) {
       const hit = await packResponse(url);
       if (hit) return hit;
@@ -203,17 +211,13 @@ function hasRange(input: RequestInfo | URL, init?: RequestInit): boolean {
 export async function packedFile(url: string): Promise<File | null> {
   await packsReady;
   const hit = urlIndex.get(url);
-  return hit ? getPackFile(hit.slug, hit.file) : null;
+  return hit ? getPackFile(hit.folder, hit.file) : null;
 }
 
 /** The routing descriptor URL a fire's pack holds (for a retry when the
  * live index points at a newer bundle the pack doesn't have). */
 export function packedRoutingDescriptor(corneaId: string): string | null {
-  const packs = useStore.getState().offline.packs;
-  for (const m of Object.values(packs)) {
-    if (m.corneaId === corneaId && m.routing) return m.routing.descriptor;
-  }
-  return null;
+  return packForFire(winners, corneaId)?.routing?.descriptor ?? null;
 }
 
 // ---------- boot ----------
@@ -235,23 +239,26 @@ export async function initOfflinePacks(): Promise<void> {
   }
 }
 
+/** Read every folder's pack.json. Read-only: a fire's second folder stays
+ * on disk (newest download serves), and nothing is renamed. */
 async function hydratePacks(): Promise<void> {
   if (!opfsSupported()) return;
-  const packs: Record<string, PackMeta> = {};
-  for (const slug of await listPackSlugs()) {
-    const raw = await readPackFile(slug, 'pack.json');
+  onDisk.clear();
+  for (const folder of await listPackFolders()) {
+    const raw = await readPackFile(folder, 'pack.json');
     if (!raw) continue; // interrupted download — files stay for resume
     try {
       const meta = JSON.parse(new TextDecoder().decode(raw)) as PackMeta;
-      if (meta.version === 1) {
-        packs[meta.slug] = meta;
-        indexPack(meta);
+      // files/prefixes checked here so a malformed pack.json is skipped
+      // rather than breaking the index for every pack.
+      if (meta.version === 1 && fireKey(meta.corneaId) && meta.files && meta.prefixes) {
+        onDisk.set(folder, { ...meta, slug: folder });
       }
     } catch {
       /* corrupt meta — ignore; re-download rewrites it */
     }
   }
-  useStore.getState().actions.setOfflinePacks(packs);
+  rebuildIndex();
 }
 
 // ---------- download ----------
@@ -259,19 +266,19 @@ async function hydratePacks(): Promise<void> {
 const CONCURRENCY = 6;
 
 async function fetchInto(
-  slug: string,
+  folder: string,
   url: string,
   opts: { immutable: boolean; signal?: AbortSignal },
 ): Promise<{ file: string; bytes: number }> {
   const file = await fileNameForUrl(url);
   if (opts.immutable) {
-    const stored = await packFileSize(slug, file);
+    const stored = await packFileSize(folder, file);
     if (stored !== null) return { file, bytes: stored }; // resume/update skips it
   }
   const res = await rawFetch(url, { signal: opts.signal });
   if (!res.ok) throw new Error(`${res.status} for ${url.slice(0, 120)}`);
   const buf = await res.arrayBuffer();
-  await writePackFile(slug, file, buf);
+  await writePackFile(folder, file, buf);
   return { file, bytes: buf.byteLength };
 }
 
@@ -310,6 +317,8 @@ export async function downloadPack(corneaId: string): Promise<PackMeta> {
 }
 
 async function runDownload(corneaId: string, abort: AbortSignal): Promise<PackMeta> {
+  // The target folder depends on the packs already on disk.
+  await packsReady;
   const actions = useStore.getState().actions;
   const progress = (done: number, total: number, bytes: number) =>
     actions.setOfflineProgress({ corneaId, done, total, bytes });
@@ -328,16 +337,18 @@ async function runDownload(corneaId: string, abort: AbortSignal): Promise<PackMe
     // the RAW fetch: an update must never be satisfied by its own stale pack.
     const catalog = await rawJson<MasterCatalog>(
       `${DATA_BASE_URL}/catalogs/catalog.json`, abort);
-    const entry = catalog.fires.find((f) => f.cornea_id === corneaId);
-    if (!entry?.fire_slug) throw new PackDownloadError('Fire not in the catalog yet');
-    const slug = entry.fire_slug;
+    const entry = catalog.fires.find((f) => sameFire(f.cornea_id, corneaId));
+    if (!entry) throw new PackDownloadError('Fire not in the catalog yet');
+    const fk = fireKey(corneaId)!;
+    const legacySlug = entry.fire_slug ?? null;
+    const folder = downloadFolder(winners, corneaId)!;
 
     const perimeterIndex = await rawJson<PerimeterIndexItem[]>(
       `${FIRE_API}/fires/${encodeURIComponent(corneaId)}/perimeters`, abort);
     const fetched = entry.incident_manifest
       ? await rawJson<IncidentManifest>(dataUrl(entry.incident_manifest), abort)
       : null;
-    // Manifests are still filed by name; never pack another fire's maps.
+    // A cached older catalog can still name another fire's legacy manifest.
     const manifest = fetched && manifestBelongsTo(fetched, corneaId) ? fetched : null;
     const hotspotIndex = entry.hotspot_archive
       ? await rawJson<HotspotArchiveIndex>(dataUrl(entry.hotspot_archive), abort)
@@ -346,7 +357,7 @@ async function runDownload(corneaId: string, abort: AbortSignal): Promise<PackMe
       `${DATA_BASE_URL}/catalogs/pyrecast_runs.json`, abort);
     // Same base the app uses at runtime, so planned ToA URLs match exactly.
     setSpreadArchiveBase(runsCatalog.archive_base);
-    const spreadRun = latestRun(runsCatalog, corneaId, slug);
+    const spreadRun = latestRun(runsCatalog, corneaId, legacySlug);
     const weatherCatalog = await rawJson<WeatherRunsCatalog>(
       `${DATA_BASE_URL}/catalogs/weather_runs.json`, abort);
     const hrrr = weatherCatalog.models?.hrrr;
@@ -369,7 +380,6 @@ async function runDownload(corneaId: string, abort: AbortSignal): Promise<PackMe
 
     const inputs: PackInputs = {
       corneaId,
-      slug,
       manifestPath: manifest ? entry.incident_manifest : null,
       hotspotIndexPath: entry.hotspot_archive ?? null,
       manifest,
@@ -403,7 +413,7 @@ async function runDownload(corneaId: string, abort: AbortSignal): Promise<PackMe
         forecast_days: '16',
       });
       const url = `https://api.open-meteo.com/v1/forecast?${params}`;
-      const { file } = await fetchInto(slug, url, { immutable: false, signal: abort });
+      const { file } = await fetchInto(folder, url, { immutable: false, signal: abort });
       weatherPrefix = { prefix, file };
     }
 
@@ -421,7 +431,7 @@ async function runDownload(corneaId: string, abort: AbortSignal): Promise<PackMe
         const item = queue.shift();
         if (!item || abort.aborted || firstError) return;
         try {
-          const r = await fetchInto(slug, item.url, {
+          const r = await fetchInto(folder, item.url, {
             immutable: item.immutable,
             signal: abort,
           });
@@ -447,9 +457,9 @@ async function runDownload(corneaId: string, abort: AbortSignal): Promise<PackMe
 
     const meta: PackMeta = {
       version: 1,
-      slug,
+      slug: folder,
       corneaId,
-      name: entry.name ?? slug,
+      name: entry.name ?? legacySlug ?? fk,
       state: entry.state ?? '',
       downloadedAt: new Date().toISOString(),
       bytes,
@@ -462,27 +472,26 @@ async function runDownload(corneaId: string, abort: AbortSignal): Promise<PackMe
             bytes: plan.routingBytes }
         : undefined,
     };
-    await writePackFile(slug, 'pack.json', JSON.stringify(meta));
+    await writePackFile(folder, 'pack.json', JSON.stringify(meta));
 
     // Prune files the new plan no longer references (rotated-out sheets,
     // superseded chunks) so updates don't grow the pack forever.
     const referenced = new Set(Object.values(files));
     referenced.add('pack.json');
     if (weatherPrefix) referenced.add(weatherPrefix.file);
-    for (const name of await listPackFiles(slug)) {
-      if (!referenced.has(name)) await deletePackFile(slug, name);
+    for (const name of await listPackFiles(folder)) {
+      if (!referenced.has(name)) await deletePackFile(folder, name);
     }
 
-    unindexPack(slug);
-    indexPack(meta);
-    const packs = { ...useStore.getState().offline.packs, [slug]: meta };
-    actions.setOfflinePacks(packs);
+    onDisk.set(folder, meta);
+    rebuildIndex();
     track('offline_pack_downloaded', {
       files: total,
       mb: Math.round(bytes / 1_000_000),
       sheets: plan.mapSheetCount,
       routing: !!routingBundle,
       routing_mb: Math.round(plan.routingBytes / 1_000_000),
+      legacy_folder: folder !== fk,
     });
     void navigator.storage?.persist?.().catch(() => undefined);
     return meta;
@@ -492,10 +501,13 @@ async function runDownload(corneaId: string, abort: AbortSignal): Promise<PackMe
   }
 }
 
-export async function removePack(slug: string): Promise<void> {
-  await opfsDeletePack(slug);
-  unindexPack(slug);
-  const packs = { ...useStore.getState().offline.packs };
-  delete packs[slug];
-  useStore.getState().actions.setOfflinePacks(packs);
+/** Delete every folder holding a pack of this fire, its second copy too. */
+export async function removePack(corneaId: string): Promise<void> {
+  const fk = fireKey(corneaId);
+  for (const [folder, meta] of [...onDisk]) {
+    if (fk === null || fireKey(meta.corneaId) !== fk) continue;
+    await opfsDeletePack(folder);
+    onDisk.delete(folder);
+  }
+  rebuildIndex();
 }

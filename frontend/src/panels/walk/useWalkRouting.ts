@@ -11,6 +11,7 @@ import { fetchPerimeterByPath } from '../../api/fireApi';
 import { usePerimeterIndex } from '../../api/queries';
 import type { PerimeterFeature, PerimeterIndexItem } from '../../api/types';
 import type { WalkContext } from '../../api/walkRouting';
+import { packForFire } from '../../offline/packModel';
 import { useFireBundle } from '../../routing/hooks';
 import { useStore } from '../../state/store';
 
@@ -24,7 +25,7 @@ export function useWalkContext() {
   const corneaId = useStore((s) => (s.view.mode === 'fire' ? s.view.corneaId : null));
   const online = useStore((s) => s.offline.online);
   const avoid = useStore((s) => s.directions.avoidPerimeter);
-  const packed = useStore((s) => Object.values(s.offline.packs).some((p) => p.corneaId === corneaId));
+  const packed = useStore((s) => !!packForFire(s.offline.packs, corneaId));
   const qc = useQueryClient();
   const index = usePerimeterIndex(corneaId);
   const latest = latestPerimeter(index.data);

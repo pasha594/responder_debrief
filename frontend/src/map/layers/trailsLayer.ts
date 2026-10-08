@@ -21,7 +21,7 @@
 import { Popup, type Map as MlMap, type MapLayerMouseEvent } from 'maplibre-gl';
 import { dataUrl } from '../../api/catalogs';
 import { trackOncePer } from '../../app/analytics';
-import { packedFile, packsReady } from '../../offline/packs';
+import { packForFire, packedFile, packsReady } from '../../offline/packs';
 import { getTrailsPointer } from '../../routing/bundleIndex';
 import { loadFireBundle } from '../../routing/hooks';
 import { routeClickClaims, useStore } from '../../state/store';
@@ -192,7 +192,7 @@ function reconcile(map: MlMap): void {
   if (dead(map)) return;
   const s = useStore.getState();
   const corneaId = s.view.mode === 'fire' ? s.view.corneaId : null;
-  const pack = Object.values(s.offline.packs).find((m) => m.corneaId === corneaId);
+  const pack = packForFire(s.offline.packs, corneaId);
   const key = `${s.offline.online}|${corneaId}|${pack?.downloadedAt ?? ''}|${nationalFailed}`;
   if (key !== inputsKey) {
     inputsKey = key;

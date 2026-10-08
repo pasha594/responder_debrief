@@ -1,6 +1,8 @@
 /**
  * Thin OPFS (Origin Private File System) wrapper for offline fire packs.
- * Layout: packs/{slug}/{sha256(url).16}[.ext] plus packs/{slug}/pack.json.
+ * Layout: packs/{folder}/{sha256(url).16}[.ext] plus packs/{folder}/pack.json.
+ * A folder is named for the fire's key; packs saved before that keep their
+ * fire_slug folder (see packs.ts).
  *
  * OPFS rather than the Cache API by design: the same storage core carries
  * into a future Capacitor wrap (where service-worker caching is unavailable),
@@ -27,13 +29,13 @@ async function packsRoot(create: boolean): Promise<FileSystemDirectoryHandle | n
 }
 
 async function packDir(
-  slug: string,
+  folder: string,
   create: boolean,
 ): Promise<FileSystemDirectoryHandle | null> {
   const root = await packsRoot(create);
   if (!root) return null;
   try {
-    return await root.getDirectoryHandle(slug, { create });
+    return await root.getDirectoryHandle(folder, { create });
   } catch {
     return null;
   }
@@ -48,11 +50,11 @@ export async function fileNameForUrl(url: string): Promise<string> {
 }
 
 export async function writePackFile(
-  slug: string,
+  folder: string,
   name: string,
   data: ArrayBuffer | string,
 ): Promise<void> {
-  const dir = await packDir(slug, true);
+  const dir = await packDir(folder, true);
   if (!dir) throw new Error('opfs unavailable');
   const handle = await dir.getFileHandle(name, { create: true });
   const w = await handle.createWritable();
@@ -60,8 +62,8 @@ export async function writePackFile(
   await w.close();
 }
 
-export async function readPackFile(slug: string, name: string): Promise<ArrayBuffer | null> {
-  const dir = await packDir(slug, false);
+export async function readPackFile(folder: string, name: string): Promise<ArrayBuffer | null> {
+  const dir = await packDir(folder, false);
   if (!dir) return null;
   try {
     const handle = await dir.getFileHandle(name);
@@ -75,8 +77,8 @@ export async function readPackFile(slug: string, name: string): Promise<ArrayBuf
 /** The stored File itself (for slice()-based readers such as the offline
  * PMTiles source), or null. A File is a snapshot: re-fetch after the pack
  * is rewritten. */
-export async function getPackFile(slug: string, name: string): Promise<File | null> {
-  const dir = await packDir(slug, false);
+export async function getPackFile(folder: string, name: string): Promise<File | null> {
+  const dir = await packDir(folder, false);
   if (!dir) return null;
   try {
     return await (await dir.getFileHandle(name)).getFile();
@@ -86,8 +88,8 @@ export async function getPackFile(slug: string, name: string): Promise<File | nu
 }
 
 /** Stored size in bytes, or null when the file does not exist. */
-export async function packFileSize(slug: string, name: string): Promise<number | null> {
-  const dir = await packDir(slug, false);
+export async function packFileSize(folder: string, name: string): Promise<number | null> {
+  const dir = await packDir(folder, false);
   if (!dir) return null;
   try {
     const f = await (await dir.getFileHandle(name)).getFile();
@@ -98,8 +100,8 @@ export async function packFileSize(slug: string, name: string): Promise<number |
 }
 
 /** File names currently stored in a pack's directory. */
-export async function listPackFiles(slug: string): Promise<string[]> {
-  const dir = await packDir(slug, false);
+export async function listPackFiles(folder: string): Promise<string[]> {
+  const dir = await packDir(folder, false);
   if (!dir) return [];
   const out: string[] = [];
   for await (const [name, handle] of dir as unknown as AsyncIterable<
@@ -110,8 +112,8 @@ export async function listPackFiles(slug: string): Promise<string[]> {
   return out;
 }
 
-export async function deletePackFile(slug: string, name: string): Promise<void> {
-  const dir = await packDir(slug, false);
+export async function deletePackFile(folder: string, name: string): Promise<void> {
+  const dir = await packDir(folder, false);
   if (!dir) return;
   try {
     await dir.removeEntry(name);
@@ -120,18 +122,18 @@ export async function deletePackFile(slug: string, name: string): Promise<void> 
   }
 }
 
-export async function deletePack(slug: string): Promise<void> {
+export async function deletePack(folder: string): Promise<void> {
   const root = await packsRoot(false);
   if (!root) return;
   try {
-    await root.removeEntry(slug, { recursive: true });
+    await root.removeEntry(folder, { recursive: true });
   } catch {
     /* already gone */
   }
 }
 
-/** Slugs that have a directory under packs/ (pack.json may or may not exist). */
-export async function listPackSlugs(): Promise<string[]> {
+/** Folders under packs/ (pack.json may or may not exist). */
+export async function listPackFolders(): Promise<string[]> {
   const root = await packsRoot(false);
   if (!root) return [];
   const out: string[] = [];

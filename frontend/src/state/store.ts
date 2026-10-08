@@ -154,7 +154,8 @@ export interface AppState {
   };
 
   offline: {
-    /** Downloaded packs by fire slug (hydrated from OPFS at boot). */
+    /** Downloaded packs by fire key, fireKey(cornea_id) (hydrated from OPFS
+     * at boot); look one up with packForFire. meta.slug is the OPFS folder. */
     packs: Record<string, import('../offline/packs').PackMeta>;
     /** Active download, or null. */
     progress: { corneaId: string; done: number; total: number; bytes: number } | null;

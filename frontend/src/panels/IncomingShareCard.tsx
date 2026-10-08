@@ -14,7 +14,7 @@ import {
 } from '../api/queries';
 import type { WeatherProduct } from '../api/types';
 import { savedMarkCount } from '../map/layers/drawLayer';
-import { sheetTileUrls } from '../offline/packModel';
+import { packForFire, sheetTileUrls } from '../offline/packModel';
 import { applyShare } from '../share/applyShare';
 import type { ShareState } from '../share/shareCodec';
 import { useStore } from '../state/store';
@@ -81,7 +81,7 @@ function IncomingShareDialog({ share }: { share: ShareState }) {
     fires?.fires.find((f) => f.cornea_id === cid)?.post_title
     ?? catalogFire?.name
     ?? (share.fire.name || 'Unknown fire');
-  const pack = Object.values(packs).find((p) => p.corneaId === cid) ?? null;
+  const pack = packForFire(packs, cid);
   const open = view.mode === 'fire' && view.corneaId === cid;
   const yours = open ? liveMarks : savedMarkCount(cid);
   const L = share.layers;

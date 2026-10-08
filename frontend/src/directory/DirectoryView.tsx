@@ -11,6 +11,7 @@ import { OfflineFiresStrip } from './OfflineFiresStrip';
 import { pickBestCity, searchPlaces } from '../api/geocode';
 import { track } from '../app/analytics';
 import { useFires, useMasterCatalog } from '../api/queries';
+import { packForFire } from '../offline/packModel';
 import { useStore } from '../state/store';
 import { useIsDesktop } from '../utils/useMediaQuery';
 import { DirectoryRow } from './DirectoryRow';
@@ -91,8 +92,7 @@ export function DirectoryView() {
   // actually open — show just those.
   const rows = useMemo(() => {
     if (online) return allRows;
-    const downloaded = new Set(Object.keys(packs));
-    return allRows.filter((r) => r.fireSlug && downloaded.has(r.fireSlug));
+    return allRows.filter((r) => !!packForFire(packs, r.corneaId));
   }, [allRows, online, packs]);
   const summary = useMemo(() => summarizeRows(rows), [rows]);
 

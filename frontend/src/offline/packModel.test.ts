@@ -1,5 +1,16 @@
 import { describe, expect, it } from 'vitest';
-import { buildPackPlan, formatBytes, sheetTileUrls, type PackInputs } from './packModel';
+import {
+  aliasHit,
+  buildPackPlan,
+  choosePacks,
+  downloadFolder,
+  formatBytes,
+  packForFire,
+  servingIndex,
+  sheetTileUrls,
+  type PackInputs,
+  type PackMeta,
+} from './packModel';
 import type { IncidentManifest, PyrecastRun } from '../api/types';
 
 const NOW = Date.parse('2026-08-31T12:00:00Z');
@@ -7,7 +18,6 @@ const NOW = Date.parse('2026-08-31T12:00:00Z');
 function inputs(over: Partial<PackInputs> = {}): PackInputs {
   return {
     corneaId: 'c-1',
-    slug: 'test-fire',
     manifestPath: '/catalogs/incidents/test-fire.json',
     hotspotIndexPath: '/hotspots/test-fire/index.json',
     manifest: null,
@@ -253,5 +263,205 @@ describe('buildPackPlan — offline Walk bundle', () => {
     const plan = buildPackPlan(inputs({ routingEntry: entry, routingBundle: null }));
     expect(plan.files.some((f) => f.url.includes('routing'))).toBe(false);
     expect(plan.routingBytes).toBe(0);
+  });
+});
+
+// ---------- stored packs ----------
+
+const DATA = 'https://data.test';
+// Two active Chipmunk fires: FL's pack predates ID folders and sits in the
+// fire_slug folder the slug later moved off of.
+const FL = '{8E2C1A4B-0F3D-4C6E-9A7B-1D2E3F4A5B6C}';
+const FL_FK = '8e2c1a4b-0f3d-4c6e-9a7b-1d2e3f4a5b6c';
+const WI = '{1B2C3D4E-5F60-4718-8A9B-0C1D2E3F4A5B}';
+const WI_FK = '1b2c3d4e-5f60-4718-8a9b-0c1d2e3f4a5b';
+
+function meta(over: Partial<PackMeta> = {}): PackMeta {
+  return {
+    version: 1,
+    slug: 'x',
+    corneaId: FL,
+    name: 'Chipmunk',
+    state: 'FL',
+    downloadedAt: '2026-10-06T12:00:00Z',
+    bytes: 1,
+    fileCount: 1,
+    files: {},
+    prefixes: [],
+    ...over,
+  };
+}
+
+describe('choosePacks', () => {
+  it('merges braced and bare ids of one fire', () => {
+    const { packs, claimants } = choosePacks([
+      ['chipmunk', meta({ corneaId: FL })],
+      [FL_FK, meta({ corneaId: FL_FK.toUpperCase(), downloadedAt: '2026-10-07T12:00:00Z' })],
+    ]);
+    expect(Object.keys(packs)).toEqual([FL_FK]);
+    expect(packs[FL_FK].slug).toBe(FL_FK);
+    expect(claimants[FL_FK]).toEqual([FL_FK, 'chipmunk']);
+  });
+
+  it('the newest downloadedAt wins; a tie goes to the fire-key folder', () => {
+    const newer = choosePacks([
+      ['chipmunk', meta({ downloadedAt: '2026-10-08T00:00:00Z' })],
+      [FL_FK, meta({ downloadedAt: '2026-10-07T00:00:00Z' })],
+    ]);
+    expect(newer.packs[FL_FK].slug).toBe('chipmunk');
+    const tie = choosePacks([
+      ['a-copy', meta()],
+      ['chipmunk', meta()],
+      [FL_FK, meta()],
+    ]);
+    expect(tie.packs[FL_FK].slug).toBe(FL_FK);
+    expect(tie.claimants[FL_FK]).toEqual([FL_FK, 'a-copy', 'chipmunk']);
+  });
+
+  it('an unparseable downloadedAt counts as oldest', () => {
+    const { packs } = choosePacks([
+      ['chipmunk', meta({ downloadedAt: 'garbage' })],
+      ['zz-copy', meta({ downloadedAt: '2020-01-01T00:00:00Z' })],
+    ]);
+    expect(packs[FL_FK].slug).toBe('zz-copy');
+  });
+
+  it('sets slug to the real folder and skips packs without a corneaId', () => {
+    const { packs, claimants } = choosePacks([
+      ['chipmunk', meta({ slug: 'chipmunk-fl' })],
+      ['orphan', meta({ corneaId: '' })],
+      ['braces-only', meta({ corneaId: '{}' })],
+    ]);
+    expect(packs[FL_FK].slug).toBe('chipmunk');
+    expect(Object.keys(packs)).toEqual([FL_FK]);
+    expect(Object.values(claimants).flat()).not.toContain('orphan');
+  });
+
+  it('lists every claimant, per fire', () => {
+    const { packs, claimants } = choosePacks([
+      ['chipmunk', meta({ corneaId: WI, downloadedAt: '2026-10-08T00:00:00Z' })],
+      ['chipmunk-old', meta({ corneaId: FL })],
+      [FL_FK, meta({ corneaId: FL, downloadedAt: '2026-10-05T00:00:00Z' })],
+    ]);
+    expect(claimants).toEqual({ [WI_FK]: ['chipmunk'], [FL_FK]: ['chipmunk-old', FL_FK] });
+    expect(packs[WI_FK].corneaId).toBe(WI);
+    expect(packs[FL_FK].slug).toBe('chipmunk-old');
+  });
+});
+
+describe('downloadFolder', () => {
+  it("reuses the legacy winner's folder", () => {
+    const { packs } = choosePacks([['chipmunk', meta()]]);
+    expect(downloadFolder(packs, FL)).toBe('chipmunk');
+  });
+
+  it('gives a new fire its fire key', () => {
+    expect(downloadFolder({}, FL)).toBe(FL_FK);
+  });
+
+  it("Chipmunk: packs/chipmunk holds FL, so a WI download goes to WI's own folder", () => {
+    const { packs } = choosePacks([['chipmunk', meta({ corneaId: FL })]]);
+    expect(downloadFolder(packs, WI)).toBe(WI_FK);
+    expect(downloadFolder(packs, FL)).toBe('chipmunk');
+  });
+
+  it('a null id returns null', () => {
+    expect(downloadFolder({}, null)).toBeNull();
+    expect(downloadFolder({}, '{}')).toBeNull();
+  });
+});
+
+describe('packForFire', () => {
+  it('finds the pack by any id spelling', () => {
+    const { packs } = choosePacks([['chipmunk', meta({ corneaId: FL })]]);
+    expect(packForFire(packs, FL)?.slug).toBe('chipmunk');
+    expect(packForFire(packs, FL_FK)?.slug).toBe('chipmunk');
+    expect(packForFire(packs, FL_FK.toUpperCase())?.slug).toBe('chipmunk');
+    expect(packForFire(packs, WI)).toBeNull();
+    expect(packForFire(packs, null)).toBeNull();
+  });
+
+  it('never returns an inherited property', () => {
+    expect(packForFire({}, 'constructor')).toBeNull();
+  });
+});
+
+describe('servingIndex', () => {
+  const catalog = `${DATA}/catalogs/catalog.json`;
+
+  it('a URL two packs hold (the shared catalog.json) serves the newest pack', () => {
+    const idx = servingIndex([
+      meta({ slug: WI_FK, corneaId: WI, downloadedAt: '2026-10-08T00:00:00Z',
+        files: { [catalog]: 'wi-cat.json' } }),
+      meta({ slug: 'chipmunk', files: { [catalog]: 'fl-cat.json' } }),
+    ]);
+    expect(idx.urls.get(catalog)).toEqual({ folder: WI_FK, file: 'wi-cat.json' });
+  });
+
+  it('removing one pack keeps URLs another pack still holds', () => {
+    const fl = meta({ slug: 'chipmunk', files: { [catalog]: 'fl-cat.json' }, immutable: [catalog] });
+    const wi = meta({ slug: WI_FK, corneaId: WI, downloadedAt: '2026-10-08T00:00:00Z',
+      files: { [catalog]: 'wi-cat.json' } });
+    expect(servingIndex([fl, wi]).immutable.has(catalog)).toBe(false); // WI's copy serves
+    const idx = servingIndex([fl]);
+    expect(idx.urls.get(catalog)).toEqual({ folder: 'chipmunk', file: 'fl-cat.json' });
+    expect(idx.immutable.has(catalog)).toBe(true);
+  });
+
+  it('serves shadowed copies too, with prefixes newest first', () => {
+    const oldCopy = meta({ slug: 'chipmunk', files: { [`${DATA}/only-old.png`]: 'o.png' },
+      prefixes: [{ prefix: 'https://api.open-meteo.com/v1/forecast?latitude=1', file: 'old.json' }] });
+    const newCopy = meta({ slug: FL_FK, downloadedAt: '2026-10-07T00:00:00Z',
+      prefixes: [{ prefix: 'https://api.open-meteo.com/v1/forecast?latitude=1', file: 'new.json' }] });
+    const idx = servingIndex([oldCopy, newCopy]);
+    expect(idx.urls.get(`${DATA}/only-old.png`)).toEqual({ folder: 'chipmunk', file: 'o.png' });
+    expect(idx.prefixes.map((p) => p.file)).toEqual(['new.json', 'old.json']);
+  });
+});
+
+describe('aliasHit', () => {
+  const legacy = `${DATA}/catalogs/incidents/chipmunk.json`;
+  const idUrl = (fk: string) => `${DATA}/catalogs/incidents/id/${fk}.json`;
+
+  it("maps the ID manifest to the fire's own legacy manifest file", () => {
+    const { packs } = choosePacks([
+      ['chipmunk', meta({ files: { [legacy]: 'fl-man.json', [`${DATA}/catalogs/catalog.json`]: 'c.json' } })],
+    ]);
+    expect(aliasHit(idUrl(FL_FK), packs, DATA)).toEqual({ folder: 'chipmunk', file: 'fl-man.json' });
+  });
+
+  it("serves FL's file even when WI's newer pack holds the same legacy URL", () => {
+    const { packs } = choosePacks([
+      ['chipmunk', meta({ corneaId: FL, files: { [legacy]: 'fl-man.json' } })],
+      [WI_FK, meta({ corneaId: WI, downloadedAt: '2026-10-08T00:00:00Z',
+        files: { [legacy]: 'wi-man.json' } })],
+    ]);
+    // The shared index hands the legacy URL to WI's newer pack...
+    expect(servingIndex(Object.values(packs)).urls.get(legacy)?.file).toBe('wi-man.json');
+    // ...but FL's ID manifest reads FL's own copy.
+    expect(aliasHit(idUrl(FL_FK), packs, DATA)).toEqual({ folder: 'chipmunk', file: 'fl-man.json' });
+    expect(aliasHit(idUrl(WI_FK), packs, DATA)).toEqual({ folder: WI_FK, file: 'wi-man.json' });
+  });
+
+  it('returns null when there is no pack or no single manifest', () => {
+    const { packs } = choosePacks([
+      ['chipmunk', meta({ files: { [`${DATA}/catalogs/catalog.json`]: 'c.json' } })],
+      [WI_FK, meta({ corneaId: WI, files: {
+        [legacy]: 'a.json', [`${DATA}/catalogs/incidents/chipmunk-wi.json`]: 'b.json' } })],
+    ]);
+    expect(aliasHit(idUrl(FL_FK), packs, DATA)).toBeNull(); // pack holds no manifest
+    expect(aliasHit(idUrl(WI_FK), packs, DATA)).toBeNull(); // two candidates: ambiguous
+    expect(aliasHit(idUrl('0000'), packs, DATA)).toBeNull(); // no pack
+    expect(aliasHit(idUrl('constructor'), packs, DATA)).toBeNull();
+    expect(aliasHit(legacy, packs, DATA)).toBeNull(); // not an ID path
+    expect(aliasHit(`${idUrl(FL_FK)}?x=1`, packs, DATA)).toBeNull();
+  });
+
+  it('never crosses fire keys', () => {
+    const { packs } = choosePacks([
+      ['chipmunk', meta({ corneaId: FL, files: { [legacy]: 'fl-man.json' } })],
+    ]);
+    expect(aliasHit(idUrl(WI_FK), packs, DATA)).toBeNull();
+    expect(aliasHit(idUrl(FL_FK.toUpperCase()), packs, DATA)).toBeNull();
   });
 });

@@ -9,16 +9,16 @@ import { formatBytes } from '../offline/packs';
 export function OfflineFiresStrip() {
   const packs = useStore((s) => s.offline.packs);
   const selectFire = useStore((s) => s.actions.selectFire);
-  const entries = Object.values(packs).sort((a, b) =>
+  const entries = Object.entries(packs).sort(([, a], [, b]) =>
     b.downloadedAt.localeCompare(a.downloadedAt),
   );
   if (entries.length === 0) return null;
   return (
     <div className="rd-offline-strip">
       <span className="rd-offline-strip-label">Available offline:</span>
-      {entries.map((p) => (
+      {entries.map(([fk, p]) => (
         <button
-          key={p.slug}
+          key={fk}
           type="button"
           className="rd-chip rd-offline-chip"
           title={`${formatBytes(p.bytes)} · open the offline copy`}

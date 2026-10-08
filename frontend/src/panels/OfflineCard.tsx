@@ -5,12 +5,14 @@
  */
 import { useState } from 'react';
 import { useMasterCatalog } from '../api/queries';
+import { sameFire } from '../api/fireKey';
 import { useStore } from '../state/store';
 import {
   cancelActiveDownload,
   downloadPack,
   formatBytes,
   opfsSupported,
+  packForFire,
   removePack,
 } from '../offline/packs';
 import { formatRelative } from '../utils/format';
@@ -26,8 +28,8 @@ export function OfflineCard({ corneaId }: { corneaId: string }) {
   const bundle = useFireBundle(corneaId);
 
   if (!opfsSupported()) return null;
-  const slug = catalog?.fires.find((f) => f.cornea_id === corneaId)?.fire_slug ?? null;
-  const pack = slug ? packs[slug] : null;
+  const inCatalog = catalog?.fires.some((f) => sameFire(f.cornea_id, corneaId)) ?? false;
+  const pack = packForFire(packs, corneaId);
   const mine = progress?.corneaId === corneaId ? progress : null;
   const otherDownloadActive = progress != null && progress.corneaId !== corneaId;
 
@@ -44,8 +46,7 @@ export function OfflineCard({ corneaId }: { corneaId: string }) {
   };
 
   const remove = () => {
-    if (!slug) return;
-    void removePack(slug).then(() => showToast('Offline copy removed'));
+    void removePack(corneaId).then(() => showToast('Offline copy removed'));
   };
 
   if (mine) {
@@ -107,9 +108,9 @@ export function OfflineCard({ corneaId }: { corneaId: string }) {
         <button
           type="button"
           className="rd-offline-btn"
-          disabled={!online || busy || otherDownloadActive || !slug}
+          disabled={!online || busy || otherDownloadActive || !inCatalog}
           title={
-            !slug
+            !inCatalog
               ? 'Waiting for the catalog'
               : otherDownloadActive
                 ? 'Another download is running'

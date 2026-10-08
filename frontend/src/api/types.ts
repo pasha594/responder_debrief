@@ -131,7 +131,7 @@ export interface CatalogFire {
   /** YYYY-MM-DD of the newest FTP upload. */
   incident_latest_upload?: string | null;
   ftp_match: {
-    method: 'unit_id' | 'name_exact' | 'name_fuzzy';
+    method: 'unit_id' | 'name_exact' | 'name_fuzzy' | 'override';
     confidence: number;
     dir_url: string;
   } | null;
@@ -385,6 +385,15 @@ export interface IncidentManifest {
   schema_version: number;
   fire_slug: string;
   cornea_id: string;
+  /** fireKey(cornea_id); on manifests filed by fire ID only. */
+  fire_key?: string;
+  /** Every FTP folder feeding the manifest; on manifests filed by fire ID only. */
+  sources?: {
+    dir_url: string;
+    region: string;
+    unit_incident: string | null;
+    method: 'unit_id' | 'name_exact' | 'name_fuzzy' | 'override';
+  }[];
   generated_at: string;
   source_dir: string;
   region: string;

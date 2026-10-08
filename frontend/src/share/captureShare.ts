@@ -2,6 +2,7 @@
 import type { Map as MlMap } from 'maplibre-gl';
 import type { WeatherProduct } from '../api/types';
 import { drawLineById, drawSymbolById } from '../map/layers/drawSymbols';
+import { packForFire } from '../offline/packModel';
 import { MY_LOCATION_LABEL } from '../panels/SearchDirectionsControl';
 import { useStore, type AppState, type DrawFeature } from '../state/store';
 import type { SharePoint, ShareRouting, ShareState } from './shareCodec';
@@ -63,7 +64,7 @@ export function captureShare(
   const s = useStore.getState();
   if (s.view.mode !== 'fire') return null;
   const corneaId = s.view.corneaId;
-  const pack = Object.values(s.offline.packs).find((p) => p.corneaId === corneaId);
+  const pack = packForFire(s.offline.packs, corneaId);
   const savedAt = pack ? Date.parse(pack.downloadedAt) : NaN;
   const center = map.getCenter().wrap();
   const weather: Partial<Record<WeatherProduct, number>> = {};

@@ -219,8 +219,9 @@ export const useWeatherRuns = () =>
 
 /**
  * A fire's incident-map manifest, or undefined when the file belongs to a
- * different fire: manifests are still filed by name, and a stale record
- * once put Idaho's Sawmill maps on three later Sawmill fires.
+ * different fire: older manifests are filed by name (a cached catalog can
+ * still name one), and a stale record once put Idaho's Sawmill maps on
+ * three later Sawmill fires.
  */
 export const useIncidentManifest = (manifestPath: string | null, corneaId: string | null) =>
   useQuery({
