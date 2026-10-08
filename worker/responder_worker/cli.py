@@ -1367,6 +1367,24 @@ def cmd_sync_incidents(args) -> int:
 
             decision = incident_ids.rebind_decision(prev, m)
             prev_method = ((prev or {}).get("match") or {}).get("method")
+            if (prev is not None and decision in ("bind", "rebind", "fresh")
+                    and m.method in incident_ids.NAME_METHODS):
+                # match_candidate dates the folder by any file it listed (a
+                # .txt, a sheet too big to mirror), the cached check by the
+                # folder's own map uploads. A name match moving a record
+                # onto a fire faces the cached check too: a folder detached
+                # by it above would otherwise be bound again, its unproven
+                # files hidden, and detached again next run.
+                why = incident_ids.record_predates_fire(prev, m.method, fire.get("created_on"))
+                if why:
+                    log(f"[incidents] {key}: {m.method} match to {m.fire_slug} "
+                        f"({m.cornea_id}) REJECTED — {why}")
+                    if fire_key((prev.get("match_rejected") or {}).get("cornea_id")) != fk:
+                        prev["match_rejected"] = {"cornea_id": m.cornea_id, "method": m.method,
+                                                  "reason": why, "at": now}
+                    if key not in date_rejected:
+                        date_rejected.append(key)
+                    continue
             if decision == "refuse":
                 # A name never outranks an ID: keep the binding and mirror
                 # under it.

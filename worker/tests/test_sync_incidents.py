@@ -13,8 +13,8 @@ import pytest
 
 from ftp_stub import BASE, FakeFTP
 from incident_world import (
-    AU_FK, AU_KEY, AUSTIN, CHERRY_KEY, GH_FK, GH_KEY, GRASSHOPPER, LATEST, MT_FK, MT_KEY, NOW,
-    TWIN_MT, World, freeze_clock, sha16, wire_cli,
+    AU_FK, AU_KEY, AUSTIN, CHERRY_ID, CHERRY_KEY, GH_FK, GH_KEY, GRASSHOPPER, LATEST, MT_FK,
+    MT_KEY, NOW, TWIN_MT, World, freeze_clock, sha16, wire_cli,
 )
 from responder_worker import cli, fire_manifests, geopdf, health
 from responder_worker.fires import fire_key
@@ -487,6 +487,46 @@ def test_name_rematch_to_its_own_fire_keeps_the_id_binding(tmp_path, monkeypatch
     rows = {r["fire_slug"]: r for r in world.storage.get_json("catalogs/catalog.json")["fires"]}
     assert (rows["grasshopper"]["ftp_match"]["method"],
             rows["grasshopper"]["ftp_match"]["confidence"]) == ("unit_id", 1.0)
+
+
+def test_folder_detached_by_date_is_not_bound_again_by_name(tmp_path, monkeypatch):
+    # 2026_Cherry, name-bound to a Cherry created weeks after the folder's
+    # last sheet. A newer notes file passes the matcher's date check (any
+    # file it lists), so the folder name-matches Cherry again; its own maps
+    # still predate the fire. Detached, it stays detached: no bind hiding
+    # its sheet, no rebind, run after run.
+    cherry_dir = f"{BASE}/great_basin/2026/2026_Cherry/"
+    sheet = "products/20260705/ops_Cherry_0705.pdf"
+    data = b"%PDF cherry 0705"
+    rec = {"fire_slug": "cherry", "storage_prefix": "cherry", "cornea_id": CHERRY_ID["cornea_id"],
+           "bound": bound_info(CHERRY_ID, "name_exact"),
+           "match": {"method": "name_exact", "confidence": 0.95, "token": None,
+                     "dir_url": cherry_dir, "cornea_id": CHERRY_ID["cornea_id"]},
+           "dir_url": cherry_dir, "region": "great_basin", "dir_mtime": "2026-10-05 05:00",
+           "synced_at": "2026-10-05T05:10:00Z", "children": {"Products": "2026-10-05 05:00"},
+           "files": {sheet: {"etag": '"e"', "lm": "Sun, 05 Jul 2026 15:42:24 GMT",
+                             "size": len(data), "sha16": sha16(data), "rev": 1,
+                             "kind": "product", "url": f"{cherry_dir}{sheet}"}}}
+    world = _bucket(tmp_path, monkeypatch, rec, key=CHERRY_KEY,
+                    fires=[dict(CHERRY_ID, fire_slug="cherry", active=True)])
+    ftp = FakeFTP()
+    ftp.dir(f"{BASE}/great_basin/2026/", "2026_Cherry", "2026-10-05 05:00")
+    products = ftp.dir(cherry_dir, "Products", "2026-10-05 05:00")
+    ftp.file(ftp.dir(products, "20260705", "2026-07-05 15:42"), "ops_Cherry_0705.pdf", data,
+             mtime="2026-07-05 15:42")
+    ftp.file(products, "notes.txt", b"radio plan", mtime="2026-10-05 05:00")
+    ftp.wire(monkeypatch)
+
+    for _run in range(2):
+        assert cli.main(["sync-incidents"]) == 0
+        m = world.storage.get_json(health.KEY)["mirror"]
+        assert m["date_rejected"] == [CHERRY_KEY]
+        assert m["rebinds"] == [] and m["files_downloaded"] == 0
+        after = world.state_on_bucket()["incidents"][CHERRY_KEY]
+        assert after["match"] is None
+        assert fire_key(after["match_rejected"]["cornea_id"]) == fire_key(CHERRY_ID["cornea_id"])
+        assert after["files"][sheet] == rec["files"][sheet]  # not stamped hidden
+        assert world.state_on_bucket()["incident_fires"] == {}
 
 
 def test_new_folder_gets_its_own_prefix(tmp_path, monkeypatch):
