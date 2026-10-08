@@ -69,6 +69,12 @@ export const RELEASE_NOTES: ReleaseDay[] = [
           'Downloading two fires with the same name for offline use saved both into one copy, so the second download replaced the first. Each fire now keeps its own offline copy, and copies already on your device keep working.',
         fix: true,
       },
+      {
+        title: 'Blank map thumbnails restored',
+        summary:
+          'When a team posted one fire’s maps in another fire’s folder, those maps showed blank thumbnails and drew nothing on the map, and the other fire went without them. They now load, and each sheet shows on the fire it belongs to: Grasshopper and Austin each list their own maps, and Bobcat Lakes has its maps for the first time.',
+        fix: true,
+      },
     ],
   },
   {
