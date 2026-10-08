@@ -9,6 +9,8 @@ claiming one incident key never share a record."""
 
 import json
 
+import pytest
+
 from ftp_stub import BASE, FakeFTP
 from incident_world import (
     AU_FK, AU_KEY, AUSTIN, CHERRY_KEY, GH_FK, GH_KEY, GRASSHOPPER, LATEST, MT_FK, MT_KEY, NOW,
@@ -160,13 +162,26 @@ def _gh_on_austin() -> dict:
             "synced_at": "2026-10-02T19:20:00Z", "children": {}, "files": files}
 
 
-def _bucket(tmp_path, monkeypatch, rec: dict, *, overrides=None, fires=None, others=None):
-    """A migrated bucket holding one record (plus `others`, by key), its
-    fires' manifests built, and cli wired to it with no tools."""
+def _gh_on_grasshopper() -> dict:
+    """2026_Grasshopper after that rebind: bound to Grasshopper by token and
+    lending Austin its sheet (Austin's token)."""
+    rec = _gh_on_austin()
+    rec.update(cornea_id=GRASSHOPPER["cornea_id"], bound=bound_info(GRASSHOPPER, "unit_id"),
+               match={"method": "unit_id", "confidence": 1.0,
+                      "token": GRASSHOPPER["unique_fire_id"], "dir_url": GH_DIR,
+                      "cornea_id": GRASSHOPPER["cornea_id"]})
+    rec["files"][AU_0817].update(fk=AU_FK, fk_src="token")
+    return rec
+
+
+def _bucket(tmp_path, monkeypatch, rec: dict, *, overrides=None, fires=None, others=None,
+            key=GH_KEY):
+    """A migrated bucket holding one record at `key` (plus `others`, by
+    key), its fires' manifests built, and cli wired to it with no tools."""
     world = World(tmp_path)  # only for its spy bucket and active-fire list
     world.fires = fires or _fires()
     storage = world.storage
-    state = {"schema_version": 1, "incidents": {GH_KEY: rec, **(others or {})}, "tiled": {},
+    state = {"schema_version": 1, "incidents": {key: rec, **(others or {})}, "tiled": {},
              "ir": {},
              "incident_fires": {}, "migrations": {"incident_ids": FLAG}, "catalog_version": 50}
     fires_by_fk = {fire_key(f["cornea_id"]): f for f in world.fires}
@@ -226,6 +241,87 @@ def test_rebind_splits_files_by_name_and_rebuilds_both_fires(tmp_path, monkeypat
     rows = {r["fire_slug"]: r for r in world.storage.get_json("catalogs/catalog.json")["fires"]}
     assert rows["grasshopper"]["incident_map_count"] == 2
     assert rows["austin"]["incident_map_count"] == 2
+
+
+def _filenames(storage, fk) -> set[str]:
+    return {x["filename"] for x in storage.get_json(fire_manifests.manifest_key(fk))["maps"]}
+
+
+def test_rematched_folder_rebuilds_the_fires_its_files_left(tmp_path, monkeypatch):
+    # 2026_Grasshopper, bound to Grasshopper, lends Austin its token sheet
+    # and a QR sheet placed there by the old ID binding ('prior'). The QR
+    # sheet is overwritten in place: its new bytes follow the binding. Austin
+    # still gets the token sheet, so its index entry names the same folder
+    # and only the run itself can know Austin lost a file.
+    qr = "qr/Transport_QR.pdf"
+    rec = _gh_on_grasshopper()
+    rec["files"][qr] = dict(rec["files"][PLAIN], kind="qr", url=f"{GH_DIR}QR/Transport_QR.pdf",
+                            sha16=sha16(b"%PDF qr rev 1"), fk=AU_FK, fk_src="prior")
+    world = _bucket(tmp_path, monkeypatch, rec)
+    assert _filenames(world.storage, AU_FK) == {AU_0817.rpartition("/")[2], "Transport_QR.pdf"}
+    ftp = _gh_folder()                                     # root changed: a re-match
+    ftp.file(ftp.dir(GH_DIR, "QR"), "Transport_QR.pdf", b"%PDF qr rev 2")
+    ftp.wire(monkeypatch)
+    assert cli.main(["sync-incidents"]) == 0
+
+    m = world.storage.get_json(health.KEY)["mirror"]
+    assert m["rebinds"] == [] and m["files_downloaded"] == 2
+    meta = world.state_on_bucket()["incidents"][GH_KEY]["files"][qr]
+    assert "fk" not in meta and meta["sha16"] == sha16(b"%PDF qr rev 2")
+    assert sorted(m["rebuilt_fires"]) == sorted([AU_FK, GH_FK])
+    assert _filenames(world.storage, AU_FK) == {AU_0817.rpartition("/")[2]}
+    assert "Transport_QR.pdf" in _filenames(world.storage, GH_FK)
+
+    # An override clears a placement naming a third fire (Twin Sisters MT),
+    # which keeps a sheet an operator assigned it: its manifest drops the
+    # placed one.
+    twin = "products/20260805/ops_twin_sisters_0805.pdf"
+    rec = _gh_on_austin()
+    rec["files"][PLAIN].update(fk=MT_FK, fk_src="location")
+    rec["files"][twin] = dict(rec["files"][PLAIN], sha16=sha16(b"%PDF twin"), fk=MT_FK,
+                              fk_src="manual")
+    world = _bucket(tmp_path / "override", monkeypatch, rec,
+                    overrides={GH_KEY: GRASSHOPPER["cornea_id"]},
+                    fires=_fires() + [dict(TWIN_MT, fire_slug="twin-sisters", active=True)])
+    assert _filenames(world.storage, MT_FK) == {"Transport_0820.pdf", "ops_twin_sisters_0805.pdf"}
+    _gh_folder(mtime="2026-10-02 19:15").wire(monkeypatch)   # root unchanged
+    assert cli.main(["sync-incidents"]) == 0
+
+    m = world.storage.get_json(health.KEY)["mirror"]
+    assert [(e["decision"], e["to"]) for e in m["rebinds"]] == [("rebind", GH_FK)]
+    # (Austin has no files left: its index entry goes, no manifest to build)
+    assert sorted(m["rebuilt_fires"]) == sorted([GH_FK, MT_FK])
+    assert AU_FK not in world.state_on_bucket()["incident_fires"]
+    assert _filenames(world.storage, MT_FK) == {"ops_twin_sisters_0805.pdf"}
+    assert "Transport_0820.pdf" in _filenames(world.storage, GH_FK)
+
+
+def test_rebuilds_owed_when_a_run_dies_before_publishing(tmp_path, monkeypatch):
+    # The rebind is checkpointed with the download, then the run dies
+    # before any manifest is written. The next run finds the folder
+    # unchanged, so only the index can say Austin is owed a rebuild.
+    world = _bucket(tmp_path, monkeypatch, _gh_on_austin())
+    assert GH_0925.rpartition("/")[2] in _filenames(world.storage, AU_FK)
+    _gh_folder().wire(monkeypatch)
+    publish = fire_manifests.publish_fire_manifests
+
+    def killed(*a, **kw):
+        raise RuntimeError("job killed")
+    monkeypatch.setattr(fire_manifests, "publish_fire_manifests", killed)
+    with pytest.raises(RuntimeError):
+        cli.main(["sync-incidents"])
+    state = world.state_on_bucket()
+    assert state["incidents"][GH_KEY]["cornea_id"] == GRASSHOPPER["cornea_id"]
+    assert state["incident_fires"][AU_FK]["v"] == 0
+
+    monkeypatch.setattr(fire_manifests, "publish_fire_manifests", publish)
+    assert cli.main(["sync-incidents"]) == 0
+    m = world.storage.get_json(health.KEY)["mirror"]
+    assert (m["unchanged_skips"], m["files_downloaded"]) == (1, 0)
+    assert sorted(m["rebuilt_fires"]) == sorted([AU_FK, GH_FK])
+    assert _filenames(world.storage, AU_FK) == {AU_0817.rpartition("/")[2],
+                                                PLAIN.rpartition("/")[2]}
+    assert world.state_on_bucket()["incident_fires"][AU_FK]["v"] == 1
 
 
 def test_unchanged_folder_with_new_child_is_refreshed(tmp_path, monkeypatch):

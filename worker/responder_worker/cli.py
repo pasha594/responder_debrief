@@ -1230,6 +1230,18 @@ def cmd_sync_incidents(args) -> int:
                 force=args.force,
             )
 
+        def checkpoint() -> None:
+            # Per-incident save: files already on B2 must not re-download if
+            # this run dies. The rebuild set lives only in memory, so every
+            # fire it names is first marked stale in the index (v=0, as
+            # reassign-files does): a run killed before publication still
+            # rebuilds them next time (fire_manifests.stale_index_fks).
+            idx = state.get("incident_fires") or {}
+            for fk in rebuild:
+                if fk in idx:
+                    idx[fk]["v"] = 0
+            state_mod.save_state(storage, state)
+
         mirrors: dict[str, dict] = {}
         matched = 0
         deferred = 0
@@ -1241,6 +1253,11 @@ def cmd_sync_incidents(args) -> int:
             prev = state["incidents"].get(key)
             ov = overrides.get(key)
             now = cat.now_iso()
+            # Every fire the folder shows files on before this run touches
+            # it. A rebind, an override or a new revision can take a file off
+            # any of them, and a fire the folder still lends other files to
+            # keeps its index entry's dirs, so stale_index_fks never sees it.
+            before = incident_ids.owners_of(prev) if prev else set()
 
             # Re-validate a cached name match before trusting it: detach the
             # folder (its mirrored files stay — retention) and fall through
@@ -1276,7 +1293,6 @@ def cmd_sync_incidents(args) -> int:
                     # the record's match, bound and region stay as they are
                     # (a region from the crawl would change the manifest's
                     # from the one the migration built).
-                    owners = incident_ids.owners_of(prev)
                     try:
                         res = new_mirror().sync_incident(
                             incident_key=key, dir_url=cand.dir_url, match=prev["match"],
@@ -1300,9 +1316,9 @@ def cmd_sync_incidents(args) -> int:
                                     "fk": bound_fk}
                     # every fire the folder showed files on, before and after
                     # (a new revision can drop a file's stamp)
-                    rebuild |= owners | incident_ids.owners_of(prev)
+                    rebuild |= before | incident_ids.owners_of(prev)
                     if res.downloads:
-                        state_mod.save_state(storage, state)
+                        checkpoint()
                     continue
                 if bound_fk:
                     # Bound to a fire that is no longer active (or, with
@@ -1377,6 +1393,9 @@ def cmd_sync_incidents(args) -> int:
             matched += 1
             log(f"[incidents] {key} -> {fire_key(cornea_id)} "
                 f"({m.fire_slug}, {m.method}, conf={m.confidence})")
+            # apply_bind may have moved files off these fires, and the
+            # mirror's new revisions can (also when it fails part-way)
+            rebuild |= before
 
             try:
                 res = new_mirror().sync_incident(
@@ -1403,18 +1422,15 @@ def cmd_sync_incidents(args) -> int:
                 f"downloads={res.downloads} ({res.bytes_downloaded/1e6:.1f} MB) "
                 f"unchanged={res.skipped_unchanged} too_big={res.skipped_too_big}")
             mirrors[key] = {"candidate": cand, "match": m, "result": res, "fk": fk}
-            # The fire the folder is bound to, and every fire a downloaded
-            # file shows on (a new revision can move a file's raw key).
+            # The fire the folder is bound to, and every fire it shows files
+            # on now (`before` covers the ones it showed them on until now).
             rebuild.add(fk)
-            for mf in res.files:
-                if mf.local_path is not None:
-                    meta = rec["files"].get(f"{mf.rel_dir}/{mf.filename}") or {}
-                    rebuild |= {o for o in [incident_ids.file_owner(rec, meta)] if o}
+            rebuild |= incident_ids.owners_of(rec)
             # Checkpoint per incident: files are already on B2, so if this run
             # dies the next one must not re-download them. (The first full run
             # was killed mid-tiling and lost every download record.)
             if res.downloads:
-                state_mod.save_state(storage, state)
+                checkpoint()
 
         if deferred:
             log(f"[incidents] download deadline reached — {deferred} candidate dirs "
