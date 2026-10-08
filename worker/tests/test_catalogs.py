@@ -227,7 +227,7 @@ class TestIncidentManifestContract:
             "ops_arch_e_port_20260816_2100_Elk_COGMF000114_817day.pdf")
         entry = map_entry(
             parsed=parsed, kind="product", sha_id="a1b2c3d4e5f6a7b8",
-            fire_slug="elk",
+            tiles_prefix="elk", preview_prefix="elk",
             pdf_key="raw/incidents/elk/products/20260817/ops_arch_e_port_20260816_2100_Elk_COGMF000114_817day.pdf",
             size_bytes=10485760,
             geo={
@@ -274,7 +274,8 @@ class TestIncidentManifestContract:
         parsed = parse_product_filename(
             "ops_arch_e_port_20260816_2100_Elk_COGMF000114_817day.pdf")
         entry = map_entry(
-            parsed=parsed, kind="product", sha_id="a" * 16, fire_slug="elk",
+            parsed=parsed, kind="product", sha_id="a" * 16,
+            tiles_prefix="elk", preview_prefix="elk",
             pdf_key="raw/incidents/elk/x.pdf", size_bytes=1, geo=None,
             uploaded_lm="Sun, 16 Aug 2026 03:18:07 GMT",
         )
@@ -285,7 +286,8 @@ class TestIncidentManifestContract:
         parsed = parse_product_filename(
             "ops_arch_e_port_20260818_2100_GoldMountain_CANOD000123_8018day.pdf")
         entry = map_entry(
-            parsed=parsed, kind="product", sha_id="b" * 16, fire_slug="gold",
+            parsed=parsed, kind="product", sha_id="b" * 16,
+            tiles_prefix="gold", preview_prefix="gold",
             pdf_key="raw/incidents/gold/x.pdf", size_bytes=1, geo=None,
             uploaded_lm="Tue, 18 Aug 2026 03:18:07 GMT",
             first_seen="2026-08-19T00:00:00Z",
@@ -297,7 +299,8 @@ class TestIncidentManifestContract:
     def test_date_source_ingested_fallback(self):
         parsed = parse_product_filename("SomethingUnparseable.pdf")
         entry = map_entry(
-            parsed=parsed, kind="product", sha_id="c" * 16, fire_slug="x",
+            parsed=parsed, kind="product", sha_id="c" * 16,
+            tiles_prefix="x", preview_prefix="x",
             pdf_key="raw/incidents/x/x.pdf", size_bytes=1, geo=None,
             first_seen="2026-08-19T12:34:56Z",
         )
@@ -307,7 +310,8 @@ class TestIncidentManifestContract:
     def test_date_source_none_when_nothing_known(self):
         parsed = parse_product_filename("SomethingUnparseable.pdf")
         entry = map_entry(
-            parsed=parsed, kind="product", sha_id="d" * 16, fire_slug="x",
+            parsed=parsed, kind="product", sha_id="d" * 16,
+            tiles_prefix="x", preview_prefix="x",
             pdf_key="raw/incidents/x/x.pdf", size_bytes=1, geo=None,
         )
         assert entry["op_date"] is None
@@ -318,7 +322,8 @@ class TestIncidentManifestContract:
             "mobile_72x96_land_20260816_2056_Elk_COGMF000114_817.pdf")
         entry = map_entry(
             parsed=parsed, kind="mobile", sha_id="ffff000011112222",
-            fire_slug="elk", pdf_key="raw/incidents/elk/products/20260817/x.pdf",
+            tiles_prefix="elk", preview_prefix="elk",
+            pdf_key="raw/incidents/elk/products/20260817/x.pdf",
             size_bytes=26_000_000, geo=None,
         )
         assert entry["georeferenced"] is False
@@ -476,3 +481,129 @@ def test_fire_keys_agree_across_id_spellings():
         assert hotspots.archive_id({"cornea_id": spelling}) == fire_key(spelling)
         assert routing_plan.fire_key(spelling) == fire_key(spelling)
     assert fire_key("") is None and fire_key(None) is None
+
+
+# ---------------------------------------------------------------------------
+# incident maps by fire ID (catalog_incident_index, after the migration)
+# ---------------------------------------------------------------------------
+
+FL_FK, WI_FK = fire_key(FL["cornea_id"]), fire_key(WI["cornea_id"])
+
+
+def _index_entry(fk, dirs, *, maps, method="unit_id", synced="2026-10-08T16:00:00Z"):
+    """A state["incident_fires"] entry, as the mirror writes it."""
+    return {"v": 1, "cornea_id": "{" + fk.upper() + "}",
+            "manifest": f"catalogs/incidents/id/{fk}.json", "dirs": dirs,
+            "primary": dirs[0], "method": method, "confidence": 1.0,
+            "dir_url": f"https://ftp.wildfire.gov/{dirs[0]}/", "synced_at": synced,
+            "built_at": "2026-10-08T16:05:00Z",
+            "counts": {"maps": maps, "ir": 2, "latest_upload": "2026-10-07",
+                       "latest_upload_ts": "2026-10-07T21:00:00Z"}}
+
+
+def test_legacy_path_identical_when_index_none(fixtures, monkeypatch):
+    # Golden output of build_catalog before incident_fires existed: the
+    # slug-keyed path must stay byte for byte the same until the migration.
+    golden = json.loads((fixtures / "catalog_legacy_golden.json").read_text())
+    inp = golden["input"]
+    monkeypatch.setattr(catalogs, "now_iso", lambda: golden["expected"]["generated_at"])
+    out = build_catalog(
+        inp["fires"], version=inp["version"], incident_matches=inp["incident_matches"],
+        incident_fires=None, spread_index=inp["spread_index"],
+        perimeter_counts=inp["perimeter_counts"],
+        hotspot_archives=set(inp["hotspot_archives"]),
+        national_layers=inp["national_layers"])
+    assert json.dumps(out, indent=1, ensure_ascii=False) == json.dumps(
+        golden["expected"], indent=1, ensure_ascii=False)
+
+
+def test_build_catalog_by_fire_id_with_swapped_slugs():
+    # WI took the bare "chipmunk" slug; FL's folder was matched (and its
+    # legacy record keyed) while FL held it. By ID, FL keeps its maps and
+    # WI is handed nothing.
+    fires = [{**WI, "fire_slug": "chipmunk"}, {**FL, "fire_slug": "chipmunk-fl"}]
+    legacy = {"chipmunk": {"method": "name_exact", "confidence": 0.95, "dir_url": "u",
+                           "synced_at": None, "map_count": 9, "ir_count": 0,
+                           "latest_upload": None, "latest_upload_ts": None}}
+    index = {FL_FK: _index_entry(FL_FK, ["southern/2026/2026_Chipmunk",
+                                         "southern/2026/2026_ChipmunkComplex"], maps=14),
+             # an entry whose manifest was never written is not advertised
+             WI_FK: {**_index_entry(WI_FK, ["great_lakes/2026/2026_Chipmunk"], maps=1),
+                     "manifest": None}}
+    doc = build_catalog(fires, version=9, incident_matches=legacy, incident_fires=index)
+    by_state = {f["state"]: f for f in doc["fires"]}
+    fl, wi = by_state["FL"], by_state["WI"]
+    assert fl["has_incident_maps"] is True
+    assert fl["incident_manifest"] == f"/catalogs/incidents/id/{FL_FK}.json"
+    assert fl["incident_last_synced"] == "2026-10-08T16:00:00Z"
+    assert (fl["incident_map_count"], fl["incident_ir_count"]) == (14, 2)
+    assert fl["incident_latest_upload"] == "2026-10-07"
+    assert fl["incident_latest_upload_ts"] == "2026-10-07T21:00:00Z"
+    assert fl["ftp_match"] == {"method": "unit_id", "confidence": 1.0,
+                               "dir_url": "https://ftp.wildfire.gov/southern/2026/2026_Chipmunk/"}
+    assert wi["has_incident_maps"] is False
+    assert wi["incident_manifest"] is None and wi["ftp_match"] is None
+    assert wi["incident_map_count"] is None
+    # every folder feeding an advertised fire
+    assert doc["counts"]["matched_incident_dirs"] == 2
+
+
+def test_inactive_fire_record_not_advertised_on_same_name_fire():
+    # 2026_Wildhorse belongs to Wildhorse ID, no longer active; the
+    # "wildhorse" slug now names WILDHORSE OK, which has no maps.
+    id_fk = "177292f2-0000-4000-8000-000000000003"
+    ok = {"fire_slug": "wildhorse", "post_title": "WILDHORSE", "state": "OK",
+          "cornea_id": "{8C318F2C-0000-4000-8000-000000000004}"}
+    index = {id_fk: _index_entry(id_fk, ["great_basin/2026/2026_Wildhorse"], maps=3)}
+    doc = build_catalog([ok], version=1, incident_fires=index)
+    row = doc["fires"][0]
+    assert row["has_incident_maps"] is False and row["incident_manifest"] is None
+    assert doc["counts"]["matched_incident_dirs"] == 0
+
+
+def test_map_entry_split_tile_and_preview_prefixes():
+    # A Grasshopper sheet tiled under austin/ while the folder was bound to
+    # Austin, previewed under grasshopper/, its PDF re-mirrored to the
+    # folder's own prefix: each URL names where its object is.
+    sha = "5b0d93088c8ddb6c"
+    pdf = "raw/incidents/grasshopper/products/20260817/ops.pdf"
+    parsed = parse_product_filename(
+        "ops_arch_e_port_20260816_2155_Grasshopper_ORMHF000688_0817day.pdf")
+    entry = map_entry(
+        parsed=parsed, kind="product", sha_id=sha, tiles_prefix="austin", preview_prefix="grasshopper",
+        pdf_key=pdf, size_bytes=1,
+        geo={"georeferenced": True, "preview": True,
+             "tiles": {"minzoom": 9, "maxzoom": 15, "bounds": [-121, 44, -120, 45]}})
+    assert entry["tiles"]["url_template"] == f"/tiles/incidents/austin/{sha}/{{z}}/{{x}}/{{y}}.png"
+    assert entry["preview_url"] == f"/previews/incidents/grasshopper/{sha}.png"
+    assert entry["pdf_url"] == f"/{pdf}"
+
+
+def test_manifest_has_fire_key_and_sources():
+    fire = {**FL, "fire_slug": "chipmunk-fl"}
+    sources = [{"dir_url": "https://ftp.wildfire.gov/southern/2026/2026_Chipmunk/",
+                "region": "southern", "unit_incident": "FLFNF000123", "method": "unit_id"}]
+    doc = build_incident_manifest(fire=fire, region="southern",
+                                  source_dir=sources[0]["dir_url"],
+                                  unit_incident="FLFNF000123", maps=[], ir_flights=[],
+                                  sources=sources)
+    assert doc["schema_version"] == 1
+    assert doc["fire_key"] == FL_FK and doc["cornea_id"] == FL["cornea_id"]
+    assert doc["sources"] == sources
+    # a legacy slug manifest is unchanged
+    legacy = build_incident_manifest(fire=fire, region="southern", source_dir="u",
+                                     unit_incident=None, maps=[], ir_flights=[])
+    assert "fire_key" not in legacy and "sources" not in legacy
+
+
+def test_catalog_incident_index_none_before_migration():
+    index = {FL_FK: _index_entry(FL_FK, ["southern/2026/2026_Chipmunk"], maps=1)}
+    assert catalogs.catalog_incident_index({"incident_fires": index}) is None
+    assert catalogs.catalog_incident_index(
+        {"incident_fires": index, "migrations": {}}) is None
+    migrated = {"incident_fires": index,
+                "migrations": {"incident_ids": "2026-10-09T00:00:00Z"}}
+    assert catalogs.catalog_incident_index(migrated) == index
+    # migrated with nothing built yet: advertise nothing, never fall back
+    assert catalogs.catalog_incident_index(
+        {"migrations": {"incident_ids": "2026-10-09T00:00:00Z"}}) == {}

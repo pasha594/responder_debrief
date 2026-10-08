@@ -11,7 +11,7 @@ from __future__ import annotations
 import re
 from datetime import datetime, timezone
 
-from . import config, hotspots, hrrr
+from . import config, hotspots, hrrr, incident_ids
 from .fires import fire_key
 from .matching import UNIT_TOKEN_RE
 
@@ -207,16 +207,66 @@ def retain_drawable_run(weather: dict, previous: dict | None) -> bool:
 # catalog.json (master — uploaded LAST)
 # ---------------------------------------------------------------------------
 
+def _legacy_incident_fields(m: dict | None, slug: str) -> dict:
+    """A fire's incident fields from its slug-keyed match (pre-migration)."""
+    return {
+        "has_incident_maps": m is not None,
+        "incident_manifest": f"/catalogs/incidents/{slug}.json" if m else None,
+        "incident_last_synced": (m or {}).get("synced_at"),
+        "incident_map_count": (m or {}).get("map_count"),
+        "incident_ir_count": (m or {}).get("ir_count"),
+        "incident_latest_upload": (m or {}).get("latest_upload"),
+        "incident_latest_upload_ts": (m or {}).get("latest_upload_ts"),
+        "ftp_match": (
+            {"method": m["method"], "confidence": m["confidence"], "dir_url": m["dir_url"]}
+            if m else None
+        ),
+    }
+
+
+def _incident_fields_by_id(m: dict | None) -> dict:
+    """A fire's incident fields from its own incident_fires entry: the path
+    is the fire's ID manifest, so a same-name fire can never be handed it."""
+    counts = (m or {}).get("counts") or {}
+    return {
+        "has_incident_maps": m is not None,
+        "incident_manifest": "/" + m["manifest"] if m else None,
+        "incident_last_synced": (m or {}).get("synced_at"),
+        "incident_map_count": counts.get("maps"),
+        "incident_ir_count": counts.get("ir"),
+        "incident_latest_upload": counts.get("latest_upload"),
+        "incident_latest_upload_ts": counts.get("latest_upload_ts"),
+        "ftp_match": (
+            {"method": m.get("method"), "confidence": m.get("confidence"),
+             "dir_url": m.get("dir_url")}
+            if m else None
+        ),
+    }
+
+
+def catalog_incident_index(state: dict) -> dict[str, dict] | None:
+    """build_catalog's `incident_fires`: the fire-ID manifest index once the
+    incident-ID migration has run, None before (the slug-keyed path)."""
+    if not incident_ids.migrated(state):
+        return None
+    return state.get("incident_fires") or {}
+
+
 def build_catalog(
     fires: list[dict],
     *,
     version: int,
     incident_matches: dict[str, dict] | None = None,   # fire_slug -> {method, confidence, dir_url, synced_at}
+    incident_fires: dict[str, dict] | None = None,     # fire_key -> state["incident_fires"] entry
     spread_index: dict | None = None,                  # fire_key -> {"latest", "count"} (or bare latest str)
     perimeter_counts: dict[str, int] | None = None,    # fire_key -> perimeter version count
     hotspot_archives: set[str] | None = None,          # hotspot archive ids ready to serve
     national_layers: dict | None = None,               # {"current_year_perimeters": {"image", "bounds", "as_of"}}
 ) -> dict:
+    """The master catalog. With `incident_fires` (catalog_incident_index)
+    each fire's incident maps come from its own fire-ID entry and
+    `incident_matches` is ignored; without it, from the legacy slug-keyed
+    matches, unchanged."""
     incident_matches = incident_matches or {}
     perimeter_counts = perimeter_counts or {}
     hotspot_archives = hotspot_archives or set()
@@ -226,10 +276,18 @@ def build_catalog(
         for fk, v in (spread_index or {}).items()
     }
     fires_out = []
+    matched_dirs = 0
     for f in fires:
         slug = f["fire_slug"]
         fk = fire_key(f.get("cornea_id"))
-        m = incident_matches.get(slug)
+        if incident_fires is None:
+            inc = _legacy_incident_fields(incident_matches.get(slug), slug)
+        else:
+            m = incident_fires.get(fk) if fk else None
+            if m is not None and not m.get("manifest"):
+                m = None  # never advertise a path that was not written
+            inc = _incident_fields_by_id(m)
+            matched_dirs += len((m or {}).get("dirs") or ())
         fires_out.append({
             "fire_slug": slug,
             "cornea_id": f.get("cornea_id"),
@@ -244,22 +302,19 @@ def build_catalog(
             "poly_last_updated": f.get("poly_last_updated"),
             "timezone": f.get("timezone"),
             "created_on": f.get("created_on"),
-            "has_incident_maps": m is not None,
-            "incident_manifest": f"/catalogs/incidents/{slug}.json" if m else None,
-            "incident_last_synced": (m or {}).get("synced_at"),
+            "has_incident_maps": inc["has_incident_maps"],
+            "incident_manifest": inc["incident_manifest"],
+            "incident_last_synced": inc["incident_last_synced"],
             # directory-view summary (avoids fetching every per-fire manifest)
-            "incident_map_count": (m or {}).get("map_count"),
-            "incident_ir_count": (m or {}).get("ir_count"),
-            "incident_latest_upload": (m or {}).get("latest_upload"),
-            "incident_latest_upload_ts": (m or {}).get("latest_upload_ts"),
+            "incident_map_count": inc["incident_map_count"],
+            "incident_ir_count": inc["incident_ir_count"],
+            "incident_latest_upload": inc["incident_latest_upload"],
+            "incident_latest_upload_ts": inc["incident_latest_upload_ts"],
             "perimeter_count": perimeter_counts.get(fk),
             "hotspot_archive": (f"/{hotspots.index_key(aid)}"
                                 if (aid := hotspots.archive_id(f)) in hotspot_archives
                                 else None),
-            "ftp_match": (
-                {"method": m["method"], "confidence": m["confidence"], "dir_url": m["dir_url"]}
-                if m else None
-            ),
+            "ftp_match": inc["ftp_match"],
             "has_spread_forecast": fk in spread_index,
             "spread_latest_run": (spread_index.get(fk) or {}).get("latest"),
             "spread_run_count": (spread_index.get(fk) or {}).get("count"),
@@ -271,7 +326,10 @@ def build_catalog(
         "fires": fires_out,
         "counts": {
             "active_fires": len(fires_out),
-            "matched_incident_dirs": len(incident_matches),
+            # legacy: one per slug-keyed match; by ID: the folders feeding
+            # the fires advertised here
+            "matched_incident_dirs": (len(incident_matches) if incident_fires is None
+                                      else matched_dirs),
             "spread_forecast_fires": len(spread_index),
         },
     }
@@ -281,7 +339,7 @@ def build_catalog(
 
 
 # ---------------------------------------------------------------------------
-# catalogs/incidents/{fire_slug}.json
+# catalogs/incidents/id/{fire_key}.json (legacy: catalogs/incidents/{fire_slug}.json)
 # ---------------------------------------------------------------------------
 
 def build_incident_manifest(
@@ -292,8 +350,12 @@ def build_incident_manifest(
     unit_incident: str | None,
     maps: list[dict],
     ir_flights: list[dict],
+    sources: list[dict] | None = None,
 ) -> dict:
-    return {
+    """A fire's incident manifest. An ID manifest passes `sources` (one
+    {dir_url, region, unit_incident, method} per folder feeding the fire)
+    and also names its `fire_key`; a legacy slug manifest is unchanged."""
+    doc = {
         "schema_version": SCHEMA_VERSION,
         "fire_slug": fire["fire_slug"],
         "cornea_id": fire.get("cornea_id"),
@@ -304,6 +366,10 @@ def build_incident_manifest(
         "maps": maps,
         "ir_flights": ir_flights,
     }
+    if sources is not None:
+        doc["fire_key"] = fire_key(fire.get("cornea_id"))
+        doc["sources"] = sources
+    return doc
 
 
 def rfc1123_to_iso(lm: str | None) -> str | None:
@@ -322,7 +388,8 @@ def map_entry(
     parsed: dict,
     kind: str,
     sha_id: str,
-    fire_slug: str,
+    tiles_prefix: str,
+    preview_prefix: str,
     pdf_key: str,
     size_bytes: int | None,
     geo: dict | None,
@@ -331,11 +398,14 @@ def map_entry(
     uploaded_lm: str | None = None,
     first_seen: str | None = None,
 ) -> dict:
+    """One sheet's manifest entry. A sheet's tiles and preview are keyed by
+    its sha under the prefixes they were written to (asset_keys.tiles_prefix
+    / preview_prefix), which can differ from each other and from the PDF's."""
     geo = geo or {}
     tiles = None
     if geo.get("tiles"):
         tiles = {
-            "url_template": f"/tiles/incidents/{fire_slug}/{sha_id}/{{z}}/{{x}}/{{y}}.png",
+            "url_template": f"/tiles/incidents/{tiles_prefix}/{sha_id}/{{z}}/{{x}}/{{y}}.png",
             "minzoom": geo["tiles"]["minzoom"],
             "maxzoom": geo["tiles"]["maxzoom"],
             "bounds": geo["tiles"]["bounds"],
@@ -368,7 +438,7 @@ def map_entry(
         "georeferenced": bool(geo.get("georeferenced")),
         "projection": geo.get("projection"),
         "preview_url": (
-            f"/previews/incidents/{fire_slug}/{sha_id}.png" if geo.get("preview") else None
+            f"/previews/incidents/{preview_prefix}/{sha_id}.png" if geo.get("preview") else None
         ),
         "tiles": tiles,
         "tiling_pending": tiling_pending,

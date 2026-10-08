@@ -1,0 +1,342 @@
+{
+ "input": {
+  "fires": [
+   {
+    "fire_slug": "chipmunk",
+    "post_title": "Chipmunk",
+    "cornea_id": "{0C1D2E3F-0000-4000-8000-0000000000A1}",
+    "state": "WI",
+    "unique_fire_id": null,
+    "coordinates": [
+     -120.0,
+     44.0
+    ],
+    "acres": 100,
+    "containment": 5,
+    "active": true,
+    "last_updated": "2026-10-08T00:00:00Z",
+    "poly_last_updated": null,
+    "timezone": "America/Los_Angeles",
+    "created_on": "2026-08-01T00:00:00Z"
+   },
+   {
+    "fire_slug": "chipmunk-fl",
+    "post_title": "Chipmunk",
+    "cornea_id": "{961F6E41-0000-4000-8000-00000000000F}",
+    "state": "FL",
+    "unique_fire_id": null,
+    "coordinates": [
+     -120.0,
+     44.0
+    ],
+    "acres": 100,
+    "containment": 5,
+    "active": true,
+    "last_updated": "2026-10-08T00:00:00Z",
+    "poly_last_updated": null,
+    "timezone": "America/Los_Angeles",
+    "created_on": "2026-08-01T00:00:00Z"
+   },
+   {
+    "fire_slug": "austin",
+    "post_title": "AUSTIN",
+    "cornea_id": "{49D1FB0B-0000-4000-8000-000000000002}",
+    "state": "OR",
+    "unique_fire_id": "2026-ORMHF-000863",
+    "coordinates": [
+     -120.0,
+     44.0
+    ],
+    "acres": 100,
+    "containment": 5,
+    "active": true,
+    "last_updated": "2026-10-08T00:00:00Z",
+    "poly_last_updated": null,
+    "timezone": "America/Los_Angeles",
+    "created_on": "2026-08-01T00:00:00Z"
+   },
+   {
+    "fire_slug": "grasshopper",
+    "post_title": "GRASSHOPPER",
+    "cornea_id": "{7A1B2C3D-0000-4000-8000-000000000001}",
+    "state": "OR",
+    "unique_fire_id": "2026-ORMHF-000688",
+    "coordinates": [
+     -120.0,
+     44.0
+    ],
+    "acres": 100,
+    "containment": 5,
+    "active": true,
+    "last_updated": "2026-10-08T00:00:00Z",
+    "poly_last_updated": null,
+    "timezone": "America/Los_Angeles",
+    "created_on": "2026-08-01T00:00:00Z"
+   },
+   {
+    "fire_slug": "nameless",
+    "post_title": "Nameless",
+    "cornea_id": null,
+    "state": "ID",
+    "unique_fire_id": null,
+    "coordinates": [
+     -120.0,
+     44.0
+    ],
+    "acres": 100,
+    "containment": 5,
+    "active": true,
+    "last_updated": "2026-10-08T00:00:00Z",
+    "poly_last_updated": null,
+    "timezone": "America/Los_Angeles",
+    "created_on": "2026-08-01T00:00:00Z"
+   }
+  ],
+  "version": 845,
+  "incident_matches": {
+   "chipmunk": {
+    "method": "name_exact",
+    "confidence": 0.95,
+    "dir_url": "u/2026_Chipmunk/",
+    "synced_at": "2026-10-08T16:00:00Z",
+    "map_count": 3,
+    "ir_count": 0,
+    "latest_upload": "2026-10-07",
+    "latest_upload_ts": "2026-10-07T21:00:00Z"
+   },
+   "austin": {
+    "method": "unit_id",
+    "confidence": 1.0,
+    "dir_url": "u/2026_Grasshopper/",
+    "synced_at": "2026-10-08T15:00:00Z",
+    "map_count": 73,
+    "ir_count": 4,
+    "latest_upload": "2026-10-06",
+    "latest_upload_ts": null
+   },
+   "gone": {
+    "method": "unit_id",
+    "confidence": 1.0,
+    "dir_url": "u/2026_Gone/",
+    "synced_at": null,
+    "map_count": 1,
+    "ir_count": 0,
+    "latest_upload": null,
+    "latest_upload_ts": null
+   }
+  },
+  "spread_index": {
+   "49d1fb0b-0000-4000-8000-000000000002": {
+    "latest": "2026-10-08T06:00:00Z",
+    "count": 5
+   },
+   "961f6e41-0000-4000-8000-00000000000f": "2026-10-07T06:00:00Z"
+  },
+  "perimeter_counts": {
+   "49d1fb0b-0000-4000-8000-000000000002": 12,
+   "0c1d2e3f-0000-4000-8000-0000000000a1": 0
+  },
+  "hotspot_archives": [
+   "7a1b2c3d-0000-4000-8000-000000000001"
+  ],
+  "national_layers": {
+   "current_year_perimeters": {
+    "image": "/frames/national/x.png",
+    "bounds": [
+     -125.0,
+     24.5,
+     -66.5,
+     49.5
+    ],
+    "as_of": "2026-10-08T16:50:00Z"
+   }
+  }
+ },
+ "expected": {
+  "schema_version": 1,
+  "version": 845,
+  "generated_at": "2026-10-08T17:00:00Z",
+  "fires": [
+   {
+    "fire_slug": "chipmunk",
+    "cornea_id": "{0C1D2E3F-0000-4000-8000-0000000000A1}",
+    "unique_fire_id": null,
+    "name": "Chipmunk",
+    "coordinates": [
+     -120.0,
+     44.0
+    ],
+    "state": "WI",
+    "acres": 100,
+    "containment": 5,
+    "active": true,
+    "last_updated": "2026-10-08T00:00:00Z",
+    "poly_last_updated": null,
+    "timezone": "America/Los_Angeles",
+    "created_on": "2026-08-01T00:00:00Z",
+    "has_incident_maps": true,
+    "incident_manifest": "/catalogs/incidents/chipmunk.json",
+    "incident_last_synced": "2026-10-08T16:00:00Z",
+    "incident_map_count": 3,
+    "incident_ir_count": 0,
+    "incident_latest_upload": "2026-10-07",
+    "incident_latest_upload_ts": "2026-10-07T21:00:00Z",
+    "perimeter_count": 0,
+    "hotspot_archive": null,
+    "ftp_match": {
+     "method": "name_exact",
+     "confidence": 0.95,
+     "dir_url": "u/2026_Chipmunk/"
+    },
+    "has_spread_forecast": false,
+    "spread_latest_run": null,
+    "spread_run_count": null
+   },
+   {
+    "fire_slug": "chipmunk-fl",
+    "cornea_id": "{961F6E41-0000-4000-8000-00000000000F}",
+    "unique_fire_id": null,
+    "name": "Chipmunk",
+    "coordinates": [
+     -120.0,
+     44.0
+    ],
+    "state": "FL",
+    "acres": 100,
+    "containment": 5,
+    "active": true,
+    "last_updated": "2026-10-08T00:00:00Z",
+    "poly_last_updated": null,
+    "timezone": "America/Los_Angeles",
+    "created_on": "2026-08-01T00:00:00Z",
+    "has_incident_maps": false,
+    "incident_manifest": null,
+    "incident_last_synced": null,
+    "incident_map_count": null,
+    "incident_ir_count": null,
+    "incident_latest_upload": null,
+    "incident_latest_upload_ts": null,
+    "perimeter_count": null,
+    "hotspot_archive": null,
+    "ftp_match": null,
+    "has_spread_forecast": true,
+    "spread_latest_run": "2026-10-07T06:00:00Z",
+    "spread_run_count": null
+   },
+   {
+    "fire_slug": "austin",
+    "cornea_id": "{49D1FB0B-0000-4000-8000-000000000002}",
+    "unique_fire_id": "2026-ORMHF-000863",
+    "name": "AUSTIN",
+    "coordinates": [
+     -120.0,
+     44.0
+    ],
+    "state": "OR",
+    "acres": 100,
+    "containment": 5,
+    "active": true,
+    "last_updated": "2026-10-08T00:00:00Z",
+    "poly_last_updated": null,
+    "timezone": "America/Los_Angeles",
+    "created_on": "2026-08-01T00:00:00Z",
+    "has_incident_maps": true,
+    "incident_manifest": "/catalogs/incidents/austin.json",
+    "incident_last_synced": "2026-10-08T15:00:00Z",
+    "incident_map_count": 73,
+    "incident_ir_count": 4,
+    "incident_latest_upload": "2026-10-06",
+    "incident_latest_upload_ts": null,
+    "perimeter_count": 12,
+    "hotspot_archive": null,
+    "ftp_match": {
+     "method": "unit_id",
+     "confidence": 1.0,
+     "dir_url": "u/2026_Grasshopper/"
+    },
+    "has_spread_forecast": true,
+    "spread_latest_run": "2026-10-08T06:00:00Z",
+    "spread_run_count": 5
+   },
+   {
+    "fire_slug": "grasshopper",
+    "cornea_id": "{7A1B2C3D-0000-4000-8000-000000000001}",
+    "unique_fire_id": "2026-ORMHF-000688",
+    "name": "GRASSHOPPER",
+    "coordinates": [
+     -120.0,
+     44.0
+    ],
+    "state": "OR",
+    "acres": 100,
+    "containment": 5,
+    "active": true,
+    "last_updated": "2026-10-08T00:00:00Z",
+    "poly_last_updated": null,
+    "timezone": "America/Los_Angeles",
+    "created_on": "2026-08-01T00:00:00Z",
+    "has_incident_maps": false,
+    "incident_manifest": null,
+    "incident_last_synced": null,
+    "incident_map_count": null,
+    "incident_ir_count": null,
+    "incident_latest_upload": null,
+    "incident_latest_upload_ts": null,
+    "perimeter_count": null,
+    "hotspot_archive": "/hotspots/7a1b2c3d-0000-4000-8000-000000000001/index.json",
+    "ftp_match": null,
+    "has_spread_forecast": false,
+    "spread_latest_run": null,
+    "spread_run_count": null
+   },
+   {
+    "fire_slug": "nameless",
+    "cornea_id": null,
+    "unique_fire_id": null,
+    "name": "Nameless",
+    "coordinates": [
+     -120.0,
+     44.0
+    ],
+    "state": "ID",
+    "acres": 100,
+    "containment": 5,
+    "active": true,
+    "last_updated": "2026-10-08T00:00:00Z",
+    "poly_last_updated": null,
+    "timezone": "America/Los_Angeles",
+    "created_on": "2026-08-01T00:00:00Z",
+    "has_incident_maps": false,
+    "incident_manifest": null,
+    "incident_last_synced": null,
+    "incident_map_count": null,
+    "incident_ir_count": null,
+    "incident_latest_upload": null,
+    "incident_latest_upload_ts": null,
+    "perimeter_count": null,
+    "hotspot_archive": null,
+    "ftp_match": null,
+    "has_spread_forecast": false,
+    "spread_latest_run": null,
+    "spread_run_count": null
+   }
+  ],
+  "counts": {
+   "active_fires": 5,
+   "matched_incident_dirs": 3,
+   "spread_forecast_fires": 2
+  },
+  "national_layers": {
+   "current_year_perimeters": {
+    "image": "/frames/national/x.png",
+    "bounds": [
+     -125.0,
+     24.5,
+     -66.5,
+     49.5
+    ],
+    "as_of": "2026-10-08T16:50:00Z"
+   }
+  }
+ }
+}

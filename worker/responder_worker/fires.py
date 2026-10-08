@@ -70,6 +70,22 @@ def fire_slug(fire: dict) -> str:
 #: this full may be truncated: jobs that act on a fire's ABSENCE (migration,
 #: prune) refuse to run on one.
 ACTIVE_FIRES_LIMIT = 500
+#: A list under this share of the previous catalog's active fires is taken
+#: for a partial answer, not for that many fires going out at once.
+MIN_ACTIVE_SHARE = 0.8
+
+
+def fire_list_suspect(raw_rows: int, n_fires: int, prev_active: int | None) -> str | None:
+    """Why an active-fire list may be incomplete, so that a fire missing
+    from it proves nothing; None when it looks whole. `raw_rows` is
+    fetch_active_fires' meta, `prev_active` the previous catalog's
+    counts.active_fires."""
+    if raw_rows >= ACTIVE_FIRES_LIMIT:
+        return f"API returned {raw_rows} rows (page limit {ACTIVE_FIRES_LIMIT}): may be truncated"
+    if prev_active and n_fires < MIN_ACTIVE_SHARE * prev_active:
+        return (f"{n_fires} active fires, under {MIN_ACTIVE_SHARE:.0%} of the previous "
+                f"catalog's {prev_active}")
+    return None
 
 
 def fetch_active_fires(client: httpx.Client, meta: dict | None = None) -> list[dict]:

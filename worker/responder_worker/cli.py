@@ -23,11 +23,17 @@ from urllib.parse import urlparse
 
 import httpx
 
-from . import archives, hotspots, catalogs as cat, health, imsr
+from . import archives, hotspots, catalogs as cat, health, imsr, incident_ids
 from . import config, frames, geopdf, hrrr, ir_vectors, pyrecast, state as state_mod
 from .asset_keys import tile_meta_key
 from .b2 import make_storage
-from .fires import fetch_active_fires, fetch_perimeter_count, fire_key
+from .fires import (
+    ACTIVE_FIRES_LIMIT,
+    fetch_active_fires,
+    fetch_perimeter_count,
+    fire_key,
+    fire_list_suspect,
+)
 from .ftp_index import list_dir
 from .http import get_optional, make_client
 from .matching import (
@@ -86,7 +92,8 @@ def cmd_sync_catalogs(args) -> int:
 
     with make_client() as client:
         log("[catalogs] fetching active fires ...")
-        fires = fetch_active_fires(client)
+        fires_meta: dict = {}
+        fires = fetch_active_fires(client, meta=fires_meta)
         log(f"[catalogs] active wildfires: {len(fires)}")
 
         # Perimeter version counts for the directory. One tiny index GET per
@@ -207,6 +214,86 @@ def cmd_sync_catalogs(args) -> int:
         if entry["runs"]
     }
 
+    # Incident maps: by fire ID once the incident-ID migration has run (the
+    # mirror's index, no manifest reads or state repairs), else the legacy
+    # slug-keyed matches.
+    incident_fires = cat.catalog_incident_index(state)
+    incident_matches = (_legacy_incident_matches(storage, state)
+                        if incident_fires is None else None)
+    _tick_prune_clock(state, fires, fires_meta,
+                      storage.get_json("catalogs/catalog.json"))
+
+    version = int(state.get("catalog_version", 0)) + 1
+    hotspot_archives = hotspots.advertised(state)
+    catalog = cat.build_catalog(
+        fires, version=version,
+        incident_matches=incident_matches, incident_fires=incident_fires,
+        spread_index=spread_index,
+        perimeter_counts=perimeter_counts,
+        hotspot_archives=hotspot_archives,
+        national_layers=national_layers,
+    )
+
+    # upload order: runs catalogs -> catalog.json LAST
+    if imsr_catalog:
+        storage.put_json("catalogs/imsr.json", imsr_catalog)
+    storage.put_json("catalogs/pyrecast_runs.json", pyre)
+    storage.put_json("catalogs/weather_runs.json", weather)
+    storage.put_json(f"catalogs/versions/catalog.{version}.json", catalog)
+    storage.put_json("catalogs/catalog.json", catalog)
+
+    state["catalog_version"] = version
+    state_mod.save_state(storage, state)
+
+    weather_runs = weather["models"]["hrrr"]["runs"]
+    gdal_ok = all(shutil.which(t) for t in ("gdalwarp", "gdaldem", "gdal_translate"))
+    health.publish(storage, "catalogs", {
+        "started_at": job_started,
+        "finished_at": cat.now_iso(),
+        "ok": True,
+        "note": None if gdal_ok else "GDAL unavailable — weather frames skipped",
+        "catalog_version": version,
+        "fires": catalog["counts"]["active_fires"],
+        "matched_incident_dirs": catalog["counts"]["matched_incident_dirs"],
+        "spread_fires": catalog["counts"]["spread_forecast_fires"],
+        "weather": {
+            "gdal_available": gdal_ok,
+            "images_fetched": frame_budget - budget_left,
+            "carried_forward": carried_forward,
+            "deadline_hit": frames.deadline_passed(),
+            "runs": [
+                {
+                    "workspace": r["workspace"],
+                    "rendered": len((r.get("frames") or {}).get("hours", [])),
+                    "expected": len(r.get("hours") or []),
+                }
+                for r in weather_runs
+            ],
+        },
+        "imsr": {
+            "published": bool(imsr_catalog),
+            "matched_fires": len((imsr_catalog or {}).get("fires", {})),
+        },
+    }, log=log)
+
+    log(
+        "[catalogs] done: "
+        f"fires={catalog['counts']['active_fires']} "
+        f"spread_fires={catalog['counts']['spread_forecast_fires']} "
+        f"unmatched_slugs={len(pyre['unmatched_slugs'])} "
+        f"weather_runs={len(weather_runs)} "
+        f"weather_hours={[len(r['hours']) for r in weather_runs]} "
+        f"catalog_version={version}"
+    )
+    return 0
+
+
+def _legacy_incident_matches(storage, state: dict) -> dict[str, dict]:
+    """Slug-keyed incident matches for build_catalog, from the records the
+    pre-migration sync-incidents left (fire_slug -> match + counts). Heals
+    missing counts from the published slug manifests and clears dir_mtime
+    where a manifest never published. Only before the incident-ID migration:
+    after it the catalog reads the fire-ID index instead."""
     # keep incident matches recorded by previous sync-incidents runs
     incident_matches: dict[str, dict] = {}
     healed = 0
@@ -281,69 +368,7 @@ def cmd_sync_catalogs(args) -> int:
 
     if healed:
         log(f"[catalogs] backfilled incident counts for {healed} fires from manifests")
-
-    version = int(state.get("catalog_version", 0)) + 1
-    hotspot_archives = hotspots.advertised(state)
-    catalog = cat.build_catalog(
-        fires, version=version,
-        incident_matches=incident_matches, spread_index=spread_index,
-        perimeter_counts=perimeter_counts,
-        hotspot_archives=hotspot_archives,
-        national_layers=national_layers,
-    )
-
-    # upload order: runs catalogs -> catalog.json LAST
-    if imsr_catalog:
-        storage.put_json("catalogs/imsr.json", imsr_catalog)
-    storage.put_json("catalogs/pyrecast_runs.json", pyre)
-    storage.put_json("catalogs/weather_runs.json", weather)
-    storage.put_json(f"catalogs/versions/catalog.{version}.json", catalog)
-    storage.put_json("catalogs/catalog.json", catalog)
-
-    state["catalog_version"] = version
-    state_mod.save_state(storage, state)
-
-    weather_runs = weather["models"]["hrrr"]["runs"]
-    gdal_ok = all(shutil.which(t) for t in ("gdalwarp", "gdaldem", "gdal_translate"))
-    health.publish(storage, "catalogs", {
-        "started_at": job_started,
-        "finished_at": cat.now_iso(),
-        "ok": True,
-        "note": None if gdal_ok else "GDAL unavailable — weather frames skipped",
-        "catalog_version": version,
-        "fires": catalog["counts"]["active_fires"],
-        "matched_incident_dirs": catalog["counts"]["matched_incident_dirs"],
-        "spread_fires": catalog["counts"]["spread_forecast_fires"],
-        "weather": {
-            "gdal_available": gdal_ok,
-            "images_fetched": frame_budget - budget_left,
-            "carried_forward": carried_forward,
-            "deadline_hit": frames.deadline_passed(),
-            "runs": [
-                {
-                    "workspace": r["workspace"],
-                    "rendered": len((r.get("frames") or {}).get("hours", [])),
-                    "expected": len(r.get("hours") or []),
-                }
-                for r in weather_runs
-            ],
-        },
-        "imsr": {
-            "published": bool(imsr_catalog),
-            "matched_fires": len((imsr_catalog or {}).get("fires", {})),
-        },
-    }, log=log)
-
-    log(
-        "[catalogs] done: "
-        f"fires={catalog['counts']['active_fires']} "
-        f"spread_fires={catalog['counts']['spread_forecast_fires']} "
-        f"unmatched_slugs={len(pyre['unmatched_slugs'])} "
-        f"weather_runs={len(weather_runs)} "
-        f"weather_hours={[len(r['hours']) for r in weather_runs]} "
-        f"catalog_version={version}"
-    )
-    return 0
+    return incident_matches
 
 
 # ===========================================================================
@@ -725,7 +750,8 @@ def _tile_and_manifest(args, storage, state, fires_by_slug, mirrors) -> None:
                 )
 
             maps.append(cat.map_entry(
-                parsed=parsed, kind=mf.kind, sha_id=sha_id, fire_slug=fire_slug,
+                parsed=parsed, kind=mf.kind, sha_id=sha_id,
+                tiles_prefix=fire_slug, preview_prefix=fire_slug,
                 pdf_key=mf.key, size_bytes=mf.size, geo=geo, rev=mf.rev,
                 tiling_pending=pending, uploaded_lm=mf.lm, first_seen=mf.first_seen,
             ))
@@ -1514,6 +1540,35 @@ def cmd_sync_incidents(args) -> int:
 # prune
 # ===========================================================================
 
+def _tick_prune_clock(state: dict, fires: list[dict], fires_meta: dict,
+                      prev_catalog: dict | None) -> None:
+    """Prune's inactivity clock, kept by fire ID (hourly, by sync-catalogs).
+
+    Every active fire is stamped last seen now and any inactivity cleared;
+    a fire that incident folders feed starts its clock the first run it is
+    missing from the list. A list that may be partial (a full API page, or
+    far shorter than the previous catalog's) is skipped for the run: a fire
+    missing from it proves nothing.
+    """
+    prev_active = ((prev_catalog or {}).get("counts") or {}).get("active_fires")
+    why = fire_list_suspect(fires_meta.get("raw_rows", ACTIVE_FIRES_LIMIT),
+                            len(fires), prev_active)
+    if why:
+        log(f"[prune] inactivity clock not advanced this run: {why}")
+        return
+    now = state_mod.now_iso()
+    clock = state.setdefault("prune", {})
+    last_seen = clock.setdefault("last_seen_active", {})
+    inactive_since = clock.setdefault("inactive_since_by_id", {})
+    active = {fk for f in fires if (fk := fire_key(f.get("cornea_id")))}
+    for fk in active:
+        last_seen[fk] = now
+        inactive_since.pop(fk, None)
+    for fk in incident_ids.contributors(state):
+        if fk not in active:
+            inactive_since.setdefault(fk, now)
+
+
 def cmd_prune(args) -> int:
     """Manual-only, explicit-opt-in deletion. USER POLICY (2026-08-17): FTP-
     derived incident data is kept indefinitely — this command refuses to run
@@ -1527,7 +1582,6 @@ def cmd_prune(args) -> int:
 
     storage = make_storage(args.dry_run, args.out)
     state = state_mod.load_state(storage)
-
     with make_client() as client:
         fires = fetch_active_fires(client)
     active_slugs = {f["fire_slug"] for f in fires}
