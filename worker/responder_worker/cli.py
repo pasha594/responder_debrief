@@ -25,7 +25,14 @@ import httpx
 
 from . import archives, hotspots, catalogs as cat, health, imsr, incident_ids
 from . import config, frames, geopdf, hrrr, ir_vectors, pyrecast, state as state_mod
-from .asset_keys import tile_meta_key
+from .asset_keys import (
+    fetch_verified,
+    raw_key,
+    raw_key_candidates,
+    tile_meta_key,
+    tile_root,
+    tiles_prefix,
+)
 from .b2 import make_storage
 from .fires import (
     ACTIVE_FIRES_LIMIT,
@@ -976,25 +983,39 @@ def _sha_in_shard(sha: str, shard: int, shards: int) -> bool:
         return shard == 0
 
 
-def _pending_sheets(state) -> list[tuple[str, str, str]]:
-    """(sha, fire_slug, rel) for every probed-georeferenced sheet still owed
-    tiles, deduped by sha (the same sheet can appear in several folders)."""
-    out: list[tuple[str, str, str]] = []
+def _pending_sheets(state) -> list[tuple[str, str, list[str]]]:
+    """(sha, tiles prefix, raw keys) for every probed-georeferenced sheet
+    still owed tiles, deduped by sha (the same sheet can appear in several
+    folders). The prefix is where the sha's tiles go (asset_keys.tiles_prefix
+    of the first record holding it); the raw keys are every copy of its
+    bytes, that record's first.
+
+    Before the incident-ID migration nothing is stamped and no file has an
+    owner, so this is exactly the old selection and keys: the first holder's
+    fire_slug, its raw key first. After it, files that show on no fire
+    (hidden, unresolved, ignored) and pruned files are skipped.
+    """
+    by_id = incident_ids.migrated(state)
+    out: list[tuple[str, str, list[str]]] = []
     seen: set[str] = set()
     for inc in state.get("incidents", {}).values():
-        fire_slug = inc.get("fire_slug")
-        if not fire_slug:
+        if not (inc.get("storage_prefix") or inc.get("fire_slug")):
             continue
         for rel, meta in (inc.get("files") or {}).items():
             sha = meta.get("sha16")
-            if not sha or sha in seen or meta.get("kind") == "ir":
+            if (not sha or sha in seen or meta.get("kind") == "ir"
+                    or meta.get("pruned_at")):
+                continue
+            if by_id and incident_ids.file_owner(inc, meta) is None:
                 continue
             rec = state["tiled"].get(sha)
             if (not rec or rec.get("tiler_version") is not None
                     or not (rec.get("geo") or {}).get("georeferenced")):
                 continue
             seen.add(sha)
-            out.append((sha, fire_slug, rel))
+            raw_keys = list(dict.fromkeys([raw_key(inc, rel),
+                                           *raw_key_candidates(state, sha)]))
+            out.append((sha, tiles_prefix(state, sha, inc), raw_keys))
     return out
 
 
@@ -1014,33 +1035,37 @@ def cmd_tile_worker(args) -> int:
             if _sha_in_shard(t[0], args.shard, args.shards)]
     log(f"[tilew] shard {args.shard}/{args.shards}: {len(todo)} pending sheet(s)")
     done = 0
-    for sha, fire_slug, rel in todo:
+    for sha, prefix, raw_keys in todo:
         if frames.deadline_passed():
             log("[tilew] deadline — remaining sheets next run")
             break
-        if storage.get_json(tile_meta_key(fire_slug, sha)):
+        if storage.get_json(tile_meta_key(prefix, sha)):
             continue  # another worker already finished this one
-        key = f"raw/incidents/{fire_slug}/{rel}"
-        parsed = cat.parse_product_filename(rel.rpartition("/")[2])
         with tempfile.TemporaryDirectory(prefix="tilew_") as td:
             local = Path(td) / "sheet.pdf"
-            if not storage.get_file(key, local):
+            # Tiles are keyed by the sheet's sha, so only bytes that hash to
+            # it may be tiled: a shared prefix let one folder overwrite
+            # another's raw key with different bytes.
+            key = fetch_verified(storage, raw_keys, sha, local, log)
+            if key is None:
+                log(f"[tilew] {sha}: no raw copy matches its sha — skipped")
                 continue
+            parsed = cat.parse_product_filename(key.rpartition("/")[2])
             tiles_dir = Path(td) / "tiles"
             r = geopdf.process_pdf(local, tiles_dir,
                                    sheet=parsed.get("sheet"),
                                    zoom_cap=args.zoom_cap)
             if not r["tiles"]:
-                log(f"[tilew] {rel}: not tileable ({r.get('error')})")
+                log(f"[tilew] {key}: not tileable ({r.get('error')})")
                 continue
-            n = storage.put_tree(f"tiles/incidents/{fire_slug}/{sha}", tiles_dir)
-            storage.put_json(tile_meta_key(fire_slug, sha), {
+            n = storage.put_tree(tile_root(prefix, sha), tiles_dir)
+            storage.put_json(tile_meta_key(prefix, sha), {
                 "tiler_version": config.TILER_VERSION,
                 "georeferenced": True,
                 "projection": r["projection"],
                 "tiles": r["tiles"],
             })
-            log(f"[tilew] {rel}: {n} tiles z{r['tiles']['minzoom']}-{r['tiles']['maxzoom']}")
+            log(f"[tilew] {key}: {n} tiles z{r['tiles']['minzoom']}-{r['tiles']['maxzoom']}")
             done += 1
     log(f"[tilew] shard {args.shard}/{args.shards}: tiled {done}")
     return 0
