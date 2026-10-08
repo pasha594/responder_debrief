@@ -2,7 +2,7 @@
  * Settings gear (top right of the directory, and of the fire panel: the
  * sidebar's corner, or the bottom sheet's on phones): app theme
  * (dark/light — the machinery lived in the store all along, this is its first
- * UI) and the basemap style, three keyless variants per theme (see MAP_STYLES).
+ * UI) and the basemap style, keyless variants per theme (see MAP_STYLES).
  */
 import { useCallback, useRef, useState } from 'react';
 import { MAP_STYLES } from '../app/config';

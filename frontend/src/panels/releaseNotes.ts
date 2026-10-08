@@ -30,6 +30,11 @@ export const RELEASE_NOTES: ReleaseDay[] = [
     date: '2026-10-08',
     notes: [
       {
+        title: 'Relief map style',
+        summary:
+          'A new dark map style in Settings: shaded terrain on a slate ground, with no roads or place names, so ridges, drainages and slopes stand out. Pick Map (not Topo or Satellite) on the map to see it.',
+      },
+      {
         title: 'Better trail joins for walking routes outside the routing area',
         summary:
           'A pin off the trails used to join whichever trail was closest, even straight down a cliff. Walk now joins the trail with the shortest total trip over the terrain, and the cross-country part and the climb count in the time. If every way to a trail crosses a cliff, the straight line is marked and left out of the time; rivers and lakes on it aren’t checked.',

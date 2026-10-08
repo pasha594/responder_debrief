@@ -1,4 +1,5 @@
 /** Central configuration. Everything URL-shaped flows through here. */
+import type { StyleSpecification } from 'maplibre-gl';
 
 /** Fire data API (cornea). Browser-callable directly: CORS `*`, no auth. */
 export const FIRE_API = 'https://fire-api-prod.web.app';
@@ -13,22 +14,47 @@ export const DEM_TILES = 'https://s3.amazonaws.com/elevation-tiles-prod/terrariu
 
 /**
  * Basemap style catalog — all free and keyless, straight from the provider
- * (OpenFreeMap serves the OpenMapTiles styles; CARTO's GL styles are public).
- * Three variants per theme; the first entry is each theme's default.
+ * (OpenFreeMap serves the OpenMapTiles styles; CARTO's GL styles are public),
+ * plus Relief, built here. The first entry is each theme's default.
  * `swatch` is just the picker chip color, roughly the style's ground tone.
  */
 export interface MapStyleDef {
   id: string;
   label: string;
-  url: string;
+  /** A style URL, or the style itself. */
+  url: string | StyleSpecification;
   swatch: string;
 }
+
+/** Shaded terrain and nothing else: MapLibre's stock hillshade of the 3D
+ * terrain's own DEM tiles (the browser cache shares them) on a slate ground.
+ * Its own DEM source — MapLibre advises against one raster-dem for both
+ * terrain and hillshade — and OpenFreeMap's glyphs for our own labels. */
+const RELIEF_STYLE: StyleSpecification = {
+  version: 8,
+  glyphs: 'https://tiles.openfreemap.org/fonts/{fontstack}/{range}.pbf',
+  sources: {
+    relief: {
+      type: 'raster-dem',
+      tiles: [DEM_TILES],
+      encoding: 'terrarium',
+      tileSize: 256,
+      maxzoom: 15,
+      attribution: 'Terrain: Mapzen/AWS Open Data',
+    },
+  },
+  layers: [
+    { id: 'background', type: 'background', paint: { 'background-color': '#555566' } },
+    { id: 'relief', type: 'hillshade', source: 'relief' },
+  ],
+};
 
 export const MAP_STYLES: Record<'dark' | 'light', MapStyleDef[]> = {
   dark: [
     { id: 'dark-matter', label: 'Dark Matter', url: 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json', swatch: '#0e0e0e' },
     { id: 'fiord', label: 'Fiord', url: 'https://tiles.openfreemap.org/styles/fiord', swatch: '#232f41' },
     { id: 'dark', label: 'Classic dark', url: 'https://tiles.openfreemap.org/styles/dark', swatch: '#161313' },
+    { id: 'relief', label: 'Relief', url: RELIEF_STYLE, swatch: '#555566' },
   ],
   light: [
     { id: 'positron', label: 'Positron', url: 'https://tiles.openfreemap.org/styles/positron', swatch: '#f4f4f2' },
