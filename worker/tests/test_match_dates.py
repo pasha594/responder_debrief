@@ -1,8 +1,10 @@
 """The mirror job's side of the date sanity check: dating a folder from the
-listings it already makes, and re-validating matches cached in state."""
+listings it already makes, and re-validating matches cached in state (the
+bound fire found by fire ID, the folder dated by its own uploads)."""
 from types import SimpleNamespace
 
 from responder_worker import cli
+from responder_worker.fires import fire_key
 from responder_worker.matching import IncidentCandidate
 
 
@@ -35,15 +37,33 @@ def test_gather_unit_tokens_dates_the_folder(monkeypatch):
     assert cand.newest_activity == "2026-04-26 02:00"
 
 
-def _rec(method="name_fuzzy", **kw):
-    rec = {"fire_slug": "corrals", "match": {"method": method, "confidence": 0.923},
-           "latest_upload_ts": "2026-04-26T02:00:33Z", "latest_upload": "2026-04-26",
-           "dir_mtime": "2026-04-24 18:11"}
+CORRALS_NM = "{E42E66D2-0000-4000-8000-000000000001}"
+CORRAL_AZ = "{00B5F441-0000-4000-8000-000000000002}"
+APRIL = "Sun, 26 Apr 2026 02:00:33 GMT"
+
+
+def _rec(method="name_fuzzy", cornea_id=CORRALS_NM, lm=APRIL, **kw):
+    """southwest/2026_Corral: April's Arizona sheets, cached as a name match
+    to a fire. Its fire_slug names whatever fire held 'corrals' when it was
+    first mirrored; only cornea_id says which fire it is bound to."""
+    rec = {"fire_slug": "corrals", "storage_prefix": "corrals", "cornea_id": cornea_id,
+           "match": {"method": method, "confidence": 0.923},
+           "dir_mtime": "2026-04-24 18:11",
+           "files": {"products/20260425/ops_11x17_land_20260425_1955_Corral_AZASF000120.pdf":
+                     {"sha16": "aa", "lm": lm}},
+           # merged across the fire's folders by the old manifest build:
+           # never the folder's own evidence
+           "latest_upload_ts": "2026-09-30T00:00:00Z", "latest_upload": "2026-09-30"}
     rec.update(kw)
     return rec
 
 
-FIRES = {"corrals": {"fire_slug": "corrals", "created_on": "2026-09-17T19:53:09Z"}}
+def _fires(*fires):
+    return {fire_key(f["cornea_id"]): f for f in fires}
+
+
+NM = {"fire_slug": "corrals", "cornea_id": CORRALS_NM, "created_on": "2026-09-17T19:53:09Z"}
+FIRES = _fires(NM)
 
 
 def test_cached_fuzzy_match_to_a_much_newer_fire_is_rejected():
@@ -52,18 +72,49 @@ def test_cached_fuzzy_match_to_a_much_newer_fire_is_rejected():
     assert cli._cached_match_predates_fire(_rec(method="name_exact"), FIRES)
 
 
-def test_cached_check_uses_the_newest_stamp_it_has():
-    # One recent signal is enough to keep the match.
-    assert cli._cached_match_predates_fire(_rec(latest_upload="2026-09-18"), FIRES) is None
-    # No usable stamps: no evidence, no veto.
-    bare = _rec(latest_upload_ts=None, latest_upload=None, dir_mtime=None)
+def test_cached_check_looks_up_fire_by_id_not_slug():
+    # The folder is bound to April's Arizona fire. The 'corrals' slug now
+    # names September's New Mexico fire, which a slug lookup would have
+    # compared it to (and detached it, as it did WA Twin Sisters).
+    az = {"fire_slug": "corral", "cornea_id": CORRAL_AZ, "created_on": "2026-04-20T00:00:00Z"}
+    fires = _fires(NM, az)
+    assert cli._cached_match_predates_fire(_rec(cornea_id=CORRAL_AZ), fires) is None
+    # any spelling of the bound id finds the fire
+    bare = _rec(cornea_id=CORRALS_NM.strip("{}").lower())
+    assert cli._cached_match_predates_fire(bare, fires)
+
+
+def test_cached_check_inactive_fire_is_noop():
+    assert cli._cached_match_predates_fire(_rec(), {}) is None
+    # bound to a fire that is no longer active, while a same-slug fire is
+    other = {"fire_slug": "corrals", "cornea_id": CORRAL_AZ, "created_on": "2026-09-20T00:00:00Z"}
+    assert cli._cached_match_predates_fire(_rec(), _fires(other)) is None
+
+
+def test_cached_check_dates_the_folder_by_its_own_uploads():
+    # One recent map upload of its own is enough to keep the match; the
+    # fire-wide merged latest_upload* never counts, nor do template files.
+    recent = _rec()
+    recent["files"]["products/20260918/ops_corral_0918.pdf"] = {
+        "sha16": "bb", "lm": "Fri, 18 Sep 2026 08:00:00 GMT"}
+    assert cli._cached_match_predates_fire(recent, FIRES) is None
+    template = _rec()
+    template["files"]["products/yymmdd/ops_template.pdf"] = {
+        "sha16": "cc", "lm": "Fri, 18 Sep 2026 08:00:00 GMT"}
+    assert cli._cached_match_predates_fire(template, FIRES)
+    # no map file with an upload time: the folder's listing mtimes stand in
+    bare = _rec(files={}, dir_mtime="2026-04-24 18:11", children={"Products": "2026-09-18 01:00"})
     assert cli._cached_match_predates_fire(bare, FIRES) is None
+    nothing = _rec(files={}, dir_mtime=None)
+    assert cli._cached_match_predates_fire(nothing, FIRES) is None
 
 
 def test_cached_check_leaves_deterministic_and_unknown_cases_alone():
     assert cli._cached_match_predates_fire(_rec(method="unit_id"), FIRES) is None
     assert cli._cached_match_predates_fire(_rec(method="override"), FIRES) is None
-    assert cli._cached_match_predates_fire(_rec(), {}) is None            # fire no longer active
-    assert cli._cached_match_predates_fire({"fire_slug": "corrals"}, FIRES) is None  # already detached
-    no_created = {"corrals": {"fire_slug": "corrals", "created_on": None}}
+    detached = _rec(match=None)
+    assert cli._cached_match_predates_fire(detached, FIRES) is None
+    unresolved = _rec(cornea_id=None, match=None, id_unresolved={"reason": "date"})
+    assert cli._cached_match_predates_fire(unresolved, FIRES) is None
+    no_created = _fires(dict(NM, created_on=None))
     assert cli._cached_match_predates_fire(_rec(), no_created) is None

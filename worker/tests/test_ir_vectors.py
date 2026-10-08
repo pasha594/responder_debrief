@@ -26,57 +26,95 @@ def test_classify_kmz_layer():
     assert _classify_kmz_layer("None") is None
 
 
-def test_ir_backlog_flags_unconverted_flights():
-    from responder_worker.cli import IR_MANIFEST_VERSION as M, _ir_backlog
+SISI = "{5151510A-0000-4000-8000-000000000001}"
+BEAR_TRAP = "{1BB1F12F-DB68-40B0-8D7B-FA0E4FCEE2E4}"
+THUMB = "{5E0A1B2C-0000-4000-8000-0000000000F1}"
+SIOUX = "{51000000-0000-4000-8000-0000000000A2}"
+
+
+def _fk(cornea_id):
+    from responder_worker.fires import fire_key
+    return fire_key(cornea_id)
+
+
+def _bound(cornea_id, slug, **files):
+    """A record bound by unit_id; files by rel, each with a sha16."""
+    return {"fire_slug": slug, "storage_prefix": slug, "cornea_id": cornea_id,
+            "match": {"method": "unit_id"},
+            "files": {rel.replace("__", "/"): dict({"kind": "ir", "sha16": f"{i:016x}"}, **meta)
+                      for i, (rel, meta) in enumerate(files.items(), 1)}}
+
+
+def test_ir_backlog_counts_per_record_and_owner():
+    from responder_worker.cli import _ir_backlog
     from responder_worker.ir_vectors import IR_CONVERTER_VERSION as V
 
-    state = {
-        "ir": {"vectors/ir/big-grass/20260818_c0230_Aircraft1.geojson":
-               {"heat_types": ["Intense"], "v": V}},
-        "incidents": {
-            "gb/2026_Bear_Trap": {
-                "fire_slug": "bear-trap",
-                "ir_manifest_v": M,
-                "files": {
-                    "ir/20260819/20260819_c0800_Bear_Trap_Aircraft3_All.kmz": {},
-                    "ir/20260819/20260819_c0800_Bear_Trap_Aircraft3_All.pdf": {},
-                },
-            },
-            "gb/2026_Big_Grass": {
-                "fire_slug": "big-grass",
-                "ir_manifest_v": M,
-                "files": {"ir/20260818/x_Shapefiles.zip": {}},
-            },
-            "gb/2026_No_IR": {"fire_slug": "no-ir", "files": {"qr/ops.pdf": {}}},
-        },
-    }
-    assert _ir_backlog(state, lambda *_: None) == {"gb/2026_Bear_Trap"}
+    fires = {_fk(BEAR_TRAP): {"cornea_id": BEAR_TRAP, "post_title": "Bear Trap"},
+             _fk(THUMB): {"cornea_id": THUMB, "post_title": "Thumb"},
+             _fk(SISI): {"cornea_id": SISI, "post_title": "Sisi"}}
+    kmz = "ir/20260819/20260819_c0800_Bear_Trap_Aircraft3_All.kmz"
+    thumb_kmz = "ir/20260819/20260819_c0900_Thumb_Aircraft3_All.kmz"
+    sisi_zip = "ir/20260818/20260818_Sisi_Shapefiles.zip"
+    jle = _bound(BEAR_TRAP, "bear-trap", **{
+        kmz: {}, "ir/20260819/20260819_c0800_Bear_Trap_Aircraft3_All.pdf": {},
+        # the same flight folder carries Thumb's flight, stamped to Thumb
+        thumb_kmz: {"fk": _fk(THUMB), "fk_src": "name"}})
+    sisi = _bound(SISI, "sisi", **{sisi_zip: {}})
+    state = {"incidents": {"eastern/2026/2026_JulyLightningEvent": jle,
+                           "pacific_nw/2026/2026_Sisi": sisi,
+                           "pacific_nw/2026/2026_NoIR": _bound(SISI, "no-ir", **{
+                               "qr/ops.pdf": {"kind": "qr"}})},
+             "ir": {}}
+    sisi["ir_keys"] = {sisi_zip: {"key": "vectors/ir/sisi/a.geojson", "flight_id": "f",
+                                  "src_sha16": sisi["files"][sisi_zip]["sha16"]}}
+    state["ir"]["vectors/ir/sisi/a.geojson"] = {"heat_types": ["Intense"], "v": V}
+    quiet = lambda *_: None  # noqa: E731
 
-    # failed attempts count as attempted — no retry loop
-    state["ir"]["vectors/ir/bear-trap/20260819_c0800_Aircraft3.geojson"] = {
-        "failed": True, "v": V}
-    assert _ir_backlog(state, lambda *_: None) == set()
+    # FIRE keys: each owner of a flight in the folder, on its own
+    assert _ir_backlog(state, fires, quiet) == {_fk(BEAR_TRAP), _fk(THUMB)}
 
-    # ...but only under the current converter: a bump redoes every flight,
-    # successes included (they pick up the new classes + flight time)
-    state["ir"]["vectors/ir/bear-trap/20260819_c0800_Aircraft3.geojson"] = {
-        "failed": True, "v": V - 1}
-    state["ir"]["vectors/ir/big-grass/20260818_c0230_Aircraft1.geojson"] = {
-        "heat_types": ["Intense"]}
-    assert _ir_backlog(state, lambda *_: None) == {
-        "gb/2026_Bear_Trap", "gb/2026_Big_Grass"}
+    # a conversion stamped for the source's bytes under the current
+    # converter is done, failed or not (no retry loop)
+    def stamp(rec, src, key, conv):
+        rec.setdefault("ir_keys", {})[src] = {"key": key, "flight_id": "f",
+                                              "src_sha16": rec["files"][src]["sha16"]}
+        state["ir"][key] = conv
+    stamp(jle, kmz, "vectors/ir/bear-trap/b.geojson", {"failed": True, "v": V})
+    stamp(jle, thumb_kmz, "vectors/ir/bear-trap/t.geojson", {"heat_types": ["Isolated"], "v": V})
+    assert _ir_backlog(state, fires, quiet) == set()
 
-    # an IR manifest from before the current IR_MANIFEST_VERSION (e.g. no
-    # preview_url yet) is rebuilt once, even with every flight converted
-    state["ir"] = {
-        "vectors/ir/big-grass/a.geojson": {"heat_types": ["Intense"], "v": V},
-        "vectors/ir/bear-trap/b.geojson": {"failed": True, "v": V}}
-    assert _ir_backlog(state, lambda *_: None) == set()
-    state["incidents"]["gb/2026_Big_Grass"]["ir_manifest_v"] = M - 1
-    assert _ir_backlog(state, lambda *_: None) == {"gb/2026_Big_Grass"}
-    # incidents without IR files never need it
-    state["incidents"]["gb/2026_No_IR"].pop("ir_manifest_v", None)
-    assert "gb/2026_No_IR" not in _ir_backlog(state, lambda *_: None)
+    # ... but only for those bytes, and only under the current converter
+    jle["files"][kmz]["sha16"] = "ffff000000000001"   # a new revision of the KMZ
+    state["ir"]["vectors/ir/sisi/a.geojson"]["v"] = V - 1
+    assert _ir_backlog(state, fires, quiet) == {_fk(BEAR_TRAP), _fk(SISI)}
+
+    # an inactive owner, an unresolved folder and a hidden file owe nothing
+    del fires[_fk(SISI)]
+    jle["files"][kmz]["fk"], jle["files"][kmz]["fk_src"] = None, "hidden"
+    assert _ir_backlog(state, fires, quiet) == set()
+    jle["files"][kmz].pop("fk")
+    jle.update(id_unresolved={"reason": "date"}, match=None, cornea_id=None)
+    jle["files"][thumb_kmz].pop("fk")
+    assert _ir_backlog(state, fires, quiet) == set()
+
+
+def test_ir_backlog_skips_mixed_folder_with_no_owner_source():
+    # Bear Trap's IR folder holds only the KMZs of Sioux and Thumb, both
+    # active: no source names Bear Trap, so the flight gets no vectors and
+    # the backlog never queues a conversion for it.
+    from responder_worker.cli import _ir_backlog
+
+    fires = {_fk(f): {"cornea_id": f, "post_title": t}
+             for f, t in ((BEAR_TRAP, "Bear Trap"), (THUMB, "Thumb"), (SIOUX, "Sioux"))}
+    rec = _bound(BEAR_TRAP, "bear-trap", **{
+        "ir/20260901/20260901_Sioux_IR.kmz": {},
+        "ir/20260901/20260901_Thumb_IR.kmz": {},
+        "ir/20260901/20260901_IR_Map.pdf": {}})
+    state = {"incidents": {"eastern/2026/2026_BearTrap": rec}, "ir": {}}
+    assert _ir_backlog(state, fires, lambda *_: None) == set()
+    # with the owner's own KMZ in the folder, that one is the source
+    rec["files"]["ir/20260901/20260901_Bear_Trap_IR.kmz"] = {"kind": "ir", "sha16": "b" * 16}
+    assert _ir_backlog(state, fires, lambda *_: None) == {_fk(BEAR_TRAP)}
 
 
 def test_regroup_flat_coords():
@@ -231,121 +269,131 @@ def test_process_ir_kmz_classifies_nirops_placemarks(tmp_path, monkeypatch, gdal
     assert "-120.84," in out.read_text() or "-120.84]" in out.read_text()
 
 
+def _sisi_flight(local_kmz=None, kmz_bytes=b"kmz"):
+    """Sisi's 09-24 flight in its own folder (bound, own prefix): an
+    aerial PDF and the KMZ, as (rel, MirroredFile) in state order."""
+    from responder_worker.asset_keys import replay_file
+
+    pdf = "ir/20260924/20260924_Sisi_IR_11x17_Aerial.pdf"
+    kmz = "ir/20260924/20260924_Sisi_IR.kmz"
+    rec = _bound(SISI, "sisi", **{pdf: {}, kmz: {}})
+    rec["files"][kmz]["sha16"] = __import__("hashlib").sha256(kmz_bytes).hexdigest()[:16]
+    files = [(rel, replay_file(rec, rel, rec["files"][rel])) for rel in (pdf, kmz)]
+    if local_kmz is not None:
+        files[1][1].local_path = local_kmz
+    return rec, kmz, files
+
+
 @pytest.mark.skipif(shutil.which("ogr2ogr") is None, reason="ogr2ogr not installed")
 def test_ir_flights_converts_kmz_and_caches_under_the_converter_version(tmp_path):
     from types import SimpleNamespace
 
-    from responder_worker import cli, frames, ir_vectors
-    from responder_worker.mirror import MirroredFile
+    from responder_worker import fire_manifests as fm, frames, ir_vectors
 
-    kmz = _write_kmz(tmp_path / "20260924_Sisi_IR.kmz", _nirops_kml())
+    kmz_path = _write_kmz(tmp_path / "20260924_Sisi_IR.kmz", _nirops_kml())
+    rec, kmz, files = _sisi_flight(kmz_path, kmz_path.read_bytes())
     put = {}
     storage = SimpleNamespace(
-        put_file=lambda key, p: put.__setitem__(key, p.read_text()),
+        put_file=lambda key, p, **kw: put.__setitem__(key, p.read_text()),
         get_file=lambda key, p: False)
-
-    def mf(name, local):
-        return MirroredFile(
-            kind="ir", filename=name, key=f"raw/incidents/sisi/ir/20260924/{name}",
-            url="", size=1, sha16=None, rev=1, local_path=local, changed=True,
-            rel_dir="ir/20260924")
-
-    by_flight = {"ir/20260924": {"files": [
-        mf("20260924_Sisi_IR_11x17_Aerial.pdf", None),
-        mf("20260924_Sisi_IR.kmz", kmz),
-    ]}}
-    fire = {"fire_slug": "sisi", "post_title": "Sisi"}
-    key = "vectors/ir/sisi/20260924_IR_11x17_Aerial.geojson"
-    # a failure recorded by the old converter must not block the retry
-    state = {"ir": {key: {"failed": True, "v": ir_vectors.IR_CONVERTER_VERSION - 1}}}
+    fire = {"cornea_id": SISI, "fire_slug": "sisi", "post_title": "Sisi"}
+    key = (f"vectors/ir/sisi/{rec['files'][kmz]['sha16']}"
+           f".v{ir_vectors.IR_CONVERTER_VERSION}.geojson")
+    # a failure the old converter recorded for this source does not block it
+    old = "vectors/ir/sisi/20260924_IR_11x17_Aerial.geojson"
+    rec["ir_keys"] = {kmz: {"key": old, "flight_id": "20260924_IR_11x17_Aerial",
+                            "src_sha16": rec["files"][kmz]["sha16"]}}
+    state = {"ir": {old: {"failed": True, "v": ir_vectors.IR_CONVERTER_VERSION - 1}},
+             "tiled": {}}
     frames.start_deadline(0)  # disarmed
 
-    [flight] = cli._ir_flights(None, storage, state, fire, by_flight)
-    assert flight["flight_date"] == "2026-09-24"   # FTP folder
-    assert flight["flown_at"] == "2026-09-24T02:25:00Z"  # KMZ: 9/23 19:25 PDT
-    assert flight["flown_date"] is None
-    assert flight["geojson_url"] == f"/{key}"
-    assert "Possible" in flight["heat_types"]
-    assert key in put
+    def flight():
+        return fm.ir_flight(None, storage, state, fire, rec, "pacific_nw/2026/2026_Sisi",
+                            "ir/20260924", files, replay_only=False, fire_names={"sisi"},
+                            log=lambda *_: None)
+
+    f = flight()
+    assert f["flight_date"] == "2026-09-24"   # FTP folder
+    assert f["flown_at"] == "2026-09-24T02:25:00Z"  # KMZ: 9/23 19:25 PDT
+    assert f["flown_date"] is None
+    assert f["geojson_url"] == f"/{key}" and f["flight_id"] == "20260924_IR_11x17_Aerial"
+    assert "Possible" in f["heat_types"]
+    assert list(put) == [key]
     assert state["ir"][key]["v"] == ir_vectors.IR_CONVERTER_VERSION
+    assert rec["ir_keys"][kmz]["key"] == key
 
     # the next rebuild replays from cache: no local file, no download
-    by_flight["ir/20260924"]["files"][1].local_path = None
+    files[1][1].local_path = None
     put.clear()
-    [again] = cli._ir_flights(None, storage, state, fire, by_flight)
-    assert again == flight and not put
+    assert flight() == f and not put
 
 
 def test_ir_flights_keeps_an_older_result_when_it_cannot_reconvert(monkeypatch):
     from types import SimpleNamespace
 
-    from responder_worker import cli, frames
-    from responder_worker.mirror import MirroredFile
+    from responder_worker import fire_manifests as fm, frames
 
-    by_flight = {"ir/20260818": {"files": [MirroredFile(
-        kind="ir", filename="20260818_c0800_Elk_Aircraft3_Shapefiles.zip",
-        key="raw/incidents/elk/ir/20260818/x.zip", url="", size=1, sha16=None,
-        rev=1, local_path=None, changed=False, rel_dir="ir/20260818")]}}
-    key = "vectors/ir/elk/20260818_c0800_Aircraft3.geojson"
-    fire = {"fire_slug": "elk", "post_title": "Elk"}
-    storage = SimpleNamespace(get_file=lambda *_: False, put_file=lambda *_: None)
+    rec, kmz, files = _sisi_flight()
+    key = "vectors/ir/sisi/20260924_IR_11x17_Aerial.geojson"
+    rec["ir_keys"] = {kmz: {"key": key, "flight_id": "20260924_IR_11x17_Aerial",
+                            "src_sha16": rec["files"][kmz]["sha16"]}}
+    storage = SimpleNamespace(get_file=lambda *_: False, put_file=lambda *_, **kw: None)
+    fire = {"cornea_id": SISI, "fire_slug": "sisi", "post_title": "Sisi"}
 
-    # a run whose GDAL install failed: serve the pre-bump result, record nothing
-    monkeypatch.setattr(cli.shutil, "which", lambda _: None)
+    # a run whose GDAL install failed: serve the pre-bump result of the same
+    # source, record nothing
+    monkeypatch.setattr(fm.shutil, "which", lambda _: None)
     frames.start_deadline(0)
-    state = {"ir": {key: {"heat_types": ["Perimeter"]}}}
-    [flight] = cli._ir_flights(None, storage, state, fire, by_flight)
-    assert flight["geojson_url"] == f"/{key}"
-    assert flight["flown_at"] is None
-    assert state["ir"][key] == {"heat_types": ["Perimeter"]}
-
-
-def _ir_pdf(local, sha="abcd1234abcd1234"):
-    from responder_worker.mirror import MirroredFile
-    return MirroredFile(
-        kind="ir", filename="20260925_Sisi_IR_11x17_Aerial.pdf",
-        key="raw/incidents/sisi/ir/20260925/20260925_Sisi_IR_11x17_Aerial.pdf",
-        url="", size=1, sha16=sha, rev=1, local_path=local, changed=True,
-        rel_dir="ir/20260925")
+    state = {"ir": {key: {"heat_types": ["Perimeter"]}}, "tiled": {}}
+    f = fm.ir_flight(None, storage, state, fire, rec, "pacific_nw/2026/2026_Sisi",
+                     "ir/20260924", files, replay_only=False, fire_names={"sisi"},
+                     log=lambda *_: None)
+    assert f["geojson_url"] == f"/{key}" and f["flown_at"] is None
+    assert state["ir"] == {key: {"heat_types": ["Perimeter"]}}
+    assert rec["ir_keys"][kmz]["key"] == key
 
 
 def test_ir_preview_url_reuses_renders_and_never_queues_tiling(tmp_path, monkeypatch):
+    import dataclasses
     from types import SimpleNamespace
 
-    from responder_worker import cli, config, geopdf
+    from responder_worker import config, fire_manifests as fm, geopdf
 
+    rec, _kmz, files = _sisi_flight()
+    pdf = files[0][1]
+    sha = pdf.sha16
     put = {}
-    storage = SimpleNamespace(put_file=lambda key, p: put.__setitem__(key, p.read_bytes()))
+    storage = SimpleNamespace(put_file=lambda key, p, **kw: put.__setitem__(key, p.read_bytes()))
     rendered = []
 
-    def fake_render(pdf, out):
-        rendered.append(pdf)
+    def fake_render(pdf_path, out):
+        rendered.append(pdf_path)
         out.write_bytes(b"png")
         return out
 
     monkeypatch.setattr(geopdf, "render_preview", fake_render)
     monkeypatch.setattr(geopdf, "gdal_available", lambda: True)
-    key = "previews/incidents/sisi/abcd1234abcd1234.png"
+    key = f"previews/incidents/sisi/{sha}.png"
+
+    def url(mf, state):
+        return fm.ir_preview_url(storage, state, rec, mf, replay_only=False, log=lambda *_: None)
 
     # a preview the probe backlog already made (same key as map sheets)
-    state = {"tiled": {"abcd1234abcd1234": {"geo": {"preview": True}}}}
-    assert cli._ir_preview_url(storage, state, "sisi", _ir_pdf(None)) == f"/{key}"
+    assert url(pdf, {"tiled": {sha: {"geo": {"preview": True}}}}) == f"/{key}"
     assert not rendered
 
     # a PDF downloaded this run: rendered now, recorded as done for the tiler
-    pdf = tmp_path / "ir.pdf"
-    pdf.write_bytes(b"%PDF")
+    local = tmp_path / "ir.pdf"
+    local.write_bytes(b"%PDF")
     state = {"tiled": {}}
-    assert cli._ir_preview_url(storage, state, "sisi", _ir_pdf(pdf)) == f"/{key}"
-    assert rendered == [pdf] and put[key] == b"png"
-    rec = state["tiled"]["abcd1234abcd1234"]
-    assert rec["tiler_version"] == config.TILER_VERSION
-    assert rec["geo"]["preview"] is True
+    assert url(dataclasses.replace(pdf, local_path=local), state) == f"/{key}"
+    assert rendered == [local] and put[key] == b"png"
+    assert state["tiled"][sha]["tiler_version"] == config.TILER_VERSION
+    assert state["tiled"][sha]["geo"]["preview"] is True
 
     # a replayed PDF with no preview yet: nothing now, the probe backlog does it
     state = {"tiled": {}}
-    assert cli._ir_preview_url(storage, state, "sisi", _ir_pdf(None)) is None
-    assert state["tiled"] == {}
+    assert url(pdf, state) is None and state["tiled"] == {}
 
 
 def test_tilers_skip_ir_pdfs():
@@ -366,34 +414,42 @@ def test_tilers_skip_ir_pdfs():
 
 
 def test_probe_backlog_previews_ir_pdfs_without_queuing_tiles(monkeypatch):
+    import hashlib
     from types import SimpleNamespace
 
-    from responder_worker import cli, config, frames, geopdf
+    from responder_worker import cli, frames, geopdf
+
+    raw = {"raw/incidents/sisi/ir/20260925/a.pdf": b"%PDF ir",
+           "raw/incidents/sisi/products/20260923/ops.pdf": b"%PDF ops"}
 
     def get_file(key, local):
-        local.write_bytes(b"%PDF")
+        if key not in raw:
+            return False
+        local.write_bytes(raw[key])
         return True
 
     put = {}
     storage = SimpleNamespace(get_file=get_file,
-                              put_file=lambda key, p: put.__setitem__(key, True))
+                              put_file=lambda key, p, **kw: put.__setitem__(key, True))
     monkeypatch.setattr(geopdf, "gdal_available", lambda: True)
     monkeypatch.setattr(geopdf, "probe_pdf",
                         lambda p: {"georeferenced": True, "projection": "UTM 10N"})
     monkeypatch.setattr(geopdf, "render_preview",
                         lambda pdf, out: out.write_bytes(b"png") or out)
     frames.start_deadline(0)
-    state = {"tiled": {}, "incidents": {"pnw/2026_Sisi": {"fire_slug": "sisi", "files": {
-        "ir/20260925/a.pdf": {"sha16": "aaaa", "kind": "ir"},
-        "products/20260923/ops.pdf": {"sha16": "bbbb", "kind": "product"},
-    }}}}
+    ir_sha, ops_sha = (hashlib.sha256(raw[k]).hexdigest()[:16] for k in raw)
+    rec = _bound(SISI, "sisi", **{
+        "ir/20260925/a.pdf": {"sha16": ir_sha},
+        "products/20260923/ops.pdf": {"sha16": ops_sha, "kind": "product"}})
+    state = {"tiled": {}, "incidents": {"pnw/2026_Sisi": rec}}
     assert cli._probe_backlog(storage, state, lambda *_: None) == {"pnw/2026_Sisi"}
-    assert "previews/incidents/sisi/aaaa.png" in put
+    assert f"previews/incidents/sisi/{ir_sha}.png" in put
     # georeferenced either way — only the map sheet is owed tiles
-    assert state["tiled"]["aaaa"]["tiler_version"] == config.TILER_VERSION
-    assert state["tiled"]["bbbb"]["tiler_version"] is None
+    assert state["tiled"][ir_sha]["tiler_version"] == cli.config.TILER_VERSION
+    assert state["tiled"][ops_sha]["tiler_version"] is None
+    assert state["tiled"][ir_sha]["prefix"] == "sisi"
     # and an IR record is never "repaired" into a tiling candidate later
-    state["tiled"]["aaaa"].pop("grat_at")
+    state["tiled"][ir_sha].pop("grat_at")
     put.clear()
     cli._probe_backlog(storage, state, lambda *_: None)
-    assert "previews/incidents/sisi/aaaa.png" not in put
+    assert f"previews/incidents/sisi/{ir_sha}.png" not in put

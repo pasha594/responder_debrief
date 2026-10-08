@@ -1,7 +1,8 @@
 """Fire <-> FTP-incident-dir and fire <-> pyrecast-slug matching.
 
 Deterministic unit-token matching first, tolerant fuzzy name fallback second,
-GACC->state constraint throughout, manual overrides as the escape hatch.
+GACC->state constraint throughout, manual overrides (by fire ID) as the
+escape hatch. A match names its fire by cornea_id; fire_slug is only a name.
 """
 
 from __future__ import annotations
@@ -16,7 +17,7 @@ from datetime import datetime, timedelta, timezone
 from rapidfuzz import fuzz
 
 from . import config
-from .fires import slugify
+from .fires import fire_key, is_fire_id, slugify
 
 # Deterministic join key inside product filenames:
 #   ops_arch_e_port_20260816_2100_Elk_COGMF000114_817day.pdf -> COGMF 000114
@@ -168,10 +169,33 @@ class IncidentCandidate:
 
 @dataclass
 class Match:
-    fire_slug: str
+    fire_slug: str   # the fire's name as listed now: logs only
     method: str      # unit_id | name_exact | name_fuzzy | override
     confidence: float
     token: str | None = None
+    cornea_id: str | None = None   # the fire, by ID (compare through fire_key)
+
+
+def resolve_override(ov: str | None, fires: list[dict]) -> tuple[str, Match | None, str | None]:
+    """A match_overrides.json value -> (kind, Match | None, reason).
+
+    kind is none (no override), ignore, match (an active fire by GUID, any
+    spelling), inactive (a GUID naming no active fire) or error (anything
+    else: a fire slug or name is refused, names are shared between fires).
+    """
+    if not ov:
+        return "none", None, None
+    if ov == "ignore":
+        return "ignore", None, None
+    if not is_fire_id(ov):
+        return "error", None, (f"override {ov!r} is not a fire GUID or 'ignore' "
+                               "(fire slugs are not accepted)")
+    fk = fire_key(ov)
+    fire = next((f for f in fires if fire_key(f.get("cornea_id")) == fk), None)
+    if fire is None:
+        return "inactive", None, f"override {ov} names no active fire"
+    return "match", Match(fire_slug=fire.get("fire_slug") or fk, method="override",
+                          confidence=1.0, cornea_id=fire.get("cornea_id")), None
 
 
 def _allowed_states(region: str) -> set[str] | None:
@@ -193,31 +217,51 @@ def match_candidate(
     cand: IncidentCandidate,
     fires: list[dict],
     overrides: dict[str, str] | None = None,
+    *,
+    prefer_fk: str | None = None,
+    log=print,
 ) -> Match | None:
-    """Match one incident dir to one active fire. None = unmatched."""
-    overrides = overrides or {}
-    ov = overrides.get(cand.key)
-    if ov == "ignore":
-        return None
-    if ov:
-        return Match(fire_slug=ov, method="override", confidence=1.0)
+    """Match one incident dir to one active fire. None = unmatched.
 
-    by_uid = {
-        (f.get("unique_fire_id") or "").upper(): f
-        for f in fires
-        if f.get("unique_fire_id")
-    }
+    `overrides` is resolved with resolve_override (sync-incidents resolves
+    them itself and passes None). `prefer_fk` is the fire the folder is
+    bound to now: a unit token two active fires share picks it, and
+    otherwise is skipped for the next token.
+    """
+    kind, m, _why = resolve_override((overrides or {}).get(cand.key), fires)
+    if kind != "none":
+        # an override decides: its fire, or unmatched for 'ignore' and for an
+        # override that cannot apply (never a name match instead)
+        return m
+
+    by_uid: dict[str, list[dict]] = {}
+    for f in fires:
+        uid = (f.get("unique_fire_id") or "").upper()
+        if uid:
+            by_uid.setdefault(uid, []).append(f)
 
     # 1. deterministic unit token, majority vote
     if cand.unit_tokens:
         for token, _n in cand.unit_tokens.most_common():
-            fire = by_uid.get(token.upper())
-            if fire:
+            holders = by_uid.get(token.upper()) or []
+            if len(holders) > 1:
+                # A unique_fire_id can belong to two active fires; it then
+                # proves only the fire the folder is already bound to.
+                preferred = [f for f in holders
+                             if prefer_fk and fire_key(f.get("cornea_id")) == prefer_fk]
+                if len(preferred) != 1:
+                    log(f"[match] {cand.key}: ambiguous uid {token} "
+                        f"({len(holders)} active fires) — trying the next token")
+                    continue
+                holders = preferred
+            if holders:
+                fire = holders[0]
                 return Match(
                     fire_slug=fire["fire_slug"],
                     method="unit_id",
                     confidence=1.0,
                     token=token,
+                    cornea_id=fire.get("cornea_id"),
                 )
 
     # 2. fuzzy name fallback, constrained by GACC states
@@ -245,7 +289,8 @@ def match_candidate(
             fuzzy_hits.append((score, f))
 
     if len(exact_hits) == 1:
-        return Match(fire_slug=exact_hits[0]["fire_slug"], method="name_exact", confidence=0.95)
+        return Match(fire_slug=exact_hits[0]["fire_slug"], method="name_exact", confidence=0.95,
+                     cornea_id=exact_hits[0].get("cornea_id"))
     if len(exact_hits) > 1:
         return None  # ambiguous tie -> unmatched (surface in report)
     if fuzzy_hits:
@@ -253,7 +298,8 @@ def match_candidate(
         if len(fuzzy_hits) > 1 and fuzzy_hits[0][0] == fuzzy_hits[1][0]:
             return None
         score, f = fuzzy_hits[0]
-        return Match(fire_slug=f["fire_slug"], method="name_fuzzy", confidence=round(score / 100, 3))
+        return Match(fire_slug=f["fire_slug"], method="name_fuzzy",
+                     confidence=round(score / 100, 3), cornea_id=f.get("cornea_id"))
     return None
 
 

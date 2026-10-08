@@ -11,9 +11,11 @@ Every key comes from asset_keys: a raw file can sit under another prefix
 were first written to, and an IR flight's vectors under the key stamped for
 its source file (ir_keys). Nothing here builds a key from a fire's slug.
 
-Until the fire-ID mirror ships (push B) only the incident-ID migration runs
-this, replay only: no tiling, previews, conversions or downloads. Today's
-slug-keyed sync-incidents keeps cli._tile_and_manifest.
+sync-incidents and the incident-ID migration build manifests with the same
+code, so the first mirror run after the migration reproduces its manifests.
+The migration replays only (no tiling, previews, conversions or downloads);
+the mirror passes its downloads in `mirrors` and converts IR flights owed a
+conversion.
 """
 
 from __future__ import annotations

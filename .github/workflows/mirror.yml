@@ -10,7 +10,7 @@ on:
   workflow_dispatch:
     inputs:
       fire:
-        description: "Limit to one fire (slug), e.g. elk"
+        description: "Limit to one fire: fire slug or fire key (cornea_id), e.g. elk"
         required: false
         type: string
       since:

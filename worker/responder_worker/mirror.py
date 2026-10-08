@@ -4,6 +4,10 @@ B2 raw/ uploads, per-incident checkpoints.
 Change detection: listed child-dir mtimes vs state (skip unchanged subtrees
 with zero requests); per-file etag/last-modified conditional GETs; QR in-place
 overwrites bump `rev`.
+
+Records are bound to a fire by cornea_id (incident_ids.bind_record) and every
+key comes from the record (asset_keys): an unchanged file is where its bytes
+are, a new revision goes under the record's own storage prefix.
 """
 
 from __future__ import annotations
@@ -18,7 +22,9 @@ from pathlib import Path
 import httpx
 
 from . import config, frames
+from .asset_keys import new_raw_key, raw_key, replay_file
 from .ftp_index import Entry, list_dir
+from .incident_ids import bind_record, revision_stamp
 
 
 def _now_iso() -> str:
@@ -108,6 +114,7 @@ class IncidentMirror:
         self.storage = storage
         self.state = state
         self.work_dir = work_dir or Path(tempfile.mkdtemp(prefix="mirror_"))
+        self._tmp = self.work_dir  # per incident, set by sync_incident
         self.max_file_bytes = int(max_file_mb * 1024 * 1024) if max_file_mb else None
         self.max_files = max_files
         self.products_keep = products_keep
@@ -116,18 +123,21 @@ class IncidentMirror:
         self.force = force
 
     # ------------------------------------------------------------------
-    def sync_incident(self, *, incident_key: str, fire_slug: str, dir_url: str,
-                      match: dict, dir_mtime: str | None) -> MirrorResult:
+    def sync_incident(self, *, incident_key: str, dir_url: str, match: dict,
+                      cornea_id: str | None, bound: dict | None,
+                      dir_mtime: str | None, region: str | None = None) -> MirrorResult:
+        """Mirror one incident folder under the record bound to `cornea_id`.
+
+        A new record gets its own storage prefix; an existing one must
+        already be bound to this fire (the caller rebinds first) and keeps
+        its fire_slug and storage_prefix.
+        """
         res = MirrorResult()
-        inc_state = self.state["incidents"].setdefault(incident_key, {
-            "fire_slug": fire_slug,
-            "match": match,
-            "dir_mtime": None,
-            "children": {},
-            "files": {},
-        })
-        inc_state["fire_slug"] = fire_slug
-        inc_state["match"] = match
+        inc_state = bind_record(self.state, incident_key, cornea_id=cornea_id,
+                                match=match, bound=bound, region=region)
+        # downloads land in a folder of their own per incident, so two
+        # folders sharing a file path never share a temp file
+        self._tmp = self.work_dir / hashlib.sha1(incident_key.encode()).hexdigest()[:12]
 
         children = list_dir(self.client, dir_url)
         res.listings += 1
@@ -142,21 +152,21 @@ class IncidentMirror:
             if cname.lower() in ("products", "gis"):
                 if unchanged:
                     res.skipped_unchanged += 1
-                    self._replay_cached(inc_state, "products/", fire_slug, res)
+                    self._replay_cached(inc_state, "products/", res)
                 else:
-                    self._sync_products(child, inc_state, fire_slug, res)
+                    self._sync_products(child, inc_state, res)
             elif cname.lower() == "qr":
                 if unchanged:
                     res.skipped_unchanged += 1
-                    self._replay_cached(inc_state, "qr/", fire_slug, res)
+                    self._replay_cached(inc_state, "qr/", res)
                 else:
-                    self._sync_flat(child, inc_state, fire_slug, "qr", "qr", res)
+                    self._sync_flat(child, inc_state, "qr", "qr", res)
             elif cname.lower() == "ir":
                 if unchanged:
                     res.skipped_unchanged += 1
-                    self._replay_cached(inc_state, "ir/", fire_slug, res)
+                    self._replay_cached(inc_state, "ir/", res)
                 else:
-                    self._sync_ir(child, inc_state, fire_slug, res)
+                    self._sync_ir(child, inc_state, res)
             else:
                 continue  # unknown subfolder — not a known container
             saw_known_child = True
@@ -167,37 +177,24 @@ class IncidentMirror:
             # container, with dated dirs (and sometimes loose files) at its root
             # — e.g. 2026_BigGrass/20260817/. Without this the whole incident
             # mirrored as zero files.
-            self._sync_dailies(children, inc_state, fire_slug, res)
+            self._sync_dailies(children, inc_state, res)
             for e in children:
                 if not e.is_dir:
-                    self._file(e, inc_state, fire_slug, "products/current",
-                               "product", res)
+                    self._file(e, inc_state, "products/current", "product", res)
 
         inc_state["dir_mtime"] = dir_mtime
         inc_state["synced_at"] = now_iso()
         return res
 
     # ------------------------------------------------------------------
-    def _replay_cached(self, inc_state: dict, rel_prefix: str, fire_slug: str,
-                       res: MirrorResult) -> None:
-        """Subtree unchanged: emit records from state without any requests."""
+    def _replay_cached(self, inc_state: dict, rel_prefix: str, res: MirrorResult) -> None:
+        """Subtree unchanged: emit records from state without any requests,
+        keyed where each file's bytes are."""
         for rel, meta in inc_state["files"].items():
-            if not rel.startswith(rel_prefix):
-                continue
-            rel_dir, _, filename = rel.rpartition("/")
-            kind = "mobile" if meta.get("kind") == "mobile" else rel_prefix.rstrip("/").split("/")[0]
-            kind = {"products": "product"}.get(kind, kind)
-            res.files.append(MirroredFile(
-                kind=meta.get("kind", kind), filename=filename,
-                key=f"raw/incidents/{fire_slug}/{rel}",
-                url=meta.get("url", ""), size=meta.get("size"),
-                sha16=meta.get("sha16"), rev=meta.get("rev", 1),
-                local_path=None, changed=False, rel_dir=rel_dir,
-                lm=meta.get("lm"), first_seen=meta.get("first_seen"),
-            ))
+            if rel.startswith(rel_prefix) and not meta.get("pruned_at"):
+                res.files.append(replay_file(inc_state, rel, meta))
 
-    def _sync_products(self, child: Entry, inc_state: dict, fire_slug: str,
-                       res: MirrorResult) -> None:
+    def _sync_products(self, child: Entry, inc_state: dict, res: MirrorResult) -> None:
         """Products/GIS trees are GISS-operator-shaped and vary a lot.
 
         Observed layouts (all handled):
@@ -215,10 +212,10 @@ class IncidentMirror:
         # (a) files sitting directly in Products/
         for e in entries:
             if not e.is_dir:
-                self._file(e, inc_state, fire_slug, "products/current", "product", res)
+                self._file(e, inc_state, "products/current", "product", res)
 
         # (b) daily dirs directly in Products/
-        self._sync_dailies(entries, inc_state, fire_slug, res)
+        self._sync_dailies(entries, inc_state, res)
 
         # (c) one level of named subfolders ("Current Maps", "Daily Products", …)
         named = [e for e in entries if e.is_dir and _daily_key(e.name) is None]
@@ -230,8 +227,8 @@ class IncidentMirror:
             rel = f"products/{_safe_name(sub.name).lower()}"
             for e in sub_entries:
                 if not e.is_dir:
-                    self._file(e, inc_state, fire_slug, rel, "product", res)
-            self._sync_dailies(sub_entries, inc_state, fire_slug, res)
+                    self._file(e, inc_state, rel, "product", res)
+            self._sync_dailies(sub_entries, inc_state, res)
 
     def _dated_floor(self) -> str:
         """Oldest dated folder worth mirroring: today, unless --since overrides."""
@@ -254,16 +251,14 @@ class IncidentMirror:
         keyed = [(_daily_key(e.name), e) for e in entries if e.is_dir]
         return self._select_current([(k, e) for k, e in keyed if k], cap)
 
-    def _sync_dailies(self, entries: list[Entry], inc_state: dict, fire_slug: str,
-                      res: MirrorResult) -> None:
+    def _sync_dailies(self, entries: list[Entry], inc_state: dict, res: MirrorResult) -> None:
         """Current-period dated dirs, keyed by normalized YYYYMMDD."""
         for key, daily in self._select_dated(entries, self.products_keep):
             # B2 path uses the NORMALIZED key so 07282026 and 20260728 land in
             # one place and manifest op_date parsing stays uniform.
-            self._sync_flat(daily, inc_state, fire_slug, f"products/{key}", "product", res)
+            self._sync_flat(daily, inc_state, f"products/{key}", "product", res)
 
-    def _sync_ir(self, child: Entry, inc_state: dict, fire_slug: str,
-                 res: MirrorResult) -> None:
+    def _sync_ir(self, child: Entry, inc_state: dict, res: MirrorResult) -> None:
         entries = list_dir(self.client, child.url)
         res.listings += 1
         # IR flight dirs carry suffixes (20260817_UTF_Weather), so key on the
@@ -271,30 +266,32 @@ class IncidentMirror:
         keyed = [(_daily_key(e.name[:8]), e) for e in entries if e.is_dir]
         for _, sub in self._select_current(
                 [(k, e) for k, e in keyed if k], self.ir_keep):
-            self._sync_flat(sub, inc_state, fire_slug, f"ir/{sub.name}", "ir", res)
+            self._sync_flat(sub, inc_state, f"ir/{sub.name}", "ir", res)
         if not any(e.is_dir for e in entries):
             # some incidents keep flight files directly under IR/
             for e in entries:
                 if not e.is_dir:
-                    self._file(e, inc_state, fire_slug, "ir", "ir", res)
+                    self._file(e, inc_state, "ir", "ir", res)
 
-    def _sync_flat(self, dir_entry: Entry, inc_state: dict, fire_slug: str,
-                   rel_dir: str, kind: str, res: MirrorResult) -> None:
+    def _sync_flat(self, dir_entry: Entry, inc_state: dict, rel_dir: str, kind: str,
+                   res: MirrorResult) -> None:
         entries = list_dir(self.client, dir_entry.url)
         res.listings += 1
         for e in entries:
             if e.is_dir:
                 continue
-            self._file(e, inc_state, fire_slug, rel_dir, kind, res)
+            self._file(e, inc_state, rel_dir, kind, res)
 
     # ------------------------------------------------------------------
-    def _file(self, e: Entry, inc_state: dict, fire_slug: str, rel_dir: str,
-              kind: str, res: MirrorResult) -> None:
+    def _file(self, e: Entry, inc_state: dict, rel_dir: str, kind: str,
+              res: MirrorResult) -> None:
         if self.max_files is not None and res.downloads >= self.max_files:
             return
         filename = _safe_name(e.name)
         rel = f"{rel_dir}/{filename}"
-        key = f"raw/incidents/{fire_slug}/{rel}"
+        meta = inc_state["files"].get(rel, {})
+        if meta.get("pruned_at"):
+            return  # deleted by prune: never fetched again
         fkind = kind
         if filename.lower().startswith("mobile"):
             fkind = "mobile"
@@ -313,7 +310,6 @@ class IncidentMirror:
             res.skipped_deferred += 1
             return
 
-        meta = inc_state["files"].get(rel, {})
         headers = {}
         if not self.force:
             if meta.get("etag"):
@@ -325,7 +321,8 @@ class IncidentMirror:
         if resp.status_code == 304:
             res.skipped_unchanged += 1
             res.files.append(MirroredFile(
-                kind=meta.get("kind", fkind), filename=filename, key=key, url=e.url,
+                kind=meta.get("kind", fkind), filename=filename,
+                key=raw_key(inc_state, rel), url=e.url,
                 size=meta.get("size"), sha16=meta.get("sha16"),
                 rev=meta.get("rev", 1), local_path=None, changed=False,
                 rel_dir=rel_dir, lm=meta.get("lm"), first_seen=meta.get("first_seen"),
@@ -342,7 +339,10 @@ class IncidentMirror:
         if changed:
             rev += 1
 
-        local = self.work_dir / fire_slug / rel
+        # New bytes always go under the record's own prefix: a file stamped
+        # elsewhere (files[rel].prefix) moves home and loses the stamp.
+        key = new_raw_key(inc_state, rel)
+        local = self._tmp / rel
         local.parent.mkdir(parents=True, exist_ok=True)
         local.write_bytes(body)
         self.storage.put_file(key, local)
@@ -357,6 +357,9 @@ class IncidentMirror:
             "kind": fkind,
             "url": e.url,
             "first_seen": first_seen,
+            # an owner stamp carries over for the same bytes, or when the
+            # file name itself (or an operator) proved the owner
+            **revision_stamp(meta, sha),
         }
         res.downloads += 1
         res.bytes_downloaded += len(body)

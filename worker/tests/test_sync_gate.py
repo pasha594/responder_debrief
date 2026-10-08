@@ -1,6 +1,7 @@
-"""The incident-ID migration flag as the jobs see it: the pre-fire-ID
-mirror pauses on migrated state, sync-catalogs switches from the slug-keyed
-records to the fire-ID index, and keeps prune's inactivity clock by ID."""
+"""The incident-ID migration flag as the jobs see it: the fire-ID mirror
+pauses until the migration has run (a fresh deployment starts migrated),
+sync-catalogs switches from the slug-keyed records to the fire-ID index, and
+keeps prune's inactivity clock by ID."""
 
 import contextlib
 import json
@@ -8,7 +9,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from responder_worker import catalogs as cat, cli, health
+from responder_worker import catalogs as cat, cli, fire_manifests, health
 from responder_worker.b2 import DryRunStorage
 from responder_worker.fires import fire_key
 from responder_worker.state import STATE_KEY
@@ -85,22 +86,43 @@ def _run_sync_catalogs(monkeypatch, storage, fires, *, raw_rows=None):
 
 
 # ---------------------------------------------------------------------------
-# push A's guard: the slug-keyed mirror never runs on migrated state
+# the gate: the fire-ID mirror pauses until the migration has run
 # ---------------------------------------------------------------------------
 
 def _no_ftp(*a, **k):
     raise AssertionError("the paused mirror must not reach the network")
 
 
-def _incidents_args(tmp_path):
-    return SimpleNamespace(dry_run=True, out=tmp_path, year=2026, fire=None,
-                           region=None, priority_fires="", zoom_cap=None)
+def _incidents_args(tmp_path, **kw):
+    args = dict(dry_run=True, out=tmp_path, year=2026, fire=None, region=None,
+                priority_fires="", zoom_cap=None, force=False, since=None,
+                max_file_mb=None, max_pdfs=None, products_keep=3, ir_keep=2, tile_budget=0)
+    args.update(kw)
+    return SimpleNamespace(**args)
 
 
-def test_push_a_guard_pauses_on_migrated_state(tmp_path, monkeypatch):
+def _wire_sync(monkeypatch, storage, fires, *, roots=None):
+    """cmd_sync_incidents against `storage`, with the given active fires
+    and an FTP whose region roots list `roots` ({url: html}) and nothing
+    else; GDAL and ogr2ogr absent, overrides empty."""
+    monkeypatch.setattr(cli, "make_storage", lambda dry_run, out: storage)
+    monkeypatch.setattr(cli, "make_client", lambda: contextlib.nullcontext(None))
+    monkeypatch.setattr(cli, "fetch_active_fires",
+                        lambda client, meta=None: [dict(f) for f in fires])
+    monkeypatch.setattr(cli.config, "load_match_overrides", lambda: {})
+    monkeypatch.setattr(cli, "get_optional",
+                        lambda client, url: SimpleNamespace(text=(roots or {})[url])
+                        if url in (roots or {}) else None)
+    monkeypatch.setattr(cli, "list_dir", _no_ftp)
+    monkeypatch.setattr(cli.geopdf, "gdal_available", lambda: False)
+    monkeypatch.setattr(fire_manifests.shutil, "which", lambda _: None)
+
+
+def test_sync_incidents_paused_publishes_failure_writes_nothing(tmp_path, monkeypatch):
+    # Push B on state the migration has not re-keyed yet (the window between
+    # push B and the apply): visible as a failure on /health, no other write.
     storage = SpyStorage(tmp_path / "out")
-    state = {"incidents": _records(), "migrations": {"incident_ids": FLAG},
-             "incident_fires": {}, "catalog_version": 845}
+    state = {"incidents": _records(), "catalog_version": 845}
     storage.put_json(STATE_KEY, state)
     storage.put_json(health.KEY, health.merge_health(None, "mirror", {
         "finished_at": "2026-10-08T23:00:00Z", "ok": True, "note": None,
@@ -118,37 +140,121 @@ def test_push_a_guard_pauses_on_migrated_state(tmp_path, monkeypatch):
     assert (tmp_path / "out" / STATE_KEY).read_bytes() == state_before
     m = storage.get_json(health.KEY)["mirror"]
     assert m["ok"] is True and m["files_downloaded"] == 32  # last run kept
-    assert m["last_failure"]["error"] == "migrated_state"
-    assert m["last_failure"]["note"] == "paused: migrated state needs the fire-ID sync code"
+    assert m["last_failure"]["error"] == "paused_migration"
+    assert m["last_failure"]["note"] == "paused: awaiting incident-ID migration (maint.yml)"
     assert storage.get_json(health.KEY)["history"][-1]["ok"] is False
 
-
-def test_push_a_guard_seeds_failure_on_first_run(tmp_path, monkeypatch):
-    storage = SpyStorage(tmp_path / "out")
-    storage.put_json(STATE_KEY, {"incidents": {}, "migrations": {"incident_ids": FLAG}})
+    # the first run of a deployment seeds the section, ok=false
+    storage = SpyStorage(tmp_path / "first")
+    storage.put_json(STATE_KEY, {"incidents": _records()})
     monkeypatch.setattr(cli, "make_storage", lambda dry_run, out: storage)
-    monkeypatch.setattr(cli, "make_client", _no_ftp)
     assert cli.cmd_sync_incidents(_incidents_args(tmp_path)) == 0
     m = storage.get_json(health.KEY)["mirror"]
-    assert m["ok"] is False and m["files_downloaded"] == 0
-    assert m["last_failure"]["error"] == "migrated_state"
+    assert m["ok"] is False and m["files_downloaded"] == 0 and m["rebinds"] == []
+    assert m["last_failure"]["error"] == "paused_migration"
 
 
-def test_push_a_guard_lets_unmigrated_state_through(tmp_path, monkeypatch):
+@pytest.mark.parametrize("stored", [None, {"incidents": {}, "catalog_version": 3}])
+def test_fresh_state_auto_migrated(tmp_path, monkeypatch, stored):
+    # No state/state.json, or no folder mirrored yet: nothing is keyed by
+    # slug, so the deployment starts keyed by fire ID instead of pausing.
     storage = SpyStorage(tmp_path / "out")
-    storage.put_json(STATE_KEY, {"incidents": _records(), "migrations": {}})
+    if stored is not None:
+        storage.put_json(STATE_KEY, stored)
+    _wire_sync(monkeypatch, storage, [_grasshopper_fire()])
+    monkeypatch.setattr(cat, "now_iso", lambda: FLAG)
+    assert cli.cmd_sync_incidents(_incidents_args(tmp_path)) == 0
 
-    class Reached(Exception):
-        pass
+    state = storage.get_json(STATE_KEY)
+    assert state["migrations"]["incident_ids"] == FLAG
+    catalog = storage.get_json("catalogs/catalog.json")
+    assert catalog["fires"][0]["has_incident_maps"] is False
+    first = (stored or {}).get("catalog_version", 0) + 1
+    assert catalog["version"] == state["catalog_version"] == first
+    m = storage.get_json(health.KEY)["mirror"]
+    assert m["ok"] is True and "last_failure" not in m and m["unresolved"] == []
 
-    def make_client():
-        raise Reached
-    monkeypatch.setattr(cli, "make_storage", lambda dry_run, out: storage)
-    monkeypatch.setattr(cli.config, "load_match_overrides", lambda: {})
-    monkeypatch.setattr(cli, "make_client", make_client)
-    with pytest.raises(Reached):
-        cli.cmd_sync_incidents(_incidents_args(tmp_path))
-    assert health.KEY not in storage.written
+
+def test_ir_backlog_fks_not_looked_up_as_incident_keys(tmp_path, monkeypatch):
+    # A Grasshopper IR flight with no conversion stamped (no ir_keys): the IR
+    # backlog owes Grasshopper a conversion and returns its FIRE key, which
+    # must reach the manifest rebuild, not be looked up (or re-keyed) as an
+    # incident record.
+    storage = SpyStorage(tmp_path / "out")
+    kmz = "ir/20260929/20260929_Grasshopper_IR.kmz"
+    rec = {"fire_slug": "grasshopper", "storage_prefix": "grasshopper", "cornea_id": GH,
+           "match": {"method": "unit_id", "confidence": 1.0, "token": "2026-ORMHF-000688",
+                     "dir_url": "u/2026_Grasshopper/"},
+           "dir_url": "u/2026_Grasshopper/", "dir_mtime": "2026-10-08 15:00",
+           "synced_at": "2026-10-08T15:10:00Z", "children": {},
+           "files": {kmz: {"sha16": "5b0d93088c8ddb6c", "kind": "ir", "size": 3}}}
+    storage.put_json(STATE_KEY, {"incidents": {GH_KEY: rec}, "migrations": {"incident_ids": FLAG},
+                                 "incident_fires": {}, "catalog_version": 846})
+    _wire_sync(monkeypatch, storage, [_grasshopper_fire()])
+    assert cli._ir_backlog(storage.get_json(STATE_KEY),
+                           {GH_FK: _grasshopper_fire()}, lambda *_: None) == {GH_FK}
+    assert cli.cmd_sync_incidents(_incidents_args(tmp_path)) == 0
+
+    state = storage.get_json(STATE_KEY)
+    assert list(state["incidents"]) == [GH_KEY]
+    assert state["incidents"][GH_KEY]["dir_mtime"] == "2026-10-08 15:00"  # not cleared
+    man = storage.get_json(f"catalogs/incidents/id/{GH_FK}.json")
+    assert man["ir_flights"][0]["kmz_url"] == f"/raw/incidents/grasshopper/{kmz}"
+    assert state["incident_fires"][GH_FK]["dirs"] == [GH_KEY]
+    assert storage.get_json(health.KEY)["mirror"]["rebuilt_fires"] == [GH_FK]
+
+
+def _root(*names, mtime="2026-10-08 15:00"):
+    return "<table>" + "".join(
+        f'<tr><td><a href="{n}/">{n}/</a></td><td align="right">{mtime}</td>'
+        f'<td align="right">-</td></tr>' for n in names) + "</table>"
+
+
+def test_fire_arg_guid_collects_bound_dirs(tmp_path, monkeypatch):
+    # --fire by fire key: Austin's folders are those named like it (the old
+    # rule) AND 2026_Grasshopper, which lends Austin stamped sheets under
+    # another name; never an unrelated folder.
+    from responder_worker.config import FTP_BASE
+
+    au = {"fire_slug": "austin", "post_title": "AUSTIN", "state": "OR",
+          "cornea_id": "{49D1FB0B-74D1-4A95-B8DF-066DCC5F06E1}",
+          "unique_fire_id": "2026-ORMHF-000863"}
+    au_fk = fire_key(au["cornea_id"])
+    state = {"incidents": {
+        GH_KEY: {"fire_slug": "grasshopper", "storage_prefix": "grasshopper", "cornea_id": GH,
+                 "match": {"method": "unit_id"},
+                 "files": {SHEET: {"sha16": "aa", "fk": au_fk, "fk_src": "token"}}},
+        "pacific_nw/2026/2026_Austin": {
+            "fire_slug": "austin", "storage_prefix": "austin", "cornea_id": au["cornea_id"],
+            "match": {"method": "unit_id"}, "files": {}}},
+        "incident_fires": {}, "migrations": {"incident_ids": FLAG}}
+    oregon = f"{FTP_BASE}/pacific_nw/2026_Incidents_Oregon/"
+    roots = {oregon: _root("2026_Grasshopper", "2026_Austin", "2026_Elk", "2026_AustinCreek")}
+    monkeypatch.setattr(cli, "get_optional", lambda client, url: (
+        SimpleNamespace(text=roots[url]) if url in roots else None))
+    fires = [_grasshopper_fire(), au]
+    args = _incidents_args(tmp_path)
+    for spelling in (au["cornea_id"], au_fk, au_fk.upper(), "austin"):
+        target = cli._resolve_fire_arg(spelling, fires)
+        assert target is au, spelling
+        got = cli._collect_candidates(None, args, fires, target=target, state=state)
+        assert sorted(c.key for c in got) == [
+            "pacific_nw/2026/2026_Austin", "pacific_nw/2026/2026_AustinCreek", GH_KEY]
+    # the index's folders count too (a folder whose stamps were since cleared)
+    del state["incidents"][GH_KEY]["files"][SHEET]["fk"]
+    got = cli._collect_candidates(None, args, fires, target=au, state=state)
+    assert GH_KEY not in {c.key for c in got}
+    state["incident_fires"][au_fk] = {"dirs": [GH_KEY, "pacific_nw/2026/2026_Austin"]}
+    got = cli._collect_candidates(None, args, fires, target=au, state=state)
+    assert GH_KEY in {c.key for c in got}
+    # no fire to resolve: nothing collected, nothing written
+    assert cli._resolve_fire_arg("{00000000-0000-4000-8000-000000000000}", fires) is None
+    storage = SpyStorage(tmp_path / "out")
+    storage.put_json(STATE_KEY, state)
+    storage.written.clear()
+    _wire_sync(monkeypatch, storage, fires)
+    assert cli.cmd_sync_incidents(_incidents_args(tmp_path, fire="no-such-fire")) == 2
+    assert storage.written == []
 
 
 # ---------------------------------------------------------------------------

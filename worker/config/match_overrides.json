@@ -1,3 +1,3 @@
 {
-  "_comment": "Manual FTP-dir -> fire pins. Key: '{region}/{year}/{dir_name}' (e.g. 'rocky_mtn/2026/2026_Elk'); value: fire_slug to pin, or 'ignore' to suppress matching for that dir. Keys starting with '_' are ignored."
+  "_comment": "Key: '{region}/{year}/{dir_name}'; value: the fire's cornea_id (GUID, braces optional) or 'ignore'. Fire slugs are NOT accepted (names are shared between fires). Per-file corrections: maint.yml reassign-files."
 }

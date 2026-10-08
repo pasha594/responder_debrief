@@ -16,7 +16,6 @@ import sys
 import re
 import tempfile
 import time
-from types import SimpleNamespace
 from collections import Counter
 from datetime import datetime
 from pathlib import Path
@@ -24,12 +23,16 @@ from urllib.parse import urlparse
 
 import httpx
 
-from . import archives, hotspots, catalogs as cat, health, imsr, incident_ids
+from . import archives, hotspots, catalogs as cat, fire_manifests, health, imsr, incident_ids
 from . import config, frames, geopdf, hrrr, ir_vectors, pyrecast, state as state_mod
 from .asset_keys import (
     fetch_verified,
+    ir_entry,
+    preview_key,
+    put_tiled,
     raw_key,
     raw_key_candidates,
+    record_prefix,
     tile_meta_key,
     tile_root,
     tiles_prefix,
@@ -42,27 +45,25 @@ from .fires import (
     fetch_perimeter_count,
     fire_key,
     fire_list_suspect,
+    is_fire_id,
 )
 from .ftp_index import list_dir
 from .http import get_optional, make_client
 from .matching import (
-    DATE_SANITY_SLACK_DAYS,
     IncidentCandidate,
     candidate_dir_name,
     extract_unit_tokens,
-    folder_predates_fire,
     match_candidate,
     normalize_name,
-    parse_when,
+    resolve_override,
 )
-from .mirror import IncidentMirror, MirroredFile, MirrorResult
+from .mirror import IncidentMirror
 
 DEFAULT_OUT = Path(__file__).resolve().parent.parent / "out"
 
-#: True once sync-incidents keys records by fire ID. Until then nothing can
-#: keep migrated state current (this sync-incidents pauses on it), so the
-#: incident-ID migration may report but not apply.
-INCIDENT_SYNC_BY_ID = False
+#: True: sync-incidents keys records by fire ID (and pauses until the
+#: incident-ID migration has run), so the migration may apply.
+INCIDENT_SYNC_BY_ID = True
 
 
 def log(msg: str) -> None:
@@ -389,10 +390,23 @@ def _legacy_incident_matches(storage, state: dict) -> dict[str, dict]:
 # sync-incidents / backfill
 # ===========================================================================
 
-def _collect_candidates(client, args, fires) -> list[IncidentCandidate]:
-    """Crawl region year-roots for candidate incident dirs."""
+def _collect_candidates(client, args, fires, *, target: dict | None = None,
+                        state: dict | None = None) -> list[IncidentCandidate]:
+    """Crawl region year-roots for candidate incident dirs.
+
+    With a `target` fire (--fire) only its folders qualify: those named like
+    it, and those already feeding it (bound to it, or lending it stamped
+    files), whatever their name.
+    """
     year = args.year
-    fire_filter = normalize_name(args.fire) if args.fire else None
+    fire_filter = None
+    target_keys: set[str] = set()
+    if target is not None:
+        fire_filter = normalize_name(target.get("post_title") or target.get("fire_slug") or "")
+        fk = fire_key(target.get("cornea_id"))
+        st = state or {}
+        target_keys = set(incident_ids.contributors(st).get(fk) or ())
+        target_keys |= set(((st.get("incident_fires") or {}).get(fk) or {}).get("dirs") or ())
     roots = config.region_year_roots(year)
     if args.region:
         roots = [(r, u) for r, u in roots if r.startswith(args.region)]
@@ -402,6 +416,12 @@ def _collect_candidates(client, args, fires) -> list[IncidentCandidate]:
     def state_of(dir_name: str) -> str | None:
         name = dir_name.rstrip("/").replace("%20", " ").replace("_", " ").lower()
         return name if name in config.STATE_NAME_ABBR else None
+
+    def wanted(cand: IncidentCandidate) -> bool:
+        if target is None or cand.key in target_keys:
+            return True
+        dir_norm = normalize_name(cand.dir_name)
+        return bool(fire_filter) and (fire_filter in dir_norm or dir_norm in fire_filter)
 
     cands: list[IncidentCandidate] = []
     extra_roots: list[tuple[str, str, bool]] = []  # (region_key, url, lenient)
@@ -439,14 +459,12 @@ def _collect_candidates(client, args, fires) -> list[IncidentCandidate]:
             rest = candidate_dir_name(e.name + "/", year)
             if rest is None:
                 continue
-            if fire_filter:
-                dir_norm = normalize_name(e.name)
-                if fire_filter not in dir_norm and dir_norm not in fire_filter:
-                    continue
-            cands.append(IncidentCandidate(
+            cand = IncidentCandidate(
                 region=region, year=year, dir_name=e.name,
                 dir_url=e.url, dir_mtime=e.mtime,
-            ))
+            )
+            if wanted(cand):
+                cands.append(cand)
 
     # Crawl the collected state subdirectory roots with lenient naming.
     seen_urls = {c.dir_url for c in cands}
@@ -462,16 +480,56 @@ def _collect_candidates(client, args, fires) -> list[IncidentCandidate]:
                 continue
             if e.url in seen_urls:
                 continue
-            if fire_filter:
-                dir_norm = normalize_name(e.name)
-                if fire_filter not in dir_norm and dir_norm not in fire_filter:
-                    continue
-            cands.append(IncidentCandidate(
+            cand = IncidentCandidate(
                 region=region, year=year, dir_name=e.name,
                 dir_url=e.url, dir_mtime=e.mtime,
-            ))
-            seen_urls.add(e.url)
+            )
+            if wanted(cand):
+                cands.append(cand)
+                seen_urls.add(e.url)
     return cands
+
+
+def _drop_key_collisions(cands: list[IncidentCandidate], state: dict | None = None
+                         ) -> tuple[list[IncidentCandidate], list[dict]]:
+    """One candidate per incident key. Two folders can map to one key (the
+    state subdirectories fold into their GACC: southern/Texas/2026/Ross_2026
+    and southern/2026/Florida/Ross_2026), and one record must never take in
+    both folders' files: the folder the record was mirrored from keeps the
+    key, else the first listed; the others are reported."""
+    incidents = (state or {}).get("incidents") or {}
+    by_key: dict[str, list[IncidentCandidate]] = {}
+    for c in cands:
+        by_key.setdefault(c.key, []).append(c)
+    kept: dict[str, IncidentCandidate] = {}
+    collisions: list[dict] = []
+    for c in cands:
+        group = by_key[c.key]
+        own = (incidents.get(c.key) or {}).get("dir_url")
+        keep = next((g for g in group if own and g.dir_url == own), group[0])
+        if c is keep:
+            kept.setdefault(c.key, c)
+        elif c.dir_url != keep.dir_url:
+            collisions.append({"key": c.key, "kept": keep.dir_url, "dropped": c.dir_url})
+            log(f"[incidents] {c.key}: KEY COLLISION — {c.dir_url} dropped, "
+                f"{keep.dir_url} keeps the key")
+    return list(kept.values()), collisions
+
+
+def _resolve_fire_arg(value: str, fires: list[dict]) -> dict | None:
+    """--fire: the active fire with that fire key (any spelling of its
+    cornea_id) or, failing that, that fire_slug."""
+    fk = fire_key(value)
+    by_id = next((f for f in fires if fk and fire_key(f.get("cornea_id")) == fk), None)
+    return by_id or next((f for f in fires if f.get("fire_slug") == value), None)
+
+
+def _override_key(value: str | None) -> str | None:
+    """An override as compared between runs ('ignore', a fire key, or the
+    raw value), so another spelling of the same GUID is no change."""
+    if not value or value == "ignore":
+        return value or None
+    return fire_key(value) if is_fire_id(value) else value
 
 
 def _rank_candidates(cands: list[IncidentCandidate], fires: list[dict],
@@ -558,413 +616,138 @@ def _gather_unit_tokens(client, cand: IncidentCandidate) -> Counter:
     return tokens
 
 
-def _cached_match_predates_fire(rec: dict, fires_by_slug: dict) -> str | None:
+def _cached_match_predates_fire(rec: dict, fires_by_fk: dict) -> str | None:
     """Reason when a cached NAME match fails the date sanity check, else None.
 
     Unchanged folders skip matching entirely, so a bad match made before the
-    check existed would otherwise live forever. The record's own upload
-    stamps (real mirrored files) are better evidence than any listing mtime;
-    the newest of them is used, so only a folder that is stale by every
-    measure is rejected.
+    check existed would otherwise live forever. The fire is looked up by the
+    record's cornea_id, never by slug (a slug can move to a newer same-name
+    fire and detach a valid folder), and the folder is dated by its own
+    newest upload, not by counts merged across the fire's folders.
     """
     m = rec.get("match") or {}
-    if m.get("method") not in ("name_exact", "name_fuzzy"):
+    if m.get("method") not in incident_ids.NAME_METHODS:
         return None
-    fire = fires_by_slug.get(rec.get("fire_slug"))
+    fire = fires_by_fk.get(fire_key(rec.get("cornea_id")))
     if not fire:
         return None
-    stamps = [rec.get(k) for k in ("latest_upload_ts", "latest_upload", "dir_mtime")]
-    dated = [(when, raw) for raw in stamps if (when := parse_when(raw))]
-    if not dated:
-        return None
-    newest = max(dated)[1]
-    if not folder_predates_fire(newest, fire.get("created_on")):
-        return None
-    return (f"newest upload {newest} is more than {DATE_SANITY_SLACK_DAYS} days "
-            f"before the fire was created ({fire.get('created_on')})")
+    return incident_ids.record_predates_fire(rec, m.get("method"), fire.get("created_on"))
 
 
-def _tile_and_manifest(args, storage, state, fires_by_slug, mirrors) -> None:
-    """GeoPDF processing + IR vectors + incident manifests (upload order safe)."""
+def _process_mirrored_assets(args, storage, state, mirrors) -> None:
+    """GeoPDF tiles and previews for the sheets this run downloaded.
+
+    Only files with a local copy: their bytes were hashed by the mirror as
+    they landed, so they are tiled under their sha with no further check.
+    Each sha is done once, under the prefix its tiles already have (or the
+    first owning record's); files that show on no fire and files with no
+    sha are skipped. Replayed sheets are the backlogs' job, and manifests
+    are built afterwards from state (fire_manifests).
+    """
     tile_budget = args.tile_budget
-    gdal_ok = geopdf.gdal_available()
-    if not gdal_ok:
-        log("[incidents] GDAL not available — skipping tiling (degrades to raw PDFs)")
-
-    # Re-arm the wall-clock for the tiling phase: a single arch-E sheet can
-    # take minutes, so the 40-sheet count budget alone let this phase blow past
-    # the CI timeout (killing the job before ANY manifest was published).
-    # Sheets past the deadline are flagged tiling_pending and picked up next run.
+    # Re-arm the wall-clock for the tiling phase (and the IR conversions of
+    # the manifest build after it): a single arch-E sheet can take minutes,
+    # so the 40-sheet count budget alone let this phase blow past the CI
+    # timeout (killing the job before ANY manifest was published). Sheets
+    # past the deadline are flagged tiling_pending and picked up next run.
     frames.start_deadline(int(os.environ.get(
         "TILE_MAX_SECONDS", str(config.TILE_MAX_SECONDS_DEFAULT))))
+    if not geopdf.gdal_available():
+        log("[incidents] GDAL not available — skipping tiling (degrades to raw PDFs)")
+        return
     tiles_deferred = 0
-
-    # Several FTP incident dirs can map to ONE fire (e.g. the fire's own dir
-    # plus a complex/event dir carrying its sheets). Their manifests share a
-    # single key, so accumulate per fire and publish the union — last-writer-
-    # wins silently dropped half of Bear Trap's maps.
-    by_fire: dict[str, dict] = {}
+    # The same sheet is often published in two places (e.g. "Current Maps/"
+    # AND "Daily Products/{date}/"), and in two folders: tile it once.
+    seen_sha: set[str] = set()
 
     for inc_key, bundle in mirrors.items():
-        fire = bundle["fire"]
-        fire_slug = fire["fire_slug"]
-        res = bundle["result"]
-        maps: list[dict] = []
-        ir_by_flight: dict[str, dict] = {}
-        # The same sheet is often published in two places (e.g. "Current Maps/"
-        # AND "Daily Products/{date}/"). Tiles are content-addressed so the work
-        # dedupes itself, but the manifest must list each sheet once.
-        seen_sha: set[str] = set()
-
-        # Retention is "current period forward", but files already mirrored are
-        # kept forever (user policy) — so the manifest replays every file this
-        # incident has EVER mirrored, not just the ones this run touched.
-        # Otherwise a fire's older sheets would silently vanish from the UI the
-        # first time its folder changed.
-        inc_files = (state["incidents"].get(inc_key) or {}).get("files", {})
-        seen_rel = {f"{mf.rel_dir}/{mf.filename}" for mf in res.files}
-        replayed = [
-            MirroredFile(
-                kind=meta.get("kind", "product"),
-                filename=rel.rpartition("/")[2],
-                key=f"raw/incidents/{fire_slug}/{rel}",
-                url=meta.get("url", ""),
-                size=meta.get("size"),
-                sha16=meta.get("sha16"),
-                rev=meta.get("rev", 1),
-                local_path=None,          # never re-tiled; geo comes from state
-                changed=False,
-                rel_dir=rel.rpartition("/")[0],
-                lm=meta.get("lm"),
-            )
-            for rel, meta in inc_files.items()
-            if rel not in seen_rel
-        ]
-
-        for mf in [*res.files, *replayed]:
-            if mf.kind == "ir":
-                d = ir_by_flight.setdefault(mf.rel_dir, {"files": []})
-                d["files"].append(mf)
+        rec = state["incidents"].get(inc_key) or {}
+        files = rec.get("files") or {}
+        for mf in bundle["result"].files:
+            sha = mf.sha16
+            if (mf.local_path is None or not sha or sha in seen_sha
+                    or mf.kind in ("ir", "mobile")
+                    or not mf.filename.lower().endswith(".pdf")):
                 continue
-            if not mf.filename.lower().endswith(".pdf"):
+            meta = files.get(f"{mf.rel_dir}/{mf.filename}")
+            if meta is None or incident_ids.file_owner(rec, meta) is None:
                 continue
-            if mf.sha16:
-                if mf.sha16 in seen_sha:
-                    continue
-                seen_sha.add(mf.sha16)
+            seen_sha.add(sha)
+            tiled_state = state["tiled"].get(sha)
+            if tiled_state and tiled_state.get("tiler_version") == config.TILER_VERSION:
+                continue  # already tiled
             parsed = cat.parse_product_filename(mf.filename)
-            sha_id = mf.sha16 or "unknown"
-            geo: dict = {"georeferenced": False, "preview": False}
-            tiled_state = state["tiled"].get(sha_id)
-            already_tiled = bool(
-                tiled_state and tiled_state.get("tiler_version") == config.TILER_VERSION
-            )
-            pending = False
-            if mf.kind != "mobile" and gdal_ok and mf.local_path is not None:
-                if already_tiled:
-                    geo = tiled_state.get("geo", geo)
-                elif tile_budget <= 0 or frames.deadline_passed():
-                    # Out of tiling budget, but detection is cheap: record
-                    # whether this sheet is EVEN overlayable plus a preview, so
-                    # the UI can offer a lightbox for flat sheets instead of an
-                    # indefinite "processing…".
-                    probe = geopdf.probe_pdf(mf.local_path)
-                    geo = {
-                        "georeferenced": probe["georeferenced"],
-                        "projection": probe.get("projection"),
-                        "tiles": None,
-                        "preview": False,
-                    }
-                    if probe.get("error"):
-                        geo["error"] = probe["error"]
-                    try:
-                        with tempfile.TemporaryDirectory() as td:
-                            preview = Path(td) / "preview.png"
-                            geopdf.render_preview(mf.local_path, preview)
-                            storage.put_file(
-                                f"previews/incidents/{fire_slug}/{sha_id}.png", preview)
-                            geo["preview"] = True
-                    except Exception as exc:
-                        log(f"[geopdf] preview failed for {mf.filename}: {exc}")
-                    # Only georeferenced sheets have tiling still owed.
-                    pending = probe["georeferenced"]
-                    if pending:
-                        tiles_deferred += 1
-                    state["tiled"][sha_id] = {
-                        # A flat sheet is DONE — nothing to tile, so don't let
-                        # it consume tiling budget on every future run. A
-                        # georeferenced one keeps tiler_version None so the
-                        # next run picks it up.
-                        "tiler_version": None if probe["georeferenced"] else config.TILER_VERSION,
-                        "at": state_mod.now_iso(),
-                        "geo": geo,
-                    }
-                else:
-                    log(f"[geopdf] processing {mf.filename} ...")
+            if tile_budget <= 0 or frames.deadline_passed():
+                # Out of tiling budget, but detection is cheap: record
+                # whether this sheet is EVEN overlayable plus a preview, so
+                # the UI can offer a lightbox for flat sheets instead of an
+                # indefinite "processing…".
+                probe = geopdf.probe_pdf(mf.local_path)
+                geo = {
+                    "georeferenced": probe["georeferenced"],
+                    "projection": probe.get("projection"),
+                    "tiles": None,
+                    "preview": False,
+                }
+                if probe.get("error"):
+                    geo["error"] = probe["error"]
+                try:
                     with tempfile.TemporaryDirectory() as td:
-                        tiles_dir = Path(td) / "tiles"
-                        r = geopdf.process_pdf(
-                            mf.local_path, tiles_dir,
-                            sheet=parsed.get("sheet"), zoom_cap=args.zoom_cap,
-                        )
-                        geo = {
-                            "georeferenced": r["georeferenced"],
-                            "projection": r["projection"],
-                            "tiles": r["tiles"],
-                            "preview": False,
-                        }
-                        if r.get("error"):
-                            geo["error"] = r["error"]
-                        if r["tiles"]:
-                            n = storage.put_tree(
-                                f"tiles/incidents/{fire_slug}/{sha_id}", tiles_dir
-                            )
-                            log(f"[geopdf] {mf.filename}: {n} tiles "
-                                f"z{r['tiles']['minzoom']}-{r['tiles']['maxzoom']}")
-                        try:
-                            preview = Path(td) / "preview.png"
-                            geopdf.render_preview(mf.local_path, preview)
-                            storage.put_file(
-                                f"previews/incidents/{fire_slug}/{sha_id}.png", preview
-                            )
-                            geo["preview"] = True
-                        except Exception as exc:  # preview failure is never fatal
-                            log(f"[geopdf] preview failed for {mf.filename}: {exc}")
-                    tile_budget -= 1
-                    state["tiled"][sha_id] = {
-                        "tiler_version": config.TILER_VERSION,
-                        "at": state_mod.now_iso(),
-                        "geo": geo,
-                    }
-            elif tiled_state:
-                # Replayed file (local_path None): reuse whatever the state
-                # knows. tiler_version None = probed-georeferenced, tiles
-                # still owed — keep it PENDING so the tile backlog (and the
-                # UI) don't silently demote it to a flat sheet.
-                geo = tiled_state.get("geo", geo)
-                pending = (
-                    tiled_state.get("tiler_version") is None
-                    and bool(geo.get("georeferenced"))
+                        preview = Path(td) / "preview.png"
+                        geopdf.render_preview(mf.local_path, preview)
+                        storage.put_file(preview_key(state, sha, rec), preview)
+                        geo["preview"] = True
+                except Exception as exc:
+                    log(f"[geopdf] preview failed for {mf.filename}: {exc}")
+                # Only georeferenced sheets have tiling still owed.
+                if probe["georeferenced"]:
+                    tiles_deferred += 1
+                put_tiled(state, sha, record_prefix(rec), {
+                    # A flat sheet is DONE — nothing to tile, so don't let
+                    # it consume tiling budget on every future run. A
+                    # georeferenced one keeps tiler_version None so the
+                    # next run picks it up.
+                    "tiler_version": None if probe["georeferenced"] else config.TILER_VERSION,
+                    "at": state_mod.now_iso(),
+                    "geo": geo,
+                })
+                continue
+            log(f"[geopdf] processing {mf.filename} ...")
+            with tempfile.TemporaryDirectory() as td:
+                tiles_dir = Path(td) / "tiles"
+                r = geopdf.process_pdf(
+                    mf.local_path, tiles_dir,
+                    sheet=parsed.get("sheet"), zoom_cap=args.zoom_cap,
                 )
-
-            maps.append(cat.map_entry(
-                parsed=parsed, kind=mf.kind, sha_id=sha_id,
-                tiles_prefix=fire_slug, preview_prefix=fire_slug,
-                pdf_key=mf.key, size_bytes=mf.size, geo=geo, rev=mf.rev,
-                tiling_pending=pending, uploaded_lm=mf.lm, first_seen=mf.first_seen,
-            ))
-
-        ir_flights = _ir_flights(args, storage, state, fire, ir_by_flight)
-
-        agg = by_fire.setdefault(fire_slug, {
-            "fire": fire, "maps": {}, "ir": {}, "meta": None, "meta_rank": -1,
-        })
-        for m in maps:
-            k = m["id"] if m.get("id") and m["id"] != "unknown" \
-                else f"{inc_key}:{m.get('filename')}"
-            agg["maps"].setdefault(k, m)
-        for f in ir_flights:
-            k = f.get("flight_id") or f.get("flight_date") or repr(f)
-            prev = agg["ir"].get(k)
-            # prefer the copy that actually converted, then the richer one
-            def _rank(x):
-                return (x.get("geojson_url") is not None,
-                        sum(x.get(u) is not None for u in ("pdf_url", "kmz_url")))
-            if prev is None or _rank(f) > _rank(prev):
-                agg["ir"][k] = f
-        if len(maps) > agg["meta_rank"]:
-            agg["meta_rank"] = len(maps)
-            agg["meta"] = {
-                "region": bundle["candidate"].region,
-                "source_dir": bundle["candidate"].dir_url,
-                "unit_incident": (bundle["match"].token or "")
-                .replace("2026-", "", 1).replace("-", "")
-                if bundle["match"].token else None,
-            }
-
-        merged_maps = list(agg["maps"].values())
-        merged_ir = sorted(agg["ir"].values(),
-                           key=lambda f: f.get("flight_date") or "", reverse=True)
-        manifest = cat.build_incident_manifest(
-            fire=fire,
-            region=agg["meta"]["region"],
-            source_dir=agg["meta"]["source_dir"],
-            unit_incident=agg["meta"]["unit_incident"],
-            maps=merged_maps,
-            ir_flights=merged_ir,
-        )
-        storage.put_json(f"catalogs/incidents/{fire_slug}.json", manifest)
-        log(f"[incidents] manifest written: catalogs/incidents/{fire_slug}.json "
-            f"(maps={len(merged_maps)}, ir_flights={len(merged_ir)}"
-            + (f", merged from {sum(1 for b in mirrors.values() if b['fire']['fire_slug'] == fire_slug)} dirs"
-               if agg["meta_rank"] != len(maps) or len(merged_maps) != len(maps) else "")
-            + ")")
-
-        # Directory-view summary in catalog.json, so the fire list can show
-        # file counts without fetching every per-fire manifest.
-        upload_dates = [m["op_date"] for m in merged_maps if _valid_day(m.get("op_date"))]
-        upload_dates += [f["flight_date"] for f in merged_ir if _valid_day(f.get("flight_date"))]
-        upload_ts = [m.get("uploaded_at") for m in merged_maps if m.get("uploaded_at")]
-        inc_state = state["incidents"].setdefault(inc_key, {})
-        inc_state["map_count"] = len(merged_maps)
-        inc_state["ir_count"] = len(merged_ir)
-        inc_state["ir_manifest_v"] = IR_MANIFEST_VERSION
-        inc_state["latest_upload_ts"] = max(upload_ts) if upload_ts else None
-        inc_state["latest_upload"] = max(upload_dates) if upload_dates else None
+                geo = {
+                    "georeferenced": r["georeferenced"],
+                    "projection": r["projection"],
+                    "tiles": r["tiles"],
+                    "preview": False,
+                }
+                if r.get("error"):
+                    geo["error"] = r["error"]
+                if r["tiles"]:
+                    n = storage.put_tree(tile_root(tiles_prefix(state, sha, rec), sha), tiles_dir)
+                    log(f"[geopdf] {mf.filename}: {n} tiles "
+                        f"z{r['tiles']['minzoom']}-{r['tiles']['maxzoom']}")
+                try:
+                    preview = Path(td) / "preview.png"
+                    geopdf.render_preview(mf.local_path, preview)
+                    storage.put_file(preview_key(state, sha, rec), preview)
+                    geo["preview"] = True
+                except Exception as exc:  # preview failure is never fatal
+                    log(f"[geopdf] preview failed for {mf.filename}: {exc}")
+            tile_budget -= 1
+            put_tiled(state, sha, record_prefix(rec), {
+                "tiler_version": config.TILER_VERSION,
+                "at": state_mod.now_iso(),
+                "geo": geo,
+            })
 
     if tiles_deferred:
         log(f"[geopdf] {tiles_deferred} sheets deferred (tile budget/deadline) — "
             "flagged tiling_pending, picked up next run")
-
-
-def _ir_flights(args, storage, state, fire, ir_by_flight: dict[str, dict]) -> list[dict]:
-    out = []
-    fire_slug = fire["fire_slug"]
-    fire_name_norm = normalize_name(fire.get("post_title") or "").replace(" ", "")
-    for rel_dir, d in sorted(ir_by_flight.items(), reverse=True):
-        files = d["files"]
-        flight_date = rel_dir.split("/")[-1]
-        if len(flight_date) == 8 and flight_date.isdigit():
-            flight_date_iso = f"{flight_date[:4]}-{flight_date[4:6]}-{flight_date[6:]}"
-        else:
-            flight_date_iso = None
-        zips = [f for f in files if f.filename.lower().endswith("shapefiles.zip")]
-        pdfs = [f for f in files if f.filename.lower().endswith(".pdf")]
-        kmzs = [f for f in files if f.filename.lower().endswith(".kmz")]
-        readmes = [f for f in files if "read_me" in f.filename.lower()]
-
-        def _stem_id(filename: str, *suffixes: str) -> str:
-            stem = filename.rsplit(".", 1)[0]
-            for suf in suffixes:
-                if stem.endswith(suf):
-                    stem = stem[: -len(suf)]
-            toks = [t for t in stem.split("_")
-                    if normalize_name(t).replace(" ", "") != fire_name_norm]
-            return "_".join(toks)
-
-        flight_id = None
-        if zips:
-            flight_id = _stem_id(zips[0].filename, "_Shapefiles")
-        elif pdfs:
-            flight_id = _stem_id(pdfs[0].filename, "_All")
-        elif kmzs:
-            flight_id = _stem_id(kmzs[0].filename, "_All")
-
-        est_acres = None
-        if readmes and readmes[0].local_path and readmes[0].local_path.exists():
-            est_acres = ir_vectors.parse_estimated_acres(
-                readmes[0].local_path.read_text(errors="replace"))
-
-        conv: dict = {}  # state["ir"] entry: heat_types | failed, flown_*, v
-        key = f"vectors/ir/{fire_slug}/{flight_id}.geojson"
-        if flight_id and (zips or kmzs):
-            cache = state.setdefault("ir", {}).get(key) or {}
-            if (cache.get("v") == ir_vectors.IR_CONVERTER_VERSION
-                    or frames.deadline_passed()
-                    or shutil.which("ogr2ogr") is None):
-                # done (or tried) under THIS converter: reuse, no re-download.
-                # Out of wall-clock, or on a run whose GDAL install failed,
-                # an older result keeps serving until a later run redoes it
-                # (recording a failure here would stick for good).
-                conv = cache
-            else:
-                conv = {"v": ir_vectors.IR_CONVERTER_VERSION}
-                try:
-                    with tempfile.TemporaryDirectory() as td:
-                        tdp = Path(td)
-
-                        def _fetch(mf) -> Path:
-                            # replayed files have no local copy, but the
-                            # bytes are in OUR bucket
-                            if mf.local_path is not None:
-                                return mf.local_path
-                            local = tdp / Path(mf.filename).name
-                            if not storage.get_file(mf.key, local):
-                                raise RuntimeError(f"missing raw object {mf.key}")
-                            return local
-
-                        # The flight time lives in the KMZ, even when the
-                        # shapefiles are what gets converted.
-                        kmz_local = None
-                        if kmzs:
-                            try:
-                                kmz_local = _fetch(kmzs[0])
-                                conv.update(ir_vectors.kmz_flight_time(kmz_local))
-                            except RuntimeError:
-                                if not zips:
-                                    raise
-                        # source: shapefiles preferred, KMZ fallback (some
-                        # teams publish KMZ only)
-                        gj = tdp / f"{flight_id}.geojson"
-                        if zips:
-                            info = ir_vectors.process_ir_zip(
-                                _fetch(zips[0]), gj, flight_id=flight_id)
-                        else:
-                            info = ir_vectors.process_ir_kmz(
-                                kmz_local, gj, flight_id=flight_id)
-                        storage.put_file(key, gj)
-                        conv["heat_types"] = info["heat_types"]
-                        log(f"[ir] {flight_id}: {info['feature_count']} features "
-                            f"({', '.join(info['heat_types'])})")
-                except Exception as exc:
-                    conv["failed"] = True
-                    log(f"[ir] vectorization failed for {rel_dir}: {exc}")
-                state["ir"][key] = conv
-        heat_types: list[str] = conv.get("heat_types") or []
-
-        out.append({
-            "flight_date": flight_date_iso,
-            # when the plane flew, per the KMZ: an instant, or a bare date
-            # when the KMZ gives no clock time (the UI falls back to
-            # flight_date, the FTP folder's date, when both are None)
-            "flown_at": conv.get("flown_at"),
-            "flown_date": conv.get("flown_date"),
-            "flight_id": flight_id,
-            "no_flight_reason": None,
-            "geojson_url": f"/{key}" if heat_types else None,
-            "heat_types": heat_types,
-            "estimated_acres": est_acres,
-            "pdf_url": f"/{pdfs[0].key}" if pdfs else None,
-            "preview_url": _ir_preview_url(storage, state, fire_slug, pdfs[0]) if pdfs else None,
-            "kmz_url": f"/{kmzs[0].key}" if kmzs else None,
-            "readme_url": f"/{readmes[0].key}" if readmes else None,
-        })
-    return out
-
-
-def _ir_preview_url(storage, state, fire_slug: str, pdf) -> str | None:
-    """Card thumbnail for an IR flight: its PDF's first page, rendered and
-    keyed exactly like a map sheet's (previews/…/{sha}.png, recorded in
-    state["tiled"]). The probe backlog renders missing ones from the bucket;
-    a PDF downloaded this run is rendered here (~1 s) so a new flight shows
-    its thumbnail straight away. IR PDFs are never tiled: they aren't map
-    overlays (the KMZ/shapefile vectors are), so their records are marked
-    done for the tiler."""
-    sha = pdf.sha16
-    if not sha:
-        return None
-    rec = state["tiled"].get(sha)
-    key = f"previews/incidents/{fire_slug}/{sha}.png"
-    if rec and (rec.get("geo") or {}).get("preview"):
-        return f"/{key}"
-    if rec is not None or pdf.local_path is None or not geopdf.gdal_available():
-        return None  # tried before, not here yet, or no GDAL this run
-    ok = False
-    try:
-        with tempfile.TemporaryDirectory(prefix="irprev_") as td:
-            png = Path(td) / "preview.png"
-            geopdf.render_preview(pdf.local_path, png)
-            storage.put_file(key, png)
-            ok = True
-    except Exception as exc:
-        log(f"[ir] preview failed for {pdf.filename}: {exc}")
-    now = state_mod.now_iso()
-    state["tiled"][sha] = {
-        "tiler_version": config.TILER_VERSION,
-        "at": now, "repair_at": now, "grat_at": now,
-        "geo": {"georeferenced": False, "projection": None, "tiles": None, "preview": ok},
-    }
-    return f"/{key}" if ok else None
 
 
 def _sha_in_shard(sha: str, shard: int, shards: int) -> bool:
@@ -1062,24 +845,34 @@ def cmd_tile_worker(args) -> int:
     return 0
 
 
-def _tile_backlog(storage, state, log, *, cap: int = 12,
-                  zoom_cap: int | None = None) -> set[str]:
+def _sha_holders(state: dict, sha: str) -> set[str]:
+    """Keys of every incident record holding a file with this sha: a sheet
+    tiled or probed once shows in every folder that published it."""
+    return {k for k, rec in state.get("incidents", {}).items()
+            if any(m.get("sha16") == sha for m in (rec.get("files") or {}).values())}
+
+
+def _tile_backlog(storage, state, log, *, cap: int = 12, zoom_cap: int | None = None,
+                  mismatches: list[str] | None = None) -> set[str]:
     """Tile sheets that were probed georeferenced but never got tiles.
 
     The mirror loop only tiles freshly-downloaded files; a sheet deferred by
     the budget is replayed on later runs WITHOUT a local file, so low-priority
     products (pio, transport) could stay "overlay rendering" forever. Their
-    bytes are in our bucket: download up to `cap` per run, tile, upload, and
-    return the incident keys whose manifests need a rebuild."""
+    bytes are in our bucket: download up to `cap` per run (only bytes that
+    hash to the sheet's sha: asset_keys.fetch_verified), tile under the
+    sha's tiles prefix, and return the incident keys whose manifests need a
+    rebuild. Sheets that show on no fire, and pruned files, are skipped.
+    `mismatches` collects raw keys whose bytes did not hash (health)."""
     if not geopdf.gdal_available():
         return set()
     touched: set[str] = set()
+    tried: set[str] = set()
     tiled = 0
     for inc_key, inc in state.get("incidents", {}).items():
         if tiled >= cap or frames.deadline_passed():
             break
-        fire_slug = inc.get("fire_slug")
-        if not fire_slug:
+        if not (inc.get("storage_prefix") or inc.get("fire_slug")):
             continue
         for rel, meta in (inc.get("files") or {}).items():
             if tiled >= cap or frames.deadline_passed():
@@ -1091,27 +884,32 @@ def _tile_backlog(storage, state, log, *, cap: int = 12,
             if (not rec or rec.get("tiler_version") is not None
                     or not (rec.get("geo") or {}).get("georeferenced")):
                 continue
+            if (sha in tried or meta.get("pruned_at")
+                    or incident_ids.file_owner(inc, meta) is None):
+                continue
+            tried.add(sha)
+            prefix = tiles_prefix(state, sha, inc)
             # A stateless tile worker may already have finished this sheet —
             # adopt its marker (cheap) instead of re-tiling.
-            marker = storage.get_json(tile_meta_key(fire_slug, sha))
+            marker = storage.get_json(tile_meta_key(prefix, sha))
             if marker and marker.get("tiles"):
                 geo = dict(rec.get("geo") or {})
                 geo["georeferenced"] = True
                 geo["projection"] = marker.get("projection")
                 geo["tiles"] = marker["tiles"]
-                state["tiled"][sha] = {
+                put_tiled(state, sha, record_prefix(inc), {
                     "tiler_version": marker.get("tiler_version",
                                                 config.TILER_VERSION),
                     "at": state_mod.now_iso(),
                     "geo": geo,
-                }
-                touched.add(inc_key)
+                })
+                touched |= _sha_holders(state, sha)
                 continue
-            key = f"raw/incidents/{fire_slug}/{rel}"
+            keys = list(dict.fromkeys([raw_key(inc, rel), *raw_key_candidates(state, sha)]))
             parsed = cat.parse_product_filename(rel.rpartition("/")[2])
             with tempfile.TemporaryDirectory(prefix="tilebk_") as td:
                 local = Path(td) / "sheet.pdf"
-                if not storage.get_file(key, local):
+                if fetch_verified(storage, keys, sha, local, log, mismatches=mismatches) is None:
                     continue
                 log(f"[geopdf] backlog tiling {rel} ...")
                 tiles_dir = Path(td) / "tiles"
@@ -1125,9 +923,8 @@ def _tile_backlog(storage, state, log, *, cap: int = 12,
                 if r.get("error"):
                     geo["error"] = r["error"]
                 if r["tiles"]:
-                    n = storage.put_tree(
-                        f"tiles/incidents/{fire_slug}/{sha}", tiles_dir)
-                    storage.put_json(tile_meta_key(fire_slug, sha), {
+                    n = storage.put_tree(tile_root(prefix, sha), tiles_dir)
+                    storage.put_json(tile_meta_key(prefix, sha), {
                         "tiler_version": config.TILER_VERSION,
                         "georeferenced": True,
                         "projection": r["projection"],
@@ -1135,38 +932,41 @@ def _tile_backlog(storage, state, log, *, cap: int = 12,
                     })
                     log(f"[geopdf] backlog {rel}: {n} tiles "
                         f"z{r['tiles']['minzoom']}-{r['tiles']['maxzoom']}")
-                state["tiled"][sha] = {
+                put_tiled(state, sha, record_prefix(inc), {
                     "tiler_version": config.TILER_VERSION,
                     "at": state_mod.now_iso(),
                     "geo": geo,
-                }
+                })
                 tiled += 1
-                touched.add(inc_key)
+                touched |= _sha_holders(state, sha)
     if tiled:
         log(f"[geopdf] tile backlog: {tiled} sheet(s) this run")
     return touched
 
 
-def _probe_backlog(storage, state, log, *, cap: int = 40) -> set[str]:
+def _probe_backlog(storage, state, log, *, cap: int = 40,
+                   mismatches: list[str] | None = None) -> set[str]:
     """Classify already-mirrored PDFs that predate georeference detection.
 
     Sheets mirrored by early runs (or replayed by retention) have no
     state["tiled"] record, so manifests could only guess georeferenced=False —
     Big Grass showed 45 real map sheets as "flat". Retention means they will
     never be re-fetched from the FTP, but the bytes are in OUR bucket: download
-    up to `cap` per run, gdalinfo-probe + preview them, and return the incident
-    keys that gained classifications (their manifests need a rebuild).
+    up to `cap` per run (verified against the sha, asset_keys.fetch_verified),
+    gdalinfo-probe + preview them, and return the incident keys that gained
+    classifications (their manifests need a rebuild). Sheets that show on no
+    fire, and pruned files, are skipped.
     Bounded by cap and the shared wall clock; converges in a few runs.
     """
     if not geopdf.gdal_available():
         return set()
     touched: set[str] = set()
+    tried: set[str] = set()
     probed = 0
     for inc_key, inc in state.get("incidents", {}).items():
         if probed >= cap or frames.deadline_passed():
             break
-        fire_slug = inc.get("fire_slug")
-        if not fire_slug:
+        if not (inc.get("storage_prefix") or inc.get("fire_slug")):
             continue
         for rel, meta in (inc.get("files") or {}).items():
             if probed >= cap or frames.deadline_passed():
@@ -1174,6 +974,9 @@ def _probe_backlog(storage, state, log, *, cap: int = 40) -> set[str]:
             sha = meta.get("sha16")
             if (not sha or not rel.lower().endswith(".pdf")
                     or meta.get("kind") == "mobile"):
+                continue
+            if (sha in tried or meta.get("pruned_at")
+                    or incident_ids.file_owner(inc, meta) is None):
                 continue
             is_ir = meta.get("kind") == "ir"
             rec = state["tiled"].get(sha)
@@ -1191,11 +994,12 @@ def _probe_backlog(storage, state, log, *, cap: int = 40) -> set[str]:
                                and not rec.get("grat_at"))
                 if not broken and not flat_regrat:
                     continue
-            key = f"raw/incidents/{fire_slug}/{rel}"
+            tried.add(sha)
+            keys = list(dict.fromkeys([raw_key(inc, rel), *raw_key_candidates(state, sha)]))
             with tempfile.TemporaryDirectory(prefix="probe_") as td:
                 local = Path(td) / "sheet.pdf"
-                if not storage.get_file(key, local):
-                    continue  # raw object missing — nothing to classify
+                if fetch_verified(storage, keys, sha, local, log, mismatches=mismatches) is None:
+                    continue  # no copy of these bytes — nothing to classify
                 probe = geopdf.probe_pdf(local)
                 geo = {
                     "georeferenced": probe["georeferenced"],
@@ -1206,12 +1010,11 @@ def _probe_backlog(storage, state, log, *, cap: int = 40) -> set[str]:
                 try:
                     preview = Path(td) / "preview.png"
                     geopdf.render_preview(local, preview)
-                    storage.put_file(
-                        f"previews/incidents/{fire_slug}/{sha}.png", preview)
+                    storage.put_file(preview_key(state, sha, inc), preview)
                     geo["preview"] = True
                 except Exception as exc:
                     log(f"[probe] preview failed for {rel}: {exc}")
-                state["tiled"][sha] = {
+                put_tiled(state, sha, record_prefix(inc), {
                     "repair_at": state_mod.now_iso(),
                     "grat_at": state_mod.now_iso(),
                     # georeferenced sheets keep tiler_version None -> the
@@ -1221,55 +1024,55 @@ def _probe_backlog(storage, state, log, *, cap: int = 40) -> set[str]:
                                       else config.TILER_VERSION),
                     "at": state_mod.now_iso(),
                     "geo": geo,
-                }
+                })
                 probed += 1
-                touched.add(inc_key)
+                touched |= _sha_holders(state, sha)
     if probed:
         log(f"[probe] classified {probed} previously-unprobed sheets "
             f"across {len(touched)} incidents")
     return touched
 
 
-# Bump when ir_flights entries gain a field that needs no reconversion (e.g.
-# preview_url): every incident with IR files gets one manifest rebuild.
-IR_MANIFEST_VERSION = 2
-
-
-def _ir_backlog(state: dict, log) -> set[str]:
-    """Incidents holding IR flights that were mirrored before conversion
-    existed for their format (e.g. KMZ-only flights, pre-KMZ-fallback code).
-    State-only scan, zero network: any flight dir with a convertible source
-    but no attempt recorded in state["ir"] under the current converter marks
-    the incident for a manifest rebuild, which runs the conversion (results
-    cached either way) — so a converter bump reconverts every flight. An
-    IR_MANIFEST_VERSION bump rebuilds each IR incident's manifest once
-    (replay only, nothing reconverted)."""
-    touched: set[str] = set()
-    attempted_by_fire: dict[str, int] = {}
-    for key, rec in state.get("ir", {}).items():
-        if (rec or {}).get("v") != ir_vectors.IR_CONVERTER_VERSION:
-            continue
-        slug = key.split("/")[2] if key.count("/") >= 3 else ""
-        attempted_by_fire[slug] = attempted_by_fire.get(slug, 0) + 1
-    for inc_key, rec in state.get("incidents", {}).items():
-        fire_slug = rec.get("fire_slug")
-        if not fire_slug:
-            continue
-        flights = set()
-        has_ir = False
-        for rel in rec.get("files", {}):
-            parts = rel.split("/")
-            if len(parts) >= 3 and parts[0] == "ir":
-                has_ir = True
-                if rel.lower().endswith(("shapefiles.zip", ".kmz")):
-                    flights.add(parts[1])
-        if (len(flights) > attempted_by_fire.get(fire_slug, 0)
-                or (has_ir and rec.get("ir_manifest_v") != IR_MANIFEST_VERSION)):
-            touched.add(inc_key)
-    if touched:
-        log(f"[incidents] IR backlog: {len(touched)} incidents have "
-            "unconverted flights or older IR manifests — queuing rebuilds")
-    return touched
+def _ir_backlog(state: dict, fires_by_fk: dict, log) -> set[str]:
+    """Active fires owed an IR conversion. State-only scan, zero network: for
+    each record, IR flight folder and active fire owning files in it, the
+    flight's source (incident_ids.choose_ir_source, as the manifest build
+    picks it) has no conversion stamped for its current bytes, or one made
+    by an older converter. Returns FIRE keys: rebuilding a fire's manifest
+    runs the conversion. A failed attempt under the current converter counts
+    as done (no retry loop); a converter bump converts every flight again,
+    into new versioned keys, never over old ones. A mixed folder whose
+    sources name other fires has no source for the owner, so it is never
+    flagged."""
+    names = fire_manifests.active_fire_names(fires_by_fk)
+    ir_state = state.get("ir") or {}
+    owed: set[str] = set()
+    for rec in state.get("incidents", {}).values():
+        files = rec.get("files") or {}
+        flights: set[tuple[str, str]] = set()  # (flight folder, owner)
+        for rel, meta in files.items():
+            if meta.get("kind", rel.split("/", 1)[0]) != "ir":
+                continue
+            owner = incident_ids.file_owner(rec, meta)
+            if owner in fires_by_fk:
+                flights.add((rel.rpartition("/")[0], owner))
+        for rel_dir, fk in sorted(flights):
+            if fk in owed:
+                continue
+            fire = fires_by_fk[fk]
+            src, _mixed = incident_ids.choose_ir_source(
+                rec, rel_dir, fk,
+                incident_ids.name_norm(fire.get("post_title") or fire.get("name")), names)
+            if src is None:
+                continue
+            e = ir_entry(rec, src, files[src])
+            conv = ir_state.get(e["key"]) if e else None
+            if conv is None or conv.get("v") != ir_vectors.IR_CONVERTER_VERSION:
+                owed.add(fk)
+    if owed:
+        log(f"[incidents] IR backlog: {len(owed)} fires have unconverted flights — "
+            "queuing manifest rebuilds")
+    return owed
 
 
 def _ftp_outage_entry(job_started: str, exc: BaseException) -> dict:
@@ -1298,25 +1101,48 @@ def _zero_mirror_entry() -> dict:
         "date_rejected": [],
         "deadline_hit": False,
         "gdal_available": geopdf.gdal_available(),
+        "unresolved": [],
+        "rebinds": [],
+        "rebind_refused": [],
+        "override_errors": [],
+        "key_collisions": [],
+        "refreshed": 0,
+        "rebuilt_fires": [],
+        "raw_sha_mismatch": [],
+        "ir_mixed_hidden": [],
     }
 
 
 def cmd_sync_incidents(args) -> int:
+    """Crawl the FTP, bind each incident folder to a fire by ID, mirror it,
+    and publish the ID manifest of every fire whose folders changed.
+
+    A folder's record is bound by cornea_id (incident_ids): a fresh match to
+    another fire rebinds it with each file weighed by its own name
+    (rebind_decision / apply_bind), and every fire it touched is rebuilt.
+    Upload order: raw, tiles, previews; each fire's manifest, then its
+    index entry; state; then the catalog (fire_manifests.publish_catalog).
+    """
     job_started = cat.now_iso()
     storage = make_storage(args.dry_run, args.out)
     state = state_mod.load_state(storage)
-    if incident_ids.migrated(state):
-        # This mirror keys everything by fire_slug. Run on migrated state it
-        # would publish slug manifests and slug catalog rows over the fire-ID
-        # ones, so it pauses (visibly, as a failure) until the fire-ID sync
-        # code is deployed: no FTP, state or catalog writes.
-        log("[incidents] state is migrated to fire IDs; this sync code predates "
-            "it — pausing")
+    if not state["incidents"]:
+        # A fresh deployment (no state/state.json, or no folder mirrored
+        # yet) has nothing keyed by fire slug: it starts keyed by fire ID.
+        state.setdefault("migrations", {})["incident_ids"] = cat.now_iso()
+    if not incident_ids.migrated(state):
+        # The records are still keyed by fire slug. Matching them by fire ID
+        # would treat every folder as new and orphan its files, so the mirror
+        # pauses until the incident-ID migration has run: visibly, as a
+        # failure that keeps the last run's numbers, and with no FTP, state
+        # or catalog writes.
+        log("[incidents] state is not keyed by fire ID yet — paused until "
+            "migrate-incident-ids is applied (maint.yml)")
         health.publish_failure(storage, "mirror", {
             "started_at": job_started,
             "finished_at": cat.now_iso(),
-            "note": "paused: migrated state needs the fire-ID sync code",
-            "error": "migrated_state",
+            "note": "paused: awaiting incident-ID migration (maint.yml)",
+            "error": "paused_migration",
         }, defaults=_zero_mirror_entry(), log=log)
         return 0
     overrides = config.load_match_overrides()
@@ -1324,25 +1150,38 @@ def cmd_sync_incidents(args) -> int:
     with make_client() as client:
         log("[incidents] fetching active fires ...")
         fires = fetch_active_fires(client)
-        fires_by_slug = {f["fire_slug"]: f for f in fires}
+        fires_by_fk = {fk: f for f in fires if (fk := fire_key(f.get("cornea_id")))}
         log(f"[incidents] active wildfires: {len(fires)}")
+        target = None
+        if args.fire:
+            target = _resolve_fire_arg(args.fire, fires)
+            if target is None:
+                log(f"[incidents] --fire {args.fire}: no active fire has that fire key or slug")
+                return 2
+            log(f"[incidents] --fire {args.fire}: {target.get('post_title')} "
+                f"({target.get('cornea_id')})")
+        target_fk = fire_key(target.get("cornea_id")) if target else None
+
+        # Fire keys whose manifests this run rebuilds.
+        rebuild: set[str] = set()
+        mismatches: list[str] = []  # raw keys whose bytes did not hash (health)
 
         # Classify legacy sheets from B2 before crawling, so this run's
-        # manifests already reflect the corrections.
+        # manifests already reflect the corrections. The two sheet backlogs
+        # return incident keys (every fire those folders show files on is
+        # rebuilt), the IR backlog returns fire keys.
         frames.start_deadline(int(os.environ.get(
             "MIRROR_MAX_SECONDS", str(config.MIRROR_MAX_SECONDS_DEFAULT))))
-        backlog_touched = _probe_backlog(storage, state, log)
-        backlog_touched |= _tile_backlog(storage, state, log,
-                                         zoom_cap=args.zoom_cap)
-        backlog_touched |= _ir_backlog(state, log)
-        for inc_key in backlog_touched:
-            # cleared mtime => the crawl re-syncs it (files replay from cache,
-            # zero downloads) and rebuilds its manifest with the new geo state
-            state["incidents"][inc_key]["dir_mtime"] = None
+        touched_inc = _probe_backlog(storage, state, log, mismatches=mismatches)
+        touched_inc |= _tile_backlog(storage, state, log, zoom_cap=args.zoom_cap,
+                                     mismatches=mismatches)
+        for inc_key in touched_inc:
+            rebuild |= incident_ids.owners_of(state["incidents"][inc_key])
+        rebuild |= _ir_backlog(state, fires_by_fk, log)
 
         log("[incidents] crawling FTP year roots for candidate dirs ...")
         try:
-            cands = _collect_candidates(client, args, fires)
+            cands = _collect_candidates(client, args, fires, target=target, state=state)
         except httpx.TransportError as exc:
             # The FTP host itself is down: connect/read timeouts that outlive
             # the retry budget before a single listing arrives. There is
@@ -1355,11 +1194,16 @@ def cmd_sync_incidents(args) -> int:
                                    _ftp_outage_entry(job_started, exc),
                                    defaults=_zero_mirror_entry(), log=log)
             return 1
+        cands, key_collisions = _drop_key_collisions(cands, state)
         priority = [x for x in (args.priority_fires or "").split(",") if x.strip()]
         cands = _rank_candidates(cands, fires, priority)
         unchanged_skips = 0
+        refreshed = 0  # unchanged folders of active fires re-listed (spec 3.9)
         failed_incidents: list[str] = []
         date_rejected: list[str] = []  # cached name matches dropped by the date check
+        rebinds: list[dict] = []
+        rebind_refused: list[dict] = []
+        override_errors: list[dict] = []
         log(f"[incidents] candidate incident dirs: {len(cands)}"
             + (f" (priority: {', '.join(priority)})" if priority else "")
             + " — ordered priority, then acreage desc")
@@ -1379,46 +1223,108 @@ def cmd_sync_incidents(args) -> int:
             if frames.deadline_passed():
                 deferred += 1
                 continue
-            # deterministic evidence (skip listing work when unchanged & known)
-            prev = state["incidents"].get(cand.key)
+            key = cand.key
+            prev = state["incidents"].get(key)
+            ov = overrides.get(key)
+            now = cat.now_iso()
+
             # Re-validate a cached name match before trusting it: detach the
             # folder (its mirrored files stay — retention) and fall through
             # to a fresh match, which applies the same date check.
-            stale = _cached_match_predates_fire(prev, fires_by_slug) if prev else None
+            stale = _cached_match_predates_fire(prev, fires_by_fk) if prev else None
             if stale:
-                log(f"[incidents] {cand.key}: cached {prev['match'].get('method')} match to "
-                    f"{prev.get('fire_slug')} REJECTED — {stale}")
+                old = incident_ids.prior_owner(prev)
+                log(f"[incidents] {key}: cached {prev['match'].get('method')} match to "
+                    f"{prev.get('cornea_id')} REJECTED — {stale}")
                 prev["match_rejected"] = {
-                    "fire_slug": prev.get("fire_slug"),
+                    "cornea_id": prev.get("cornea_id"),
                     "method": prev["match"].get("method"),
                     "reason": stale,
-                    "at": cat.now_iso(),
+                    "at": now,
                 }
                 prev["match"] = None
-                date_rejected.append(cand.key)
+                if old:
+                    rebuild.add(old)
+                date_rejected.append(key)
+
             # --since widens the mirror window, so an unchanged dir still
             # needs re-listing on a backfill run.
             if (prev and not args.force and not args.since
                     and prev.get("dir_mtime") == cand.dir_mtime
-                    and prev.get("match")):
-                log(f"[incidents] {cand.key}: unchanged since last sync — skipping")
-                unchanged_skips += 1
-                continue
+                    and _override_key(prev.get("override")) == _override_key(ov)):
+                if incident_ids.prior_owner(prev):
+                    # Bound, and nothing new at the folder's root. (Keeping an
+                    # active fire's unchanged folders fresh is spec 3.9.)
+                    log(f"[incidents] {key}: unchanged since last sync — skipping")
+                    unchanged_skips += 1
+                    continue
+                if prev.get("id_unresolved") or prev.get("ignored"):
+                    log(f"[incidents] {key}: unchanged and "
+                        f"{'ignored' if prev.get('ignored') else 'unresolved'} — skipping")
+                    unchanged_skips += 1
+                    continue
+                # detached by the date check: a fresh match below
 
-            cand.unit_tokens = _gather_unit_tokens(client, cand)
-            m = match_candidate(cand, fires, overrides)
+            kind, m, why = resolve_override(ov, fires)
+            if kind == "ignore":
+                if prev is not None:
+                    old = incident_ids.prior_owner(prev)
+                    prev.update(match=None, ignored=True, override="ignore",
+                                dir_mtime=cand.dir_mtime)
+                    if old:
+                        rebuild.add(old)
+                log(f"[incidents] {key}: ignored (match_overrides.json)")
+                continue
+            if kind in ("error", "inactive"):
+                # An invalid override leaves the folder exactly as it was.
+                log(f"[incidents] {key}: override NOT applied — {why}")
+                override_errors.append({"key": key, "override": ov, "error": kind,
+                                        "reason": why})
+                continue
             if m is None:
-                log(f"[incidents] {cand.key}: UNMATCHED "
+                cand.unit_tokens = _gather_unit_tokens(client, cand)
+                m = match_candidate(cand, fires, None,
+                                    prefer_fk=fire_key((prev or {}).get("cornea_id")), log=log)
+            if m is None:
+                log(f"[incidents] {key}: UNMATCHED "
                     f"(tokens={dict(cand.unit_tokens) or 'none'}) — see match_overrides.json")
                 continue
-            if args.fire and m.fire_slug != args.fire:
+            fk = fire_key(m.cornea_id)
+            if target_fk and fk != target_fk:
                 continue
-            fire = fires_by_slug.get(m.fire_slug)
+            fire = fires_by_fk.get(fk)
             if fire is None:
+                log(f"[incidents] {key}: matched inactive fire {m.cornea_id} — skipping")
                 continue
+
+            decision = incident_ids.rebind_decision(prev, m)
+            if decision == "refuse":
+                # A name never outranks an ID: keep the binding and mirror
+                # under it.
+                log(f"[incidents] {key}: {m.method} match to {m.fire_slug} ({m.cornea_id}) "
+                    f"REFUSED — bound by unit_id to {prev.get('cornea_id')}")
+                rebind_refused.append({"key": key, "cornea_id": prev.get("cornea_id"),
+                                       "matched": m.cornea_id, "method": m.method})
+                cornea_id, match_record, bound = (prev.get("cornea_id"), prev["match"],
+                                                  prev.get("bound"))
+                fk = fire_key(cornea_id)
+            else:
+                if decision != "new":
+                    old = incident_ids.apply_bind(prev, m, fire, now, inc_key=key)
+                    if old:
+                        rebuild.add(old)
+                    if decision != "same":
+                        rebinds.append({"key": key, "decision": decision, "from": old,
+                                        "to": fk, "method": m.method})
+                        log(f"[incidents] {key}: {decision} {old or '-'} -> {fk} ({m.method})")
+                cornea_id = m.cornea_id
+                match_record = {"method": m.method, "confidence": m.confidence,
+                                "token": m.token, "dir_url": cand.dir_url,
+                                "cornea_id": m.cornea_id}
+                bound = incident_ids.bound_info(fire, m.method)
             matched += 1
-            log(f"[incidents] {cand.key} -> {m.fire_slug} "
-                f"({m.method}, conf={m.confidence})")
+            log(f"[incidents] {key} -> {fire_key(cornea_id)} "
+                f"({m.fire_slug}, {m.method}, conf={m.confidence})")
 
             mirror = IncidentMirror(
                 client, storage, state,
@@ -1429,28 +1335,38 @@ def cmd_sync_incidents(args) -> int:
                 since=args.since,
                 force=args.force,
             )
-            match_record = {"method": m.method, "confidence": m.confidence,
-                            "token": m.token, "dir_url": cand.dir_url}
             try:
                 res = mirror.sync_incident(
-                    incident_key=cand.key, fire_slug=m.fire_slug,
-                    dir_url=cand.dir_url, match=match_record, dir_mtime=cand.dir_mtime,
+                    incident_key=key, dir_url=cand.dir_url, match=match_record,
+                    cornea_id=cornea_id, bound=bound, dir_mtime=cand.dir_mtime,
+                    region=cand.region,
                 )
             except httpx.HTTPError as exc:
                 # One incident's FTP flaking (retries exhausted) must not kill
                 # the run — its checkpoint state is intact, next run resumes.
-                log(f"[incidents] {cand.key}: FAILED mid-mirror ({exc}) — "
+                log(f"[incidents] {key}: FAILED mid-mirror ({exc}) — "
                     "skipping; will resume next run")
-                failed_incidents.append(cand.key)
+                failed_incidents.append(key)
                 continue
-            state["incidents"][cand.key]["dir_url"] = cand.dir_url
-            state["incidents"][cand.key].pop("match_rejected", None)
-            log(f"[incidents] {cand.key}: listings={res.listings} "
+            rec = state["incidents"][key]
+            rec["dir_url"] = cand.dir_url
+            rec.pop("id_unresolved", None)
+            rec.pop("match_rejected", None)
+            if m.method == "override":
+                rec["override"] = m.cornea_id
+            else:
+                rec.pop("override", None)
+            log(f"[incidents] {key}: listings={res.listings} "
                 f"downloads={res.downloads} ({res.bytes_downloaded/1e6:.1f} MB) "
                 f"unchanged={res.skipped_unchanged} too_big={res.skipped_too_big}")
-            mirrors[cand.key] = {
-                "fire": fire, "candidate": cand, "match": m, "result": res,
-            }
+            mirrors[key] = {"candidate": cand, "match": m, "result": res, "fk": fk}
+            # The fire the folder is bound to, and every fire a downloaded
+            # file shows on (a new revision can move a file's raw key).
+            rebuild.add(fk)
+            for mf in res.files:
+                if mf.local_path is not None:
+                    meta = rec["files"].get(f"{mf.rel_dir}/{mf.filename}") or {}
+                    rebuild |= {o for o in [incident_ids.file_owner(rec, meta)] if o}
             # Checkpoint per incident: files are already on B2, so if this run
             # dies the next one must not re-download them. (The first full run
             # was killed mid-tiling and lost every download record.)
@@ -1461,87 +1377,27 @@ def cmd_sync_incidents(args) -> int:
             log(f"[incidents] download deadline reached — {deferred} candidate dirs "
                 "deferred to the next scheduled run")
 
-        # A fire's manifest is the UNION of all its incident dirs (a complex/
-        # event dir can carry the same fire's sheets). When only one dir
-        # changed this run, its rebuild would drop the unchanged siblings'
-        # sheets — so hand those siblings to the manifest phase as pure state
-        # replays: no FTP work, files come from the per-incident cache.
-        rebuilt_slugs = {b["fire"]["fire_slug"] for b in mirrors.values()}
-        for inc_key, rec in list(state["incidents"].items()):
-            slug = rec.get("fire_slug")
-            if (inc_key in mirrors or slug not in rebuilt_slugs
-                    or not rec.get("files") or not rec.get("match")):
-                continue  # (no match = detached by the date check)
-            fire = fires_by_slug.get(slug)
-            if fire is None:
-                continue
-            m = rec.get("match") or {}
-            dir_url = rec.get("dir_url") or ""
-            region = ""
-            parts = dir_url.split("/incident_specific_maps/", 1)
-            if len(parts) == 2:
-                region = parts[1].split("/", 1)[0]
-            mirrors[inc_key] = {
-                "fire": fire,
-                "candidate": SimpleNamespace(region=region, dir_url=dir_url),
-                "match": SimpleNamespace(token=m.get("token")),
-                "result": MirrorResult(),
-            }
-            log(f"[incidents] {inc_key}: unchanged sibling of a rebuilt fire "
-                f"({slug}) — replaying into the manifest union")
-
-        _tile_and_manifest(args, storage, state, fires_by_slug, mirrors)
-        state_mod.save_state(storage, state)  # tiling records before manifests
-
-        # master catalog rebuild (catalog.json LAST)
-        incident_matches = {}
-        for inc_key, inc in state["incidents"].items():
-            mrec = inc.get("match") or {}
-            if inc.get("fire_slug") and mrec:  # detached records carry no match
-                incident_matches[inc["fire_slug"]] = {
-                    "method": mrec.get("method"),
-                    "confidence": mrec.get("confidence"),
-                    "dir_url": inc.get("dir_url") or mrec.get("dir_url"),
-                    "synced_at": inc.get("synced_at"),
-                    "map_count": inc.get("map_count"),
-                    "ir_count": inc.get("ir_count"),
-                    "latest_upload": inc.get("latest_upload"),
-                    "latest_upload_ts": inc.get("latest_upload_ts"),
-                }
-        # Preserve forecast fields owned by sync-catalogs: rebuild them from the
-        # previously published catalog so this job never blanks them.
-        prev_catalog = storage.get_json("catalogs/catalog.json") or {}
-        # By fire ID: this job's slugs can differ from that catalog's when
-        # two active fires share a name and one updated in between.
-        spread_index = {
-            fire_key(f.get("cornea_id")): {"latest": f["spread_latest_run"],
-                                           "count": f.get("spread_run_count")}
-            for f in prev_catalog.get("fires", [])
-            if f.get("has_spread_forecast") and f.get("spread_latest_run")
-        }
-        perimeter_counts = {
-            fk: rec["count"]
-            for fk, rec in migrate_perim_counts(state, fires).items()
-            if rec.get("count") is not None
-        }
-        hotspot_archives = hotspots.advertised(state)
-        version = int(state.get("catalog_version", 0)) + 1
-        catalog = cat.build_catalog(fires, version=version,
-                                    incident_matches=incident_matches,
-                                    spread_index=spread_index,
-                                    perimeter_counts=perimeter_counts,
-                                    hotspot_archives=hotspot_archives,
-                                    national_layers=prev_catalog.get("national_layers"))
-        storage.put_json(f"catalogs/versions/catalog.{version}.json", catalog)
-        storage.put_json("catalogs/catalog.json", catalog)
-        state["catalog_version"] = version
-        state_mod.save_state(storage, state)
+        stats: dict = {"raw_sha_mismatch": mismatches}
+        _process_mirrored_assets(args, storage, state, mirrors)
+        # fires whose index entry is missing, outdated (reassign-files) or
+        # names other folders than the ones feeding them now
+        rebuild |= fire_manifests.stale_index_fks(state, fires_by_fk)
+        built = fire_manifests.publish_fire_manifests(
+            args, storage, state, fires_by_fk, rebuild, mirrors, stats=stats, log=log)
+        state_mod.save_state(storage, state)  # tiling records and the index
+        # master catalog rebuild (state, versions/catalog.N.json, catalog.json LAST)
+        catalog = fire_manifests.publish_catalog(storage, state, fires, log=log)
+        version = catalog["version"]
 
         log(f"[incidents] done: candidates={len(cands)} matched={matched} "
-            f"mirrored_incidents={len(mirrors)} catalog_version={version}")
+            f"mirrored_incidents={len(mirrors)} rebuilt_fires={len(built)} "
+            f"catalog_version={version}")
 
         downloads = sum(m["result"].downloads for m in mirrors.values())
         dl_bytes = sum(m["result"].bytes_downloaded for m in mirrors.values())
+        unresolved = sorted(k for k, r in state["incidents"].items()
+                            if r.get("id_unresolved") and not r.get("ignored"))
+        raw_sha_mismatch = sorted(set(stats.get("raw_sha_mismatch") or ()))
         health.publish(storage, "mirror", {
             "started_at": job_started,
             "finished_at": cat.now_iso(),
@@ -1551,6 +1407,14 @@ def cmd_sync_incidents(args) -> int:
                 if failed_incidents else None,
                 f"{len(date_rejected)} stale name match(es) dropped by the date check"
                 if date_rejected else None,
+                f"{len(rebinds)} folder(s) rebound to another fire" if rebinds else None,
+                f"{len(rebind_refused)} name rebind(s) of ID-bound folders refused"
+                if rebind_refused else None,
+                f"{len(override_errors)} invalid override(s) in match_overrides.json"
+                if override_errors else None,
+                f"{len(key_collisions)} incident key collision(s)" if key_collisions else None,
+                f"{len(raw_sha_mismatch)} raw object(s) failed their hash check"
+                if raw_sha_mismatch else None,
             ])) or None,
             "catalog_version": version,
             "candidates": len(cands),
@@ -1562,6 +1426,15 @@ def cmd_sync_incidents(args) -> int:
             "date_rejected": date_rejected,
             "deadline_hit": frames.deadline_passed(),
             "gdal_available": geopdf.gdal_available(),
+            "unresolved": unresolved,
+            "rebinds": rebinds,
+            "rebind_refused": rebind_refused,
+            "override_errors": override_errors,
+            "key_collisions": key_collisions,
+            "refreshed": refreshed,
+            "rebuilt_fires": sorted(built),
+            "raw_sha_mismatch": raw_sha_mismatch,
+            "ir_mixed_hidden": stats.get("ir_mixed_hidden") or [],
         }, log=log)
     return 0
 
@@ -1764,7 +1637,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     def incidents_args(sp):
         common(sp)
-        sp.add_argument("--fire", help="restrict to one fire (fire_slug, e.g. 'elk')")
+        sp.add_argument("--fire", help="restrict to one fire: its fire slug (e.g. 'elk') "
+                                       "or fire key (its cornea_id, any spelling)")
         sp.add_argument("--region", help="restrict to one GACC region dir (e.g. rocky_mtn)")
         sp.add_argument("--year", type=int, default=2026)
         sp.add_argument("--since", help="backfill: include Products dailies >= YYYYMMDD")

@@ -103,7 +103,7 @@ def test_sync_incidents_records_ftp_outage_and_fails(tmp_path, monkeypatch):
     monkeypatch.setattr(cli, "_tile_backlog", lambda *a, **k: set())
     monkeypatch.setattr(cli, "_ir_backlog", lambda *a, **k: set())
 
-    def boom(client, args, fires):
+    def boom(client, args, fires, **kw):
         raise httpx.ConnectTimeout("timed out")
     monkeypatch.setattr(cli, "_collect_candidates", boom)
 
@@ -134,7 +134,7 @@ def test_sync_incidents_other_crashes_still_propagate(tmp_path, monkeypatch):
     for name in ("_probe_backlog", "_tile_backlog", "_ir_backlog"):
         monkeypatch.setattr(cli, name, lambda *a, **k: set())
 
-    def boom(client, args, fires):
+    def boom(client, args, fires, **kw):
         raise ValueError("parser bug")
     monkeypatch.setattr(cli, "_collect_candidates", boom)
     args = SimpleNamespace(dry_run=True, out=tmp_path, year=2026, fire=None,

@@ -15,17 +15,22 @@ from responder_worker.matching import (
     match_pyrecast_slug,
     name_variants,
     normalize_name,
+    resolve_override,
 )
 
 
-def _fire(slug, title, state, uid=None, created_on=None):
+def _fire(slug, title, state, uid=None, created_on=None, cornea_id=None):
     return {
         "fire_slug": slug,
         "post_title": title,
         "state": state,
         "unique_fire_id": uid,
         "created_on": created_on,
+        "cornea_id": cornea_id,
     }
+
+
+ELK_ID = "{5152A1B2-0000-4000-8000-C13CE748EC08}"
 
 
 # ---------------------------------------------------------------------------
@@ -173,14 +178,16 @@ class TestMatchCandidate:
         assert match_candidate(cand, fires) is None
 
     def test_override_pin_and_ignore(self):
-        fires = [_fire("elk", "Elk", "CO")]
+        fires = [_fire("elk", "Elk", "CO", cornea_id=ELK_ID)]
         cand = IncidentCandidate(
             region="rocky_mtn", year=2026, dir_name="2026_Mystery",
             dir_url="https://x/",
         )
-        m = match_candidate(cand, fires, {"rocky_mtn/2026/2026_Mystery": "elk"})
-        assert m and m.method == "override" and m.fire_slug == "elk"
+        m = match_candidate(cand, fires, {"rocky_mtn/2026/2026_Mystery": ELK_ID})
+        assert m and m.method == "override" and m.cornea_id == ELK_ID
         assert match_candidate(cand, fires, {"rocky_mtn/2026/2026_Mystery": "ignore"}) is None
+        # a slug is a name, shared between fires: never an override
+        assert match_candidate(cand, fires, {"rocky_mtn/2026/2026_Mystery": "elk"}) is None
 
 
 # ---------------------------------------------------------------------------
@@ -268,8 +275,10 @@ class TestDateSanity:
         cand = self._corral(newest_file_mtime="2026-04-26 02:00")
         m = match_candidate(cand, fires)
         assert m and m.method == "unit_id"
-        other = [_fire("corrals", "Corrals", "NM", created_on="2026-09-17T19:53:09Z")]
-        pinned = match_candidate(cand, other, {"southwest/2026/2026_Corral": "corrals"})
+        corrals = "{E42E66D2-0000-4000-8000-000000000001}"
+        other = [_fire("corrals", "Corrals", "NM", created_on="2026-09-17T19:53:09Z",
+                       cornea_id=corrals)]
+        pinned = match_candidate(cand, other, {"southwest/2026/2026_Corral": corrals})
         assert pinned and pinned.method == "override"
 
     def test_file_mtimes_beat_directory_mtimes(self):
@@ -288,6 +297,89 @@ class TestDateSanity:
         fires = [_fire("corrals", "Corrals", "NM")]
         cand = self._corral(newest_file_mtime="2026-04-26 02:00")
         assert match_candidate(cand, fires) is not None
+
+
+# ---------------------------------------------------------------------------
+# fire IDs: overrides by GUID, matches carry cornea_id, shared unit ids
+# ---------------------------------------------------------------------------
+
+class TestFireIds:
+    def test_resolve_override_guid_any_spelling(self):
+        fires = [_fire("elk", "Elk", "CO", cornea_id=ELK_ID)]
+        bare = ELK_ID.strip("{}")
+        for ov in (ELK_ID, bare, bare.lower(), "{" + bare.lower() + "}"):
+            kind, m, why = resolve_override(ov, fires)
+            assert kind == "match" and why is None, ov
+            assert (m.method, m.confidence, m.cornea_id, m.fire_slug) == (
+                "override", 1.0, ELK_ID, "elk")
+        assert resolve_override(None, fires) == ("none", None, None)
+        assert resolve_override("", fires) == ("none", None, None)
+        assert resolve_override("ignore", fires) == ("ignore", None, None)
+
+    def test_resolve_override_slug_is_error(self):
+        fires = [_fire("elk", "Elk", "CO", cornea_id=ELK_ID)]
+        for ov in ("elk", "Elk", "IGNORE", "5152a1b2", ELK_ID + "x", "{5152A1B2-0000}"):
+            kind, m, why = resolve_override(ov, fires)
+            assert (kind, m) == ("error", None), ov
+            assert "not a fire GUID" in why
+
+    def test_resolve_override_inactive_fire(self):
+        fires = [_fire("elk", "Elk", "CO", cornea_id=ELK_ID)]
+        gone = "{0258851A-0000-4000-8000-000000000009}"
+        kind, m, why = resolve_override(gone, fires)
+        assert (kind, m) == ("inactive", None)
+        assert gone in why
+        cand = IncidentCandidate(region="rocky_mtn", year=2026, dir_name="2026_Elk",
+                                 dir_url="https://x/")
+        # an override that cannot be applied leaves the folder unmatched,
+        # never matched by name instead
+        assert match_candidate(cand, fires, {cand.key: gone}) is None
+
+    def test_match_carries_cornea_id(self):
+        elk = _fire("elk", "Elk", "CO", uid="2026-COGMF-000114", cornea_id=ELK_ID)
+        token = IncidentCandidate(region="rocky_mtn", year=2026, dir_name="2026_Mystery",
+                                  dir_url="https://x/",
+                                  unit_tokens=Counter({"2026-COGMF-000114": 2}))
+        m = match_candidate(token, [elk])
+        assert (m.method, m.cornea_id, m.token) == ("unit_id", ELK_ID, "2026-COGMF-000114")
+        by_name = IncidentCandidate(region="rocky_mtn", year=2026, dir_name="2026_Elk",
+                                    dir_url="https://x/")
+        m = match_candidate(by_name, [elk])
+        assert (m.method, m.cornea_id) == ("name_exact", ELK_ID)
+        willow = _fire("willow", "Willow Fire", "CO",
+                       cornea_id="{1F000000-0000-4000-8000-000000000001}")
+        fuzzy = IncidentCandidate(region="rocky_mtn", year=2026, dir_name="2026_WillowFires",
+                                  dir_url="https://x/")
+        m = match_candidate(fuzzy, [willow])
+        assert (m.method, m.cornea_id) == ("name_fuzzy", willow["cornea_id"])
+
+    def test_shared_uid_token_skipped_unless_preferred(self):
+        # 2026-ARARS-600170 belongs to two active fires (seen on real data):
+        # the token proves nothing on its own, so the next token decides
+        a = _fire("pine", "Pine", "AR", uid="2026-ARARS-600170",
+                  cornea_id="{A0000000-0000-4000-8000-00000000000A}")
+        b = _fire("ridge", "Ridge", "AR", uid="2026-ARARS-600170",
+                  cornea_id="{B0000000-0000-4000-8000-00000000000B}")
+        c = _fire("creek", "Creek", "AR", uid="2026-ARARS-600171",
+                  cornea_id="{C0000000-0000-4000-8000-00000000000C}")
+        logged = []
+        cand = IncidentCandidate(region="southern", year=2026, dir_name="2026_Mystery",
+                                 dir_url="https://x/",
+                                 unit_tokens=Counter({"2026-ARARS-600170": 5,
+                                                      "2026-ARARS-600171": 1}))
+        m = match_candidate(cand, [a, b, c], log=logged.append)
+        assert m.cornea_id == c["cornea_id"] and m.token == "2026-ARARS-600171"
+        assert "ambiguous uid 2026-ARARS-600170" in logged[0]
+        # ... unless one holder is the fire the folder is bound to now
+        m = match_candidate(cand, [a, b, c], prefer_fk="b0000000-0000-4000-8000-00000000000b",
+                            log=logged.append)
+        assert m.cornea_id == b["cornea_id"] and m.method == "unit_id"
+        # a preferred fire that does not hold the token changes nothing
+        only = IncidentCandidate(region="southern", year=2026, dir_name="2026_Mystery",
+                                 dir_url="https://x/",
+                                 unit_tokens=Counter({"2026-ARARS-600170": 5}))
+        assert match_candidate(only, [a, b, c], prefer_fk="c0000000-0000-4000-8000-00000000000c",
+                               log=logged.append) is None
 
 
 # ---------------------------------------------------------------------------
