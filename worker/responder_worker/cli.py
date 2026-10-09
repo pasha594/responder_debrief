@@ -875,6 +875,12 @@ def _sha_holders(state: dict, sha: str) -> set[str]:
             if any(m.get("sha16") == sha for m in (rec.get("files") or {}).values())}
 
 
+def _preview_owed(rec: dict) -> dict:
+    """needs_preview carried over by a writer that re-tiles a sheet without
+    rendering its preview (only the probe backlog's preview pass clears it)."""
+    return {"needs_preview": True} if rec.get("needs_preview") else {}
+
+
 def _tile_backlog(storage, state, log, *, cap: int = 12, zoom_cap: int | None = None,
                   mismatches: list[str] | None = None) -> set[str]:
     """Tile sheets that were probed georeferenced but never got tiles.
@@ -925,6 +931,7 @@ def _tile_backlog(storage, state, log, *, cap: int = 12, zoom_cap: int | None = 
                                                 config.TILER_VERSION),
                     "at": state_mod.now_iso(),
                     "geo": geo,
+                    **_preview_owed(rec),
                 })
                 touched |= _sha_holders(state, sha)
                 continue
@@ -959,6 +966,7 @@ def _tile_backlog(storage, state, log, *, cap: int = 12, zoom_cap: int | None = 
                     "tiler_version": config.TILER_VERSION,
                     "at": state_mod.now_iso(),
                     "geo": geo,
+                    **_preview_owed(rec),
                 })
                 tiled += 1
                 touched |= _sha_holders(state, sha)
@@ -978,7 +986,8 @@ def _probe_backlog(storage, state, log, *, cap: int = 40,
     up to `cap` per run (verified against the sha, asset_keys.fetch_verified),
     gdalinfo-probe + preview them, and return the incident keys that gained
     classifications (their manifests need a rebuild). Sheets that show on no
-    fire, and pruned files, are skipped.
+    fire, and pruned files, are skipped. A sheet whose preview the key audit
+    found nowhere (needs_preview) only gets its preview rendered again.
     Bounded by cap and the shared wall clock; converges in a few runs.
     """
     if not geopdf.gdal_available():
@@ -1003,6 +1012,13 @@ def _probe_backlog(storage, state, log, *, cap: int = 40,
                 continue
             is_ir = meta.get("kind") == "ir"
             rec = state["tiled"].get(sha)
+            if rec is not None and rec.get("needs_preview"):
+                tried.add(sha)
+                if _render_missing_preview(storage, state, inc, rel, sha, rec, log,
+                                           mismatches=mismatches):
+                    probed += 1
+                    touched |= _sha_holders(state, sha)
+                continue
             if rec is not None and is_ir:
                 continue  # IR PDFs only ever need the card thumbnail
             if rec is not None:
@@ -1054,6 +1070,37 @@ def _probe_backlog(storage, state, log, *, cap: int = 40,
         log(f"[probe] classified {probed} previously-unprobed sheets "
             f"across {len(touched)} incidents")
     return touched
+
+
+def _render_missing_preview(storage, state, inc, rel, sha, rec, log, *,
+                            mismatches: list[str] | None = None) -> bool:
+    """The preview-only pass for a sheet whose preview the key audit found
+    nowhere (tiled[sha].needs_preview): render it again from bytes that hash
+    to the sha, PUT it only where no preview is yet, and keep everything
+    else the entry says (tiles, tiler_version, prefixes). False when no raw
+    copy verifies (the flag stays, for a later run)."""
+    key = preview_key(state, sha, inc)
+    keys = list(dict.fromkeys([raw_key(inc, rel), *raw_key_candidates(state, sha)]))
+    with tempfile.TemporaryDirectory(prefix="preview_") as td:
+        local = Path(td) / "sheet.pdf"
+        if fetch_verified(storage, keys, sha, local, log, mismatches=mismatches) is None:
+            return False
+        ok = True
+        if not storage.exists(key):
+            try:
+                preview = Path(td) / "preview.png"
+                geopdf.render_preview(local, preview)
+                storage.put_file(key, preview)
+            except Exception as exc:
+                # tried once, like a failed probe: the sheet shows no preview
+                log(f"[probe] preview failed for {rel}: {exc}")
+                ok = False
+    entry = {k: v for k, v in rec.items()
+             if k not in ("prefix", "preview_prefix", "needs_preview")}
+    entry["geo"] = dict(rec.get("geo") or {}, preview=ok)
+    put_tiled(state, sha, record_prefix(inc), entry)
+    log(f"[probe] preview {'restored' if ok else 'not restored'} for {rel}")
+    return True
 
 
 def _ir_backlog(state: dict, fires_by_fk: dict, log) -> set[str]:
@@ -1589,69 +1636,38 @@ def _tick_prune_clock(state: dict, fires: list[dict], fires_meta: dict,
 
 
 def cmd_prune(args) -> int:
-    """Manual-only, explicit-opt-in deletion. USER POLICY (2026-08-17): FTP-
-    derived incident data is kept indefinitely — this command refuses to run
-    without BOTH --days and --confirm, and is never invoked by CI."""
-    from datetime import datetime, timedelta, timezone
+    """Delete the bucket objects of incident files whose fire has been
+    inactive for --days, by fire key (prune.py). USER POLICY (2026-08-17):
+    FTP-derived incident data is kept indefinitely, so CI never deletes:
+    --report (the default, and all maint.yml runs) lists exactly what
+    would go, with byte totals, and writes nothing.
 
-    from .maint import write_report
+    Destructive prune is CLI-only: --days N --confirm, refused unless the
+    state is migrated to fire IDs and the key audit has repaired it, and
+    refused on an active-fire list that may be partial. Before running it,
+    `gh workflow disable` mirror.yml, tile.yml and catalogs.yml and wait for
+    their runs in flight to finish; re-enable them after. It deletes exact
+    keys only (never a prefix), never what a surviving file still needs,
+    and marks the files it deleted `pruned_at`."""
+    from . import prune
 
-    if getattr(args, "report", False):
-        # maint.yml runs prune in report mode only; the fire-ID prune
-        # report comes with the key audit (spec 5.2)
-        note = "prune report is not implemented yet (fire-ID prune, spec 5.2); nothing deleted"
-        log(f"[prune] {note}")
+    if getattr(args, "report", False) and args.confirm:
+        from .maint import write_report
+
+        why = "--report and --confirm together: pick one"
+        log(f"[prune] refused: {why}")
         write_report(getattr(args, "report_out", None),
-                     {"command": "prune", "mode": "report", "deleted": [], "note": note})
-        return 2
-    if args.days is None or not args.confirm:
-        log("[prune] refused: incident data is kept indefinitely by policy. "
-            "To delete anyway, pass BOTH --days N and --confirm.")
+                     {"command": "prune", "mode": "report", "error": why, "deleted": []})
         return 2
 
-    storage = make_storage(args.dry_run, args.out)
-    state = state_mod.load_state(storage)
-    if incident_ids.migrated(state):
-        # Migrated prefixes hold other folders' stamped files (austin/ keeps
-        # Grasshopper's sheets), so deleting a whole slug prefix here would
-        # take another fire's maps with it.
-        log("[prune] refused: state is keyed by fire ID; this slug-prefix "
-            "prune would delete files other fires still show")
-        return 2
+    def fetch_fires(meta: dict) -> list[dict]:
+        # only once the state checks pass: a refusal never calls the API
+        with make_client() as client:
+            return fetch_active_fires(client, meta=meta)
 
-    with make_client() as client:
-        fires = fetch_active_fires(client)
-    active_slugs = {f["fire_slug"] for f in fires}
-
-    now = datetime.now(timezone.utc)
-    cutoff = now - timedelta(days=args.days)
-    inactive_since = state["prune"]["inactive_since"]
-
-    removed = []
-    for inc_key, inc in list(state["incidents"].items()):
-        slug = inc.get("fire_slug")
-        if slug in active_slugs:
-            inactive_since.pop(slug, None)
-            continue
-        first_seen = inactive_since.get(slug)
-        if first_seen is None:
-            inactive_since[slug] = now.strftime("%Y-%m-%dT%H:%M:%SZ")
-            continue
-        if datetime.strptime(first_seen, "%Y-%m-%dT%H:%M:%SZ").replace(
-                tzinfo=timezone.utc) < cutoff:
-            log(f"[prune] {slug}: inactive > {args.days}d — deleting")
-            for prefix in (f"raw/incidents/{slug}/", f"tiles/incidents/{slug}/",
-                           f"previews/incidents/{slug}/", f"vectors/ir/{slug}/",
-                           f"catalogs/incidents/{slug}.json"):
-                n = storage.delete_prefix(prefix)
-                log(f"[prune]   {prefix}: {n} objects removed")
-            del state["incidents"][inc_key]
-            inactive_since.pop(slug, None)
-            removed.append(slug)
-
-    state_mod.save_state(storage, state)
-    log(f"[prune] done: removed={removed or 'none'}")
-    return 0
+    return prune.run(make_storage(args.dry_run, args.out), fetch_fires=fetch_fires,
+                     days=args.days, confirm=args.confirm,
+                     report_out=getattr(args, "report_out", None), log=log)
 
 
 # ===========================================================================
@@ -1703,8 +1719,18 @@ def cmd_migrate_incident_ids(args) -> int:
 
 
 def cmd_audit_incident_keys(args) -> int:
-    log("[audit] audit-incident-keys is not yet implemented (spec 5.1)")
-    return 2
+    """Check every incident key against the bucket (audit_keys). --report
+    writes nothing; --repair edits state only; --refetch-missing (with
+    --repair) also writes raw objects re-fetched from the FTP, only to keys
+    nothing is at. Nothing is deleted or copied."""
+    from . import audit_keys
+
+    storage = make_storage(args.dry_run, args.out)
+    with make_client() as client:
+        return audit_keys.run(
+            storage, fetch_fires=lambda meta: fetch_active_fires(client, meta=meta),
+            repair=args.apply, refetch=args.refetch_missing, client=client,
+            report_out=args.report_out, log=log)
 
 
 def cmd_reassign_files(args) -> int:
@@ -1790,14 +1816,17 @@ def build_parser() -> argparse.ArgumentParser:
     incidents_args(sp)
     sp.set_defaults(func=cmd_backfill)
 
-    sp = sub.add_parser("prune", help="drop fires inactive > 14 days")
+    sp = sub.add_parser("prune",
+                        help="delete the objects of fires inactive > --days (report by default; "
+                             "CLI-only --confirm deletes)")
     common(sp)
     sp.add_argument("--days", type=int, default=None,
-                    help="inactivity threshold; required (policy: keep forever)")
+                    help="inactivity threshold in days; required to delete "
+                         "(policy: keep forever)")
     sp.add_argument("--confirm", action="store_true",
-                    help="required second flag to actually delete")
+                    help="required second flag to actually delete (CLI only)")
     sp.add_argument("--report", action="store_true",
-                    help="report only, never delete (maint.yml)")
+                    help="report only, never delete (the default; maint.yml)")
     sp.add_argument("--report-out", type=Path, default=None, help="write a JSON report here")
     sp.set_defaults(func=cmd_prune)
 
@@ -1818,10 +1847,13 @@ def build_parser() -> argparse.ArgumentParser:
     sp.set_defaults(func=cmd_migrate_incident_ids)
 
     sp = sub.add_parser("audit-incident-keys",
-                        help="check every incident key against the bucket (not yet implemented)")
+                        help="check every incident key against the bucket; --repair "
+                             "corrects state only")
     common(sp)
     mode_args(sp, apply_flag="--repair")
-    sp.add_argument("--refetch-missing", action="store_true")
+    sp.add_argument("--refetch-missing", action="store_true",
+                    help="with --repair: re-fetch files found nowhere from the FTP and write "
+                         "them where no object is yet")
     sp.set_defaults(func=cmd_audit_incident_keys)
 
     sp = sub.add_parser("reassign-files",

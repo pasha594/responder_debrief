@@ -394,16 +394,17 @@ def test_index_path_never_used_before_flag():
     assert cat.catalog_incident_index(state) is None
 
 
-def test_legacy_prune_refuses_migrated_state(tmp_path, monkeypatch):
-    # The slug-prefix prune deletes raw/incidents/{slug}/ wholesale; on
-    # migrated state that prefix can hold another fire's stamped files.
+def test_prune_never_deletes_a_slug_prefix(tmp_path, monkeypatch):
+    # The slug-prefix prune deleted raw/incidents/{slug}/ wholesale; on
+    # migrated state that prefix can hold another fire's stamped files. The
+    # fire-ID prune refuses until the key audit has run, before any API call.
     storage = SpyStorage(tmp_path / "out")
     storage.put_json(STATE_KEY, _migrated_state())
     storage.put_bytes(f"raw/incidents/wildhorse/{SHEET}", b"%PDF")
     storage.written.clear()
     monkeypatch.setattr(cli, "make_storage", lambda dry_run, out: storage)
     monkeypatch.setattr(cli, "make_client", _no_ftp)
-    args = SimpleNamespace(dry_run=True, out=None, days=0, confirm=True)
+    args = SimpleNamespace(dry_run=True, out=None, days=14, confirm=True)
     assert cli.cmd_prune(args) == 2
     assert storage.written == []
     assert storage.exists(f"raw/incidents/wildhorse/{SHEET}")

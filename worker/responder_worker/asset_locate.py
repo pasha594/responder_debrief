@@ -19,7 +19,14 @@ from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .asset_keys import fetch_verified, file_location, raw_key, record_prefix
+from .asset_keys import (
+    fetch_verified,
+    file_location,
+    preview_prefix,
+    raw_key,
+    record_prefix,
+    tiles_prefix,
+)
 
 RAW = "raw/incidents/"
 PREVIEWS = "previews/incidents/"
@@ -106,11 +113,11 @@ def locate_raw(storage, state: dict, listings: Listings, *, prefer: dict | None 
     the first whose bytes hash to the file's sha16 is its location
     (stamped unless `stamp` is False). Pruned files are skipped.
 
-    Returns {ok, relocated: {prefix: n}, missing: [...], raw_size_mismatch:
-    [...], sha_mismatch: [keys]}; a file at its key with another size is
-    only reported."""
+    Returns {ok, relocated: {prefix: n}, moves: [{key, rel, from, to}],
+    missing: [...], raw_size_mismatch: [...], sha_mismatch: [keys]}; a file
+    at its key with another size is only reported."""
     prefer = prefer or {}
-    rep: dict = {"ok": 0, "relocated": {}, "missing": [], "raw_size_mismatch": [],
+    rep: dict = {"ok": 0, "relocated": {}, "moves": [], "missing": [], "raw_size_mismatch": [],
                  "sha_mismatch": []}
     with tempfile.TemporaryDirectory(prefix="locate_") as td:
         dest = Path(td) / "raw"
@@ -139,6 +146,8 @@ def locate_raw(storage, state: dict, listings: Listings, *, prefer: dict | None 
                     rep["missing"].append({"key": inc_key, "rel": rel, "sha16": meta.get("sha16")})
                     continue
                 rep["relocated"][found] = rep["relocated"].get(found, 0) + 1
+                rep["moves"].append({"key": inc_key, "rel": rel,
+                                     "from": file_location(rec, rel), "to": found})
                 if stamp:
                     set_file_location(rec, rel, found)
     return rep
@@ -217,6 +226,64 @@ def locate_shas(state: dict, listings: Listings, live_tiles: dict, live_previews
             if v and v[0] != prefix:
                 entry["preview_prefix"] = v[0]
     return rep
+
+
+def audit_shas(state: dict, listings: Listings, live_tiles: dict, live_previews: dict,
+               *, stamp: bool = True) -> dict:
+    """Check every sha a file holds against the listings: are the tiles
+    and preview its geo claims where state's keys point (tiles_prefix and
+    preview_prefix, for its first holder)? A copy missing there but listed
+    under another prefix moves the stamp to it (choose_copy; the tiles'
+    prefix and the preview's are moved separately, so the one still in
+    place keeps its key); a copy found nowhere is reported missing.
+
+    Returns {tiles: {ok, moved: [{sha, from, to}], missing: [sha]},
+    previews: {...}}."""
+    holders = sha_holders(state)
+    incidents = state.get("incidents") or {}
+    rep = {kind: {"ok": 0, "moved": [], "missing": []} for kind in ("tiles", "previews")}
+    for sha, entry in (state.get("tiled") or {}).items():
+        if sha not in holders:
+            continue
+        first = incidents[holders[sha][0][0]]
+        locs = [loc for _key, loc in holders[sha]]
+        geo = entry.get("geo") or {}
+        at = {"tiles": tiles_prefix(state, sha, first),
+              "previews": preview_prefix(state, sha, first)}
+        to = dict(at)
+        for kind, found, live, claimed in (
+                ("tiles", listings.tiles.get(sha, set()), live_tiles, geo.get("tiles")),
+                ("previews", listings.previews.get(sha, set()), live_previews, geo.get("preview"))):
+            if not claimed:
+                continue
+            if at[kind] in found:
+                rep[kind]["ok"] += 1
+                continue
+            copies = choose_copy(found, live.get(sha, set()), locs)
+            if not copies:
+                rep[kind]["missing"].append(sha)
+                continue
+            to[kind] = copies[0]
+            rep[kind]["moved"].append({"sha": sha, "from": at[kind], "to": copies[0]})
+        if stamp and to != at:
+            entry["prefix"] = to["tiles"]
+            if to["previews"] != to["tiles"]:
+                entry["preview_prefix"] = to["previews"]
+            else:
+                entry.pop("preview_prefix", None)
+    return rep
+
+
+def manifest_urls(man: dict) -> list[str]:
+    """Every object URL a published manifest links."""
+    urls = []
+    for m in man.get("maps") or []:
+        urls += [m.get("pdf_url"), m.get("preview_url"),
+                 (m.get("tiles") or {}).get("url_template")]
+    for f in man.get("ir_flights") or []:
+        urls += [f.get(u) for u in ("pdf_url", "kmz_url", "readme_url", "geojson_url",
+                                    "preview_url")]
+    return [u for u in urls if u]
 
 
 def ir_objects(state: dict, listings: Listings) -> dict:

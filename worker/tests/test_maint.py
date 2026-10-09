@@ -1,6 +1,7 @@
 """maint.yml commands: per-file reassignment (state only, rebuild marked)
 and the migration's rollback; the parser registrations they run through."""
 
+import contextlib
 import json
 
 import pytest
@@ -133,13 +134,24 @@ def test_restore_backup_refuses_migrated_backup(tmp_path, monkeypatch):
 
 
 def test_maint_parsers_registered(tmp_path, monkeypatch):
-    # the Phase 4 audit is a stub until then; prune reports only, deleting nothing
-    assert cli.main(["audit-incident-keys", "--report"]) == 2
+    # maint.yml's command lines parse; on unmigrated state the audit refuses
+    # and prune never deletes, whatever the flags
     storage = SpyStorage(tmp_path / "bucket")
-    storage.put_json(STATE_KEY, _migrated())
+    storage.put_json(STATE_KEY, dict(_migrated(), migrations={}))
     storage.written.clear()
     _wire(monkeypatch, storage)
+    monkeypatch.setattr(cli, "make_client", contextlib.nullcontext)
+    monkeypatch.setattr(cli, "fetch_active_fires", lambda *a, **k: pytest.fail(
+        "a refusal never asks the fire API"))
     out = tmp_path / "r.json"
+    for argv in (["audit-incident-keys", "--report"], ["audit-incident-keys", "--repair"]):
+        assert cli.main([*argv, "--report-out", str(out)]) == 2
+        assert "not migrated" in json.loads(out.read_text())["error"]
+    assert cli.main(["audit-incident-keys", "--report", "--refetch-missing",
+                     "--report-out", str(out)]) == 2
     assert cli.main(["prune", "--report", "--days", "14", "--confirm",
                      "--report-out", str(out)]) == 2
-    assert storage.written == [] and json.loads(out.read_text())["deleted"] == []
+    assert json.loads(out.read_text())["deleted"] == []
+    assert cli.main(["prune", "--report", "--days", "14", "--report-out", str(out)]) == 2
+    assert "not keyed by fire ID" in json.loads(out.read_text())["error"]
+    assert storage.written == []

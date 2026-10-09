@@ -6,7 +6,11 @@ name: Maintenance
 #   migrate-incident-ids  report: compute the fire-ID migration, write nothing.
 #                         apply: needs expect_run_id (a report run); downloads
 #                         its report and aborts unless this run reproduces it.
-#   audit-incident-keys   report | repair (Phase 4)
+#   audit-incident-keys   report: check every incident key against the
+#                         bucket, write nothing. apply (--repair): edit state
+#                         only (locations, missing marks, previews/tiles/IR
+#                         requeued); refetch_missing also re-fetches files
+#                         found nowhere from the FTP, to keys nothing is at.
 #   reassign-files        key, rel (regex), to (fire GUID | binding | hidden):
 #                         state only
 #   restore-state-backup  apply only: the migration's rollback
@@ -58,6 +62,11 @@ on:
         description: "prune (report only): inactivity threshold in days"
         required: false
         type: string
+      refetch_missing:
+        description: "audit apply: re-fetch raw files found nowhere from the FTP (writes only absent keys)"
+        required: false
+        type: boolean
+        default: false
 
 concurrency:
   # Same group as every job that writes state/state.json or catalog.json.
@@ -116,6 +125,7 @@ jobs:
           INPUT_REL: ${{ inputs.rel }}
           INPUT_TO: ${{ inputs.to }}
           INPUT_DAYS: ${{ inputs.days }}
+          INPUT_REFETCH_MISSING: ${{ inputs.refetch_missing }}
         run: |
           set -o pipefail
           ARGS=()
@@ -132,7 +142,15 @@ jobs:
               fi
               ;;
             audit-incident-keys)
-              if [ "$INPUT_MODE" = "apply" ]; then ARGS+=(--repair); else ARGS+=(--report); fi
+              if [ "$INPUT_MODE" = "apply" ]; then
+                ARGS+=(--repair)
+                if [ "$INPUT_REFETCH_MISSING" = "true" ]; then ARGS+=(--refetch-missing); fi
+              else
+                ARGS+=(--report)
+                if [ "$INPUT_REFETCH_MISSING" = "true" ]; then
+                  echo "::warning::refetch_missing applies to mode apply only; this report run re-fetches nothing"
+                fi
+              fi
               ;;
             reassign-files)
               if [ -z "$INPUT_REL" ]; then

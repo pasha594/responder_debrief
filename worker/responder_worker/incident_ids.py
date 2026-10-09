@@ -15,6 +15,7 @@ Everything here is pure: it reads and edits the state dicts it is given.
 from __future__ import annotations
 
 import re
+from collections import Counter
 
 from .asset_keys import new_storage_prefix
 from .fires import fire_key
@@ -170,6 +171,43 @@ def contributors(state: dict) -> dict[str, set[str]]:
             fk = file_owner(rec, meta)
             if fk:
                 out.setdefault(fk, set()).add(key)
+    return out
+
+
+def suspect_files(state: dict, fires_by_fk: dict) -> dict[str, list[dict]]:
+    """Files whose unit token (held by one active fire) or name points at an
+    active fire other than the one showing them, counted per (folder, that
+    fire, the fire showing them): {"id_suspect": [...], "name_suspect":
+    [...]}. Report only: a third fire is never given files."""
+    by_uid: dict[str, set[str]] = {}
+    by_name: dict[str, set[str]] = {}
+    for fk, f in fires_by_fk.items():
+        if uid := (f.get("unique_fire_id") or "").upper():
+            by_uid.setdefault(uid, set()).add(fk)
+        if n := name_norm(f.get("post_title")):
+            by_name.setdefault(n, set()).add(fk)
+    own_names = {fk: name_norm(f.get("post_title")) for fk, f in fires_by_fk.items()}
+    ids: Counter = Counter()
+    names: Counter = Counter()
+    for key, rec in sorted((state.get("incidents") or {}).items()):
+        year = year_of(key)
+        for rel, meta in (rec.get("files") or {}).items():
+            if meta.get("pruned_at"):
+                continue
+            owner = file_owner(rec, meta)
+            filename = rel.rpartition("/")[2]
+            for tok in extract_unit_tokens([filename], year=year):
+                holders = by_uid.get(tok.upper(), set())
+                if len(holders) == 1 and (y := next(iter(holders))) != owner:
+                    ids[(key, y, owner)] += 1
+            for n in names_in(filename, by_name.keys() - {own_names.get(owner)}):
+                for y in by_name[n] - {owner}:
+                    names[(key, y, owner)] += 1
+    out: dict[str, list[dict]] = {"id_suspect": [], "name_suspect": []}
+    for counter, field in ((ids, "id_suspect"), (names, "name_suspect")):
+        for (key, y, owner), n in sorted(counter.items(), key=lambda kv: (kv[0][0], kv[0][1])):
+            out[field].append({"key": key, "fk": y, "name": fires_by_fk[y].get("post_title"),
+                               "shown_on": owner, "files": n})
     return out
 
 

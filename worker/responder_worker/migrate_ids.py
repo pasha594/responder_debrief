@@ -52,10 +52,11 @@ from .incident_ids import (
     names_in,
     prior_owner,
     record_predates_fire,
+    suspect_files,
     year_of,
 )
 from .maint import write_report
-from .matching import extract_unit_tokens, parse_when
+from .matching import parse_when
 from .state import STATE_KEY
 
 #: catalogs 1-5 predate the serialized writers (36c66c8); no record needs them
@@ -672,35 +673,7 @@ class Migration:
     def suspects(self) -> None:
         """Report only: files whose unit token or name points at an active
         fire other than the one showing them (third fires are never moved)."""
-        by_uid: dict[str, set[str]] = {}
-        by_name: dict[str, set[str]] = {}
-        for fk, f in self.fires_by_fk.items():
-            if uid := (f.get("unique_fire_id") or "").upper():
-                by_uid.setdefault(uid, set()).add(fk)
-            if n := name_norm(f.get("post_title")):
-                by_name.setdefault(n, set()).add(fk)
-        own_names = {fk: name_norm(f.get("post_title")) for fk, f in self.fires_by_fk.items()}
-        ids: Counter = Counter()
-        names: Counter = Counter()
-        for key, rec in sorted(self.state["incidents"].items()):
-            year = year_of(key)
-            for rel, meta in (rec.get("files") or {}).items():
-                if meta.get("pruned_at"):
-                    continue
-                owner = file_owner(rec, meta)
-                filename = rel.rpartition("/")[2]
-                for tok in extract_unit_tokens([filename], year=year):
-                    holders = by_uid.get(tok.upper(), set())
-                    if len(holders) == 1 and (y := next(iter(holders))) != owner:
-                        ids[(key, y, owner)] += 1
-                for n in names_in(filename, by_name.keys() - {own_names.get(owner)}):
-                    for y in by_name[n] - {owner}:
-                        names[(key, y, owner)] += 1
-        rep = self.report["records"]
-        for counter, out in ((ids, rep["id_suspect"]), (names, rep["name_suspect"])):
-            for (key, y, owner), n in sorted(counter.items(), key=lambda kv: (kv[0][0], kv[0][1])):
-                out.append({"key": key, "fk": y, "name": self.fires_by_fk[y].get("post_title"),
-                            "shown_on": owner, "files": n})
+        self.report["records"].update(suspect_files(self.state, self.fires_by_fk))
 
     # -- step E ------------------------------------------------------------
 
@@ -923,21 +896,10 @@ class Migration:
             man = self.out.get_json(path) or {}
             if fire_key(man.get("cornea_id")) != fk:
                 problems.append(f"{path}: cornea_id {man.get('cornea_id')}")
-            for url in _manifest_urls(man):
+            for url in asset_locate.manifest_urls(man):
                 if not self.listings.url_exists(url) and not self._known_missing(url):
                     problems.append(f"{fk}: {url} is not on the bucket")
         return problems
-
-
-def _manifest_urls(man: dict) -> list[str]:
-    urls = []
-    for m in man.get("maps") or []:
-        urls += [m.get("pdf_url"), m.get("preview_url"),
-                 (m.get("tiles") or {}).get("url_template")]
-    for f in man.get("ir_flights") or []:
-        urls += [f.get(u) for u in ("pdf_url", "kmz_url", "readme_url", "geojson_url",
-                                    "preview_url")]
-    return [u for u in urls if u]
 
 
 def run(storage, *, fetch_fires, apply: bool, expect: Path | None = None,
