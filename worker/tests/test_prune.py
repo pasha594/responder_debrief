@@ -252,6 +252,12 @@ def test_prune_requires_own_upload_older_than_cutoff(tmp_path):
     scene.publish()
     code, report = scene.run(tmp_path, days=14)
     assert report["fires"] == [] and report["delete"]["raw"] == []
+    # nor seen on the list since the cutoff, whatever inactive_since says
+    scene.fires.pop()
+    scene.state["prune"]["last_seen_active"][AU_FK] = "2026-10-01T00:00:00Z"
+    scene.publish()
+    code, report = scene.run(tmp_path, days=14)
+    assert code == 0 and report["fires"] == [] and report["files"] == {}
 
 
 # ---------------------------------------------------------------------------
@@ -432,3 +438,146 @@ def test_prune_report_is_the_default(tmp_path, monkeypatch, argv):
         assert report["fires"] == [AU_FK] and report["keys"] > 0
     else:
         assert "fires" not in report
+
+
+def test_prune_keeps_a_raw_key_a_survivor_names(tmp_path):
+    scene = _austin_and_grasshopper(tmp_path)
+    # 2026_Grasshopper names Austin's sheet where its bytes are (two records
+    # at one raw key, the same bytes, as live state has under tartar/)
+    scene.file(GH_KEY, AU_OPS, _pdf("au ops 0815"), at="austin")
+    scene.publish()
+    key = f"raw/incidents/austin/{AU_OPS}"
+    code, report = scene.run(tmp_path, confirm=True)
+    assert code == 0 and report["records_removed"] == [AU_KEY]
+    assert key in scene.keys()
+    assert key not in report["delete"]["raw"] and key not in scene.bucket.deleted
+    assert "pruned_at" not in scene.state_on_bucket()["incidents"][GH_KEY]["files"][AU_OPS]
+
+
+@pytest.mark.parametrize("survivor", ["unstamped", "stamped"])
+def test_prune_keeps_ir_a_survivor_may_serve(tmp_path, survivor):
+    scene = _austin_and_grasshopper(tmp_path)
+    stamped = f"vectors/ir/austin/{sha16(b'PK austin 0814')}.v3.geojson"
+    if survivor == "unstamped":
+        # 2026_Grasshopper's flight under austin/, never stamped: any
+        # conversion under austin/ may be the one serving it
+        scene.file(GH_KEY, "ir/20260817/20260817_Grasshopper_IR.kmz", b"PK gh 0817",
+                   at="austin")
+        kept, gone = {stamped, LEGACY_IR}, set()
+    else:
+        # 2026_Grasshopper's copy of the 08-14 flight, stamped to Austin's
+        # conversion of the same bytes
+        src = "ir/20260814/20260814_Austin_IR.kmz"
+        kmz = scene.file(GH_KEY, src, b"PK austin 0814")
+        scene.state["incidents"][GH_KEY]["ir_keys"] = {
+            src: {"key": stamped, "flight_id": "20260814_IR", "src_sha16": kmz}}
+        kept, gone = {stamped}, {LEGACY_IR}
+    scene.publish()
+    code, report = scene.run(tmp_path, confirm=True)
+    assert code == 0
+    keys, state = scene.keys(), scene.state_on_bucket()
+    for key in kept:
+        assert key in keys and key in state["ir"] and key not in report["delete"]["vectors"]
+    for key in gone:
+        assert key not in keys and key not in state["ir"]
+
+
+def test_prune_keeps_a_folder_bound_to_a_live_fire(tmp_path):
+    scene = _austin_and_grasshopper(tmp_path)
+    # a folder bound to Grasshopper whose only file (old) shows on Austin
+    spot, rel = "pacific_nw/2026/2026_GrasshopperSpot", "products/20260815/Spot_Austin_0815.pdf"
+    scene.record(spot, GRASSHOPPER, "grasshopper-5d1e2f")
+    scene.file(spot, rel, _pdf("spot 0815"), fk=AU_FK, fk_src="prior")
+    scene.publish()
+    code, report = scene.run(tmp_path, confirm=True)
+    assert code == 0
+    state = scene.state_on_bucket()
+    # the file goes; the folder stays, its fire is not doomed
+    assert state["incidents"][spot]["files"][rel]["pruned_at"] == NOW_ISO
+    assert f"raw/incidents/grasshopper-5d1e2f/{rel}" in scene.bucket.deleted
+    assert report["records_removed"] == [AU_KEY]
+
+
+def _planned_keys(scene, report) -> set[str]:
+    """Every key a report says --confirm deletes (tile trees listed)."""
+    keys = {k for kind in ("raw", "previews", "vectors", "manifests", "legacy_manifests")
+            for k in report["delete"][kind]}
+    for t in report["delete"]["tiles"]:
+        keys.update(k for k, _s in scene.bucket.list_keys(f"{t['root']}/"))
+    return keys
+
+
+def test_prune_delete_failing_part_way_saves_nothing_and_reruns(tmp_path, monkeypatch):
+    scene = _austin_and_grasshopper(tmp_path)
+    # a file shown on no fire keeps 2026_Austin in state
+    scene.file(AU_KEY, "products/20260815/Hidden.pdf", _pdf("hidden"), fk=None, fk_src="hidden")
+    scene.publish()
+    before = (scene.bucket.out_dir / STATE_KEY).read_bytes()
+    planned = _planned_keys(scene, scene.run(tmp_path)[1])
+    real = scene.bucket.delete_keys
+    calls: list[list[str]] = []
+
+    def flaky(keys):
+        calls.append(list(keys))
+        if len(calls) == 2:
+            raise RuntimeError("delete_keys: 1 of 1 failed; first x: InternalError")
+        return real(keys)
+
+    monkeypatch.setattr(scene.bucket, "delete_keys", flaky)
+    code, report = scene.run(tmp_path, confirm=True)
+    assert code == 1 and "InternalError" in report["error"]
+    assert report["storage_writes"] == 0 and scene.bucket.written == []
+    assert (scene.bucket.out_dir / STATE_KEY).read_bytes() == before
+    assert set(calls[0]) <= planned and not set(calls[0]) & scene.keys()   # part-way
+
+    # run again: the same plan, everything goes, the files are marked
+    monkeypatch.setattr(scene.bucket, "delete_keys", real)
+    code, report = scene.run(tmp_path, confirm=True)
+    assert code == 0 and not planned & scene.keys()
+    files = scene.state_on_bucket()["incidents"][AU_KEY]["files"]
+    assert {rel: m.get("pruned_at") for rel, m in files.items()} == {
+        **dict.fromkeys((AU_OPS, SHARED, AU_KMZ, AU_IR_PDF, LEGACY_KMZ, LEGACY_PDF), NOW_ISO),
+        "products/20260815/Hidden.pdf": None}
+
+
+def test_prune_stops_when_a_state_writer_ran(tmp_path, monkeypatch):
+    scene = _austin_and_grasshopper(tmp_path).publish()
+    keys = scene.keys()
+    # the mirror saves state after prune loaded it, before any delete
+    mirrored = json.loads(json.dumps(dict(scene.state, updated_at="2026-10-09T02:00:41Z")))
+    real_resolve = prune.Plan.resolve
+
+    def resolve_while_mirror_saves(self, storage, log=print):
+        out = real_resolve(self, storage, log)
+        scene.bucket.put_json(STATE_KEY, mirrored)
+        return out
+
+    monkeypatch.setattr(prune.Plan, "resolve", resolve_while_mirror_saves)
+    code, report = scene.run(tmp_path, confirm=True)
+    assert code == 2 and "a state writer ran" in report["error"]
+    assert scene.bucket.deleted == [] and scene.keys() == keys
+    assert scene.state_on_bucket() == mirrored   # its save stands
+
+    # ... or during the deletes: they happened, its save still stands
+    monkeypatch.setattr(prune.Plan, "resolve", real_resolve)
+    real_delete = scene.bucket.delete_keys
+    later = dict(mirrored, updated_at="2026-10-09T02:41:09Z")
+
+    def delete_while_mirror_saves(keys):
+        n = real_delete(keys)
+        scene.bucket.put_json(STATE_KEY, later)
+        return n
+
+    monkeypatch.setattr(scene.bucket, "delete_keys", delete_while_mirror_saves)
+    scene.bucket.written.clear()
+    code, report = scene.run(tmp_path, confirm=True)
+    assert code == 1 and "a state writer ran" in report["error"]
+    assert scene.bucket.deleted and report["storage_writes"] == 0
+    assert scene.state_on_bucket() == later
+
+    # run again with the writers stopped: the plan from its state converges
+    monkeypatch.setattr(scene.bucket, "delete_keys", real_delete)
+    code, report = scene.run(tmp_path, confirm=True)
+    assert code == 0
+    state = scene.state_on_bucket()
+    assert AU_KEY not in state["incidents"] and f"raw/incidents/austin/{AU_OPS}" not in scene.keys()

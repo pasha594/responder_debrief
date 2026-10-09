@@ -7,7 +7,9 @@ incident-ID migration's step C).
   2  shas whose tiles or preview are not where their stamps point, with the
      copies listed elsewhere
   3  every URL in every published ID manifest that names no object
-  4  IR: failed conversions (and whether their source now resolves),
+  4  IR: failed conversions with their sources (the files stamped to the
+     key; for a legacy key no stamp names, the files the slug-keyed build
+     could have converted it from) and whether one now resolves;
      conversions and ir_keys whose object is not on the bucket
   5  files of different folders at one raw key with other sizes or bytes
   6  files whose unit token or name points at a third fire
@@ -21,12 +23,14 @@ preview found nowhere is queued for the probe backlog's preview-only pass
 (tiler_version None); IR conversions with no object are dropped, so the
 next mirror run converts their sources into new keys, and failed ones whose
 object exists get their heat types back. Every fire whose manifest that
-touches is marked stale (incident_fires[fk].v = 0) and
-migrations.incident_keys_audit is set.
+touches, and every fire whose manifest item 3 found broken, is marked stale
+(incident_fires[fk].v = 0) and migrations.incident_keys_audit is set.
 
 --refetch-missing (with --repair) GETs every `missing` file from the FTP
 with no conditional headers and writes bytes that still hash to the file's
-sha16 to its new_raw_key, only when nothing is at that key yet.
+sha16 to its new_raw_key, only when nothing is at that key yet (by the
+audit's LIST, this run's writes and a HEAD that must answer) and no other
+record's file with other bytes is stamped there.
 
 Nothing is ever deleted or copied on the bucket.
 """
@@ -45,6 +49,7 @@ from .fires import ACTIVE_FIRES_LIMIT, fire_key, fire_list_suspect
 from .http import get
 from .incident_ids import file_owner, migrated, suspect_files
 from .maint import write_report
+from .migrate_ids import legacy_ir_conversions
 
 
 def _records(state: dict):
@@ -232,6 +237,21 @@ class Audit:
 
     # -- 4: IR conversions ---------------------------------------------------
 
+    def _legacy_sources(self) -> dict[str, list[tuple[str, str]]]:
+        """Legacy IR key (vectors/ir/{slug}/{flight}.geojson) -> the files
+        the slug-keyed build could have converted it from, recomputed as
+        prune recomputes them (legacy_ir_conversions)."""
+        out: dict[str, list[tuple[str, str]]] = {}
+        for inc_key, rec in _records(self.state):
+            dirs = {rel.rpartition("/")[0] for rel, meta in (rec.get("files") or {}).items()
+                    if meta.get("kind", rel.split("/", 1)[0]) == "ir"}
+            if not dirs:
+                continue
+            for vkey, src, _fid in sorted(legacy_ir_conversions(self.state, inc_key, rec, dirs)):
+                if (inc_key, src) not in out.setdefault(vkey, []):
+                    out[vkey].append((inc_key, src))
+        return out
+
     def check_ir(self) -> None:
         ir_state = self.state.setdefault("ir", {})
         incidents = self.state["incidents"]
@@ -242,16 +262,25 @@ class Audit:
             for src, e in (rec.get("ir_keys") or {}).items():
                 if e.get("key"):
                     refs.setdefault(e["key"], []).append((inc_key, src))
+        legacy: dict[str, list[tuple[str, str]]] | None = None
         rep = self.report["ir"]
         for key, e in sorted(ir_state.items()):
             e = e or {}
             if e.get("failed"):
+                # the files stamped to the key; a key no stamp names (every
+                # failed slug-keyed conversion: the migration never stamped
+                # one) is matched to the files that build could have used
+                via, holders = "ir_keys", refs.get(key)
+                if not holders:
+                    if legacy is None:
+                        legacy = self._legacy_sources()
+                    via, holders = "legacy", legacy.get(key, [])
                 sources = []
-                for inc_key, src in refs.get(key, []):
+                for inc_key, src in holders:
                     rec = incidents[inc_key]
                     meta = (rec.get("files") or {}).get(src)
                     rk = raw_key(rec, src) if meta else None
-                    sources.append({"key": inc_key, "src": src, "raw_key": rk,
+                    sources.append({"key": inc_key, "src": src, "via": via, "raw_key": rk,
                                     "resolves": bool(meta) and not meta.get("pruned_at")
                                     and (rk in self.listings.raw or (inc_key, src) in moved)})
                 rep["failed"].append({"key": key, "object_exists": key in vectors,
@@ -282,8 +311,11 @@ class Audit:
             e = e or {}
             if e.get("failed"):
                 if key not in vectors:
-                    # nothing was written there: the next mirror run converts
-                    # the source again (into a key that is still free)
+                    # nothing was written there. A stamped key: the next
+                    # mirror run converts its source again (into a key that
+                    # is still free). A key no stamp names is only cleaned
+                    # up: nothing converts into it again (a source with no
+                    # stamp converts into a new key anyway)
                     ir_state.pop(key)
                     fix["ir_failed_dropped"].append(key)
                     affect_refs(key)
@@ -312,7 +344,8 @@ class Audit:
 
     # -- 5: one raw key, several files ---------------------------------------
 
-    def check_shared_rels(self) -> None:
+    def raw_holders(self) -> dict[str, list[dict]]:
+        """raw key -> every unpruned file whose bytes state places there."""
         by_key: dict[str, list[dict]] = {}
         for inc_key, rec in _records(self.state):
             for rel, meta in (rec.get("files") or {}).items():
@@ -320,8 +353,12 @@ class Audit:
                     by_key.setdefault(raw_key(rec, rel), []).append(
                         {"key": inc_key, "rel": rel, "size": meta.get("size"),
                          "sha16": meta.get("sha16")})
+        return by_key
+
+    def check_shared_rels(self) -> None:
         self.report["shared_rel_conflicts"] = [
-            {"raw_key": key, "holders": holders} for key, holders in sorted(by_key.items())
+            {"raw_key": key, "holders": holders}
+            for key, holders in sorted(self.raw_holders().items())
             if len({h["key"] for h in holders}) > 1
             and len({(h["size"], h["sha16"]) for h in holders}) > 1]
 
@@ -330,9 +367,13 @@ class Audit:
     def refetch_missing(self, storage, client) -> dict:
         """GET every file marked missing from its FTP URL, unconditionally
         (the file's etag would only earn a 304), and write bytes that hash
-        to its sha16 to its new_raw_key, never over an existing object."""
+        to its sha16 to its new_raw_key, never over an existing object and
+        never where another record's file with other bytes is stamped (the
+        mirror's _foreign guard: that file's URLs would serve these bytes)."""
         out: dict = {"restored": [], "revised_upstream": [], "unrecoverable": [],
-                     "key_occupied": [], "errors": []}
+                     "key_occupied": [], "key_claimed": [], "errors": []}
+        holders = self.raw_holders()
+        written: set[str] = set()
         for inc_key, rec in _records(self.state):
             for rel, meta in (rec.get("files") or {}).items():
                 if not meta.get("missing") or meta.get("pruned_at"):
@@ -365,17 +406,35 @@ class Audit:
                         dict(item, sha16=meta.get("sha16"), upstream_sha16=sha))
                     continue
                 key = new_raw_key(rec, rel)
-                if storage.exists(key):
+                claimed = [h for h in holders.get(key, ())
+                           if h["key"] != inc_key and h["sha16"] != meta.get("sha16")]
+                if claimed:
+                    out["key_claimed"].append(dict(item, raw_key=key, holders=claimed))
+                    continue
+                # Occupied by the audit's own LIST (it runs in the writer
+                # group, so nothing else writes meanwhile), by this run, or
+                # by a HEAD. A HEAD that fails is never read as "free".
+                try:
+                    occupied = (key in self.listings.raw or key in written
+                                or storage.exists_strict(key))
+                except Exception as exc:
+                    out["errors"].append(dict(item, raw_key=key,
+                                              error=f"HEAD {type(exc).__name__}: {exc}"))
+                    continue
+                if occupied:
                     out["key_occupied"].append(dict(item, raw_key=key))
                     continue
                 storage.put_bytes(key, body)
+                written.add(key)
                 meta.pop("prefix", None)
                 meta.pop("missing", None)
                 out["restored"].append(dict(item, raw_key=key))
                 self._affect(rec, meta)
         self.log(f"[audit] refetch: {len(out['restored'])} restored, "
                  f"{len(out['revised_upstream'])} revised upstream, "
-                 f"{len(out['unrecoverable'])} unrecoverable")
+                 f"{len(out['unrecoverable'])} unrecoverable, "
+                 f"{len(out['key_occupied']) + len(out['key_claimed'])} at a taken key, "
+                 f"{len(out['errors'])} errors")
         return out
 
 
@@ -413,7 +472,12 @@ def run(storage, *, fetch_fires, repair: bool, refetch: bool = False, client=Non
             report["refetch"] = audit.refetch_missing(storage, client)
             writes += len(report["refetch"]["restored"])
         idx = state.get("incident_fires") or {}
-        marked = sorted(fk for fk in audit.affected if fk in idx)
+        # also every manifest item 3 found broken (not on the bucket, not
+        # parsing, another fire's, or linking objects that are gone): a
+        # rebuild from state is idempotent
+        broken = ({p["fk"] for p in report["manifests"]["problems"]}
+                  | {u["fk"] for u in report["manifests"]["missing_urls"]})
+        marked = sorted(fk for fk in audit.affected | broken if fk in idx)
         for fk in marked:
             idx[fk]["v"] = 0  # the next mirror run rebuilds it
         report["repair"]["marked_stale"] = marked

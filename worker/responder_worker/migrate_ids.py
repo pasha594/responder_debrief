@@ -183,6 +183,29 @@ def legacy_ir_choice(rels: list[str], slug: str,
     return picks.pop(), False
 
 
+def legacy_ir_conversions(state: dict, inc_key: str, rec: dict,
+                          rel_dirs: set[str]) -> set[tuple[str, str, str]]:
+    """Every (vectors key, source rel, flight_id) the slug-keyed build could
+    have made for these IR folders of a record: legacy_ir_picks under each
+    prefix the folder's IR files sit at and its slug at the migration, with
+    each fire name it was bound to. Errs wide: prune keeps or deletes these
+    keys only against state["ir"], the key audit names possible sources."""
+    files = rec.get("files") or {}
+    slug_at = ((state.get("migrations") or {}).get("slugs_at_migration") or {}).get(inc_key)
+    names = {(rec.get("bound") or {}).get("name")}
+    names.update(e.get("name") for e in rec.get("rebound_from") or [])
+    ir_rels = [rel for rel, meta in files.items()
+               if meta.get("kind", rel.split("/", 1)[0]) == "ir"]
+    out: set[tuple[str, str, str]] = set()
+    for rel_dir in sorted(rel_dirs):
+        in_dir = [rel for rel in ir_rels if rel.rpartition("/")[0] == rel_dir]
+        slugs = {file_location(rec, rel) for rel in in_dir} | {slug_at}
+        for slug in filter(None, slugs):
+            for name in filter(None, names):
+                out.update(filter(None, legacy_ir_picks(in_dir, slug, name)))
+    return out
+
+
 def fingerprint(state: dict) -> dict:
     """Per record, what an apply must reproduce from the expected report
     (G8): the binding, the owner stamps by (fk, fk_src), the IR keys."""

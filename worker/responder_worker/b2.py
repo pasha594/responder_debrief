@@ -25,8 +25,8 @@ def _dir_prefix(prefix: str) -> str:
 
 
 class Storage:
-    """Interface: put_bytes/put_file/put_json/exists/get_json/get_file,
-    list_keys/list_dirs, delete_prefix/delete_keys."""
+    """Interface: put_bytes/put_file/put_json/exists/exists_strict/get_json/
+    get_file, list_keys/list_dirs, delete_prefix/delete_keys."""
 
     def put_bytes(self, key: str, data: bytes, *, content_type: str | None = None,
                   cache_control: str | None = None) -> None:
@@ -46,6 +46,13 @@ class Storage:
 
     def exists(self, key: str) -> bool:
         raise NotImplementedError
+
+    def exists_strict(self, key: str) -> bool:
+        """exists(), but False only when the bucket says the key is not
+        there; any other failure raises. Use it before a write that must
+        never land on an existing object (exists() on B2 reads a 403 or a
+        5xx as absent, which is fine for a cache check)."""
+        return self.exists(key)
 
     def get_file(self, key: str, dest: Path) -> bool:
         """Download an object to `dest`. False when the key does not exist."""
@@ -228,6 +235,17 @@ class B2Storage(Storage):
         except botocore.exceptions.ClientError:
             return False
 
+    def exists_strict(self, key):
+        import botocore.exceptions
+
+        try:
+            self.client.head_object(Bucket=self.bucket, Key=key)
+            return True
+        except botocore.exceptions.ClientError as exc:
+            if exc.response["Error"]["Code"] in ("NoSuchKey", "NotFound", "404"):
+                return False
+            raise
+
     def get_file(self, key, dest):
         import botocore.exceptions
 
@@ -297,6 +315,9 @@ class ReadOnlyStorage(Storage):
     def exists(self, key):
         return self.inner.exists(key)
 
+    def exists_strict(self, key):
+        return self.inner.exists_strict(key)
+
     def get_file(self, key, dest):
         return self.inner.get_file(key, dest)
 
@@ -360,6 +381,9 @@ class RecordingStorage(Storage):
 
     def exists(self, key):
         return key in self._latest or self.inner.exists(key)
+
+    def exists_strict(self, key):
+        return key in self._latest or self.inner.exists_strict(key)
 
     def get_file(self, key, dest):
         if key in self._latest:

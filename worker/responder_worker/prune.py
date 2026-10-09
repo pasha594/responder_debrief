@@ -21,6 +21,11 @@ Every object that a surviving file needs stays: its raw key, every object
 of its sha, and its IR conversions (or, for an IR flight never stamped,
 every conversion under its locations). Only exact keys are deleted, never a
 prefix: a prefix can hold other folders' files.
+
+--confirm runs outside the writer group (the operator disables the writing
+workflows first), so state is read again before the first delete and
+before the save: a state writer that ran meanwhile stops the run, and its
+save is never overwritten.
 """
 
 from __future__ import annotations
@@ -43,7 +48,8 @@ from .fires import ACTIVE_FIRES_LIMIT, fire_key, fire_list_suspect
 from .incident_ids import file_owner, migrated, own_newest_upload, prior_owner
 from .maint import write_report
 from .matching import parse_when
-from .migrate_ids import legacy_ir_picks
+from .migrate_ids import legacy_ir_conversions
+from .state import STATE_KEY
 
 RAW = "raw/incidents/"
 PREVIEWS = "previews/incidents/"
@@ -171,17 +177,9 @@ class Plan:
             # flights never stamped: the slug-keyed build's keys, recomputed
             # for each slug and fire name the folder was shown under
             stamped_dirs = {src.rpartition("/")[0] for src in ir_keys}
-            ir_rels = [rel for rel, meta in files.items() if _is_ir(rel, meta)]
             dirs = {rel.rpartition("/")[0] for rel in rels if _is_ir(rel, files[rel])}
-            names = {(rec.get("bound") or {}).get("name")}
-            names.update(e.get("name") for e in rec.get("rebound_from") or [])
-            for rel_dir in sorted(dirs - stamped_dirs):
-                in_dir = [rel for rel in ir_rels if rel.rpartition("/")[0] == rel_dir]
-                slugs = {file_location(rec, rel) for rel in in_dir} | {slugs_at.get(key)}
-                for slug in filter(None, slugs):
-                    for name in filter(None, names):
-                        self.ir.update(pick[0] for pick in filter(
-                            None, legacy_ir_picks(in_dir, slug, name)))
+            self.ir.update(vkey for vkey, _src, _fid in
+                           legacy_ir_conversions(state, key, rec, dirs - stamped_dirs))
             owners = {file_owner(rec, files[rel]) for rel in rels} | {prior_owner(rec)}
             for fk in owners & set(self.emptied):
                 self.legacy_slugs[fk].update(filter(None, (
@@ -284,6 +282,7 @@ def run(storage, *, fetch_fires, days: int | None, confirm: bool,
         return refuse(f"--days {days}: the threshold is at least one day")
     ro = ReadOnlyStorage(storage)
     state = state_mod.load_state(ro)
+    loaded_at = state.get("updated_at")
     if not migrated(state):
         return refuse("state is not keyed by fire ID yet (migrate-incident-ids)")
     if not (state.get("migrations") or {}).get("incident_keys_audit"):
@@ -338,6 +337,18 @@ def run(storage, *, fetch_fires, days: int | None, confirm: bool,
         write_report(report_out, doc)
         return 0
 
+    def writer_ran() -> str | None:
+        """Why state changed since it was loaded (a writer saved it), or None."""
+        now_at = (get_json_retry(ro, STATE_KEY) or {}).get("updated_at")
+        if now_at == loaded_at:
+            return None
+        return (f"state was saved at {now_at} after this run loaded it ({loaded_at}): "
+                "a state writer ran; disable mirror.yml, tile.yml and catalogs.yml, "
+                "wait for their runs to finish, and run again")
+
+    # Nothing is deleted under a writer: the plan would be stale.
+    if why := writer_ran():
+        return refuse(why)
     # Exact keys, in upload order reversed: the manifests first, then the
     # objects they name. State is saved last, so a run that dies part-way
     # is simply run again (the same plan; deleting a missing key succeeds).
@@ -357,6 +368,12 @@ def run(storage, *, fetch_fires, days: int | None, confirm: bool,
         doc["error"] = f"{type(exc).__name__}: {exc}"
         log(f"[prune] delete failed after {len(doc['deleted'])} key(s): {doc['error']} "
             "— state not saved; run again")
+        write_report(report_out, doc)
+        return 1
+    if why := writer_ran():
+        # its save stands; a run again recomputes the plan from it
+        doc["error"] = why
+        log(f"[prune] after {len(doc['deleted'])} key(s) deleted: {why} — state not saved")
         write_report(report_out, doc)
         return 1
     doc["state"] = plan.apply_to_state(_iso(now))

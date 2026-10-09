@@ -111,6 +111,32 @@ def test_b2_delete_keys_batches_of_1000_and_raises_on_errors():
         st.assert_no_pending_responses()
 
 
+def test_b2_exists_strict_reads_only_not_found_as_absent(tmp_path):
+    s = _b2()
+    with Stubber(s.client) as st:
+        st.add_response("head_object", {}, {"Bucket": "bkt", "Key": "a"})
+        st.add_client_error("head_object", service_error_code="404", http_status_code=404)
+        st.add_client_error("head_object", service_error_code="AccessDenied",
+                            http_status_code=403)
+        assert s.exists_strict("a") is True
+        assert s.exists_strict("b") is False
+        # a write that must never overwrite cannot take a 403 for "absent"
+        with pytest.raises(ClientError):
+            s.exists_strict("c")
+        # exists() (HRRR, trails, frames) still reads any error as absent
+        st.add_client_error("head_object", service_error_code="AccessDenied",
+                            http_status_code=403)
+        assert s.exists("c") is False
+        st.assert_no_pending_responses()
+    inner = DryRunStorage(tmp_path)
+    inner.put_bytes("k", b"x")
+    ro = ReadOnlyStorage(inner)
+    assert ro.exists_strict("k") and not ro.exists_strict("j")
+    rec = RecordingStorage(inner)
+    rec.put_bytes("j", b"y")
+    assert rec.exists_strict("j") and rec.exists_strict("k") and not rec.exists_strict("z")
+
+
 def test_read_only_storage_reads_through_and_refuses_writes(tmp_path):
     inner = DryRunStorage(tmp_path / "inner")
     inner.put_json("state/state.json", {"incidents": {}})

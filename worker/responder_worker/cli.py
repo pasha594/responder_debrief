@@ -1078,15 +1078,22 @@ def _render_missing_preview(storage, state, inc, rel, sha, rec, log, *,
     nowhere (tiled[sha].needs_preview): render it again from bytes that hash
     to the sha, PUT it only where no preview is yet, and keep everything
     else the entry says (tiles, tiler_version, prefixes). False when no raw
-    copy verifies (the flag stays, for a later run)."""
+    copy verifies, or the preview key cannot be checked (the flag stays, for
+    a later run)."""
     key = preview_key(state, sha, inc)
     keys = list(dict.fromkeys([raw_key(inc, rel), *raw_key_candidates(state, sha)]))
     with tempfile.TemporaryDirectory(prefix="preview_") as td:
         local = Path(td) / "sheet.pdf"
         if fetch_verified(storage, keys, sha, local, log, mismatches=mismatches) is None:
             return False
+        try:
+            # a HEAD that fails is never read as "no preview there"
+            present = storage.exists_strict(key)
+        except Exception as exc:
+            log(f"[probe] preview check failed for {rel}: {exc}")
+            return False
         ok = True
-        if not storage.exists(key):
+        if not present:
             try:
                 preview = Path(td) / "preview.png"
                 geopdf.render_preview(local, preview)
@@ -1646,9 +1653,10 @@ def cmd_prune(args) -> int:
     state is migrated to fire IDs and the key audit has repaired it, and
     refused on an active-fire list that may be partial. Before running it,
     `gh workflow disable` mirror.yml, tile.yml and catalogs.yml and wait for
-    their runs in flight to finish; re-enable them after. It deletes exact
-    keys only (never a prefix), never what a surviving file still needs,
-    and marks the files it deleted `pruned_at`."""
+    their runs in flight to finish; re-enable them after (a state saved
+    while it runs stops it, unsaved). It deletes exact keys only (never a
+    prefix), never what a surviving file still needs, and marks the files
+    it deleted `pruned_at`."""
     from . import prune
 
     if getattr(args, "report", False) and args.confirm:
@@ -1722,7 +1730,8 @@ def cmd_audit_incident_keys(args) -> int:
     """Check every incident key against the bucket (audit_keys). --report
     writes nothing; --repair edits state only; --refetch-missing (with
     --repair) also writes raw objects re-fetched from the FTP, only to keys
-    nothing is at. Nothing is deleted or copied."""
+    nothing is at and no other record's file claims. Nothing is deleted or
+    copied."""
     from . import audit_keys
 
     storage = make_storage(args.dry_run, args.out)

@@ -10,7 +10,8 @@ name: Maintenance
 #                         bucket, write nothing. apply (--repair): edit state
 #                         only (locations, missing marks, previews/tiles/IR
 #                         requeued); refetch_missing also re-fetches files
-#                         found nowhere from the FTP, to keys nothing is at.
+#                         found nowhere from the FTP, to keys nothing is at
+#                         and no other record's file claims.
 #   reassign-files        key, rel (regex), to (fire GUID | binding | hidden):
 #                         state only
 #   restore-state-backup  apply only: the migration's rollback
