@@ -890,6 +890,121 @@
   color: var(--color-text-muted);
 }
 
+/* My maps: the user's own PDFs, leading every fire's Maps tab. Rows reuse
+   the rd-map-row card; the section doubles as a PDF drop target. */
+.rd-my-maps {
+  border-radius: var(--radius);
+  outline: 2px dashed transparent;
+  outline-offset: 2px;
+  transition: outline-color 0.15s ease, background-color 0.15s ease;
+}
+.rd-my-maps--drop {
+  outline-color: var(--color-accent);
+  background: var(--color-hover-bg);
+}
+
+.rd-my-maps-add {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 6px 0 10px;
+}
+.rd-my-maps-help {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--color-text-muted);
+}
+.rd-my-maps .rd-offline-btn[aria-disabled='true'] {
+  opacity: 0.45;
+  cursor: default;
+}
+/* Behind the Add button. Visually hidden rather than display:none, which
+   some mobile browsers won't open a picker for. */
+.rd-my-maps-file {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  pointer-events: none;
+}
+
+.rd-my-maps-progress .rd-offline-row > span:first-child {
+  min-width: 0;
+  overflow-wrap: anywhere; /* long file names */
+}
+/* (beats .rd-offline-card's own margin, which comes later in the file) */
+.rd-my-maps .rd-my-maps-progress {
+  margin-bottom: 10px;
+}
+
+.rd-my-maps-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-bottom: 10px;
+  padding: 8px 8px 8px 12px;
+  font-size: 12.5px;
+  line-height: 1.45;
+  background: var(--color-hover-bg);
+  border-left: 3px solid var(--color-accent);
+  border-radius: var(--radius);
+}
+.rd-my-maps-notice--error {
+  border-left-color: var(--color-error);
+}
+.rd-my-maps-notice-body {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.rd-my-maps-notice-body p {
+  margin: 0;
+}
+.rd-my-maps-notice-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+.rd-my-maps-dismiss {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  margin: -4px -2px -4px 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius);
+  color: var(--color-text-muted);
+}
+.rd-my-maps-dismiss:hover {
+  color: var(--color-text);
+  background: var(--color-card-bg);
+}
+
+/* File names can be long and unbroken: wrap anywhere, and stay clear of
+   the corner open-PDF icon. */
+.rd-my-maps-title {
+  padding-right: 30px;
+  overflow-wrap: anywhere;
+}
+.rd-my-maps-approx {
+  margin-top: 1px;
+  font-size: 11.5px;
+  font-style: italic;
+  color: var(--color-text-muted);
+}
+.rd-my-maps-note {
+  margin: 4px 0 0;
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--color-text-muted);
+}
+
 /* IR flights */
 
 .rd-ir-row {

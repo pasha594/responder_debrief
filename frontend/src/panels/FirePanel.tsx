@@ -1,16 +1,19 @@
 /** Selected-fire panel: header, badge, stats strip, tab bar + active tab. */
-import { useMemo } from 'react';
 import { DisclaimerFooter } from './DisclaimerFooter';
-import { useFire, useMasterCatalog } from '../api/queries';
+import { useFire } from '../api/queries';
 import { useStore, type AppState } from '../state/store';
 import { formatAcresValue, formatPct } from '../utils/format';
 import { OverviewTab } from './tabs/OverviewTab';
 import { ForecastTab } from './tabs/ForecastTab';
 import { IncidentMapsTab } from './tabs/IncidentMapsTab';
+import { useFlyToAddedUserMaps } from './tabs/MyMapsSection';
 import { DrawTab } from './tabs/DrawTab';
 
 type Tab = AppState['ui']['sidebarTab'];
 
+/** No tab ever disables: Layers hosts the weather section and Maps leads
+ * with the user's own PDF maps, so both have content on every fire (each
+ * shows its own empty note for the fire's part). */
 const TABS: { id: Tab; label: string }[] = [
   { id: 'overview', label: 'Overview' },
   { id: 'forecast', label: 'Layers' },
@@ -20,25 +23,11 @@ const TABS: { id: Tab; label: string }[] = [
 
 export function FirePanel({ corneaId }: { corneaId: string }) {
   const { data: fire } = useFire(corneaId);
-  const { data: catalog } = useMasterCatalog();
-  const tab = useStore((s) => s.ui.sidebarTab);
+  const activeTab = useStore((s) => s.ui.sidebarTab);
   const actions = useStore((s) => s.actions);
-
-  const catalogFire = useMemo(
-    () => catalog?.fires.find((f) => f.cornea_id === corneaId) ?? null,
-    [catalog, corneaId],
-  );
-
-  // Forecast hosts the weather section too, so it never disables; the fire-
-  // forecast half shows its own empty note when no run exists.
-  const mapsDisabled = !catalogFire?.incident_manifest;
-  const disabled: Record<Tab, boolean> = {
-    overview: false,
-    forecast: false,
-    maps: mapsDisabled,
-    draw: false,
-  };
-  const activeTab: Tab = disabled[tab] ? 'overview' : tab;
+  // Mounted here, not in the Maps tab, so a map added while the user looks
+  // at another tab still flies into view when it finishes.
+  useFlyToAddedUserMaps();
 
   const contained = fire?.containment === 100;
 
@@ -85,12 +74,6 @@ export function FirePanel({ corneaId }: { corneaId: string }) {
               role="tab"
               aria-selected={activeTab === t.id}
               className={`rd-tab${activeTab === t.id ? ' rd-tab--active' : ''}`}
-              disabled={disabled[t.id]}
-              title={
-                t.id === 'maps' && mapsDisabled
-                  ? 'No incident maps published for this fire'
-                  : undefined
-              }
               onClick={() => actions.setSidebarTab(t.id)}
             >
               {t.label}

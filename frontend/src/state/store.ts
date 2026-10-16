@@ -12,6 +12,7 @@ import { TOA_DEFAULT_WITHIN_HOURS } from '../spread/toaBands';
 import type { DirectoryFilter, DirectoryNear, DirectorySort, DirectorySortKey } from '../directory/rowModel';
 import { DEFAULT_DIRECTORY_SORT } from '../directory/rowModel';
 import { MAP_STYLES } from '../app/config';
+import type { ImportProgress, UserMapMeta, UserMapsState } from '../userMaps/types';
 
 /**
  * 'directory' is the app's default: a full-screen roster with no map. 'fire'
@@ -105,6 +106,10 @@ export interface AppState {
       opacity: number;
     };
     irFlight: { flightId: string | null };
+    /** "My maps": the user's own georeferenced PDF shown on the map (an id
+     * from `userMaps.list`). Local to this device, so it is never put in the
+     * URL or a QR share; it uses the incident sheet's opacity. */
+    userMap: { id: string | null };
     /** TomTom live traffic flow tiles (needs VITE_TOMTOM_KEY). */
     traffic: { visible: boolean };
     /** NIFC land status around the fire (online only). */
@@ -162,6 +167,10 @@ export interface AppState {
     /** navigator.onLine mirror (App keeps it current). */
     online: boolean;
   };
+
+  /** "My maps" saved on this device (src/userMaps/; one list for every
+   * fire), plus the import in progress and the last notice. */
+  userMaps: UserMapsState;
 
   /** QR sharing between phones (see share/). */
   share: {
@@ -233,6 +242,13 @@ export interface AppState {
     setIncidentMapSeries(series: string | null): void;
     setIncidentMapOpacity(opacity: number): void;
     setIrFlight(flightId: string | null): void;
+    /** Show one of My maps (or none). Replaces any incident sheet, series or
+     * IR flight, like they replace each other. */
+    setUserMap(id: string | null): void;
+    /** The saved list as read from the device (marks it loaded). */
+    setUserMaps(list: UserMapMeta[], sessionOnly?: boolean): void;
+    setUserMapImport(p: ImportProgress | null): void;
+    setUserMapNotice(n: UserMapsState['notice']): void;
     toggleTraffic(): void;
     toggleLand(): void;
     toggleIncidents(): void;
@@ -351,6 +367,7 @@ export const useStore = create<AppState>((set, get) => ({
     nationalPerimeters: { visible: true },
     incidentMap: { mapId: null, series: null, opacity: 0.75 },
     irFlight: { flightId: null },
+    userMap: { id: null },
     traffic: { visible: false },
     land: { visible: false },
     incidents: { visible: false },
@@ -375,6 +392,8 @@ export const useStore = create<AppState>((set, get) => ({
     progress: null,
     online: typeof navigator === 'undefined' ? true : navigator.onLine,
   },
+
+  userMaps: { list: [], loaded: false, sessionOnly: false, import: null, notice: null },
 
   share: { incoming: null, pending: null },
 
@@ -416,6 +435,8 @@ export const useStore = create<AppState>((set, get) => ({
           historicPerimeters: { visible: false },
           incidentMap: { mapId: null, series: null, opacity: s.layers.incidentMap.opacity },
           irFlight: { flightId: null },
+          // the My maps LIST is global; which one is shown is per fire view
+          userMap: { id: null },
           // traffic (like the basemap) is a viewing preference — persists
         },
         directions: {
@@ -443,6 +464,7 @@ export const useStore = create<AppState>((set, get) => ({
           spread: { ...s.layers.spread },
           incidentMap: { mapId: null, series: null, opacity: s.layers.incidentMap.opacity },
           irFlight: { flightId: null },
+          userMap: { id: null },
         },
       })),
 
@@ -546,8 +568,8 @@ export const useStore = create<AppState>((set, get) => ({
       }));
     },
 
-    // One map overlay at a time: an incident sheet (or series) and an IR
-    // flight replace each other rather than stacking.
+    // One map overlay at a time: an incident sheet (or series), an IR
+    // flight and one of My maps replace each other rather than stacking.
     setIncidentMap: (mapId) => {
       if (mapId) track('map_overlay_shown', { kind: 'sheet' });
       set((s) => ({
@@ -555,6 +577,7 @@ export const useStore = create<AppState>((set, get) => ({
           ...s.layers,
           incidentMap: { ...s.layers.incidentMap, mapId, series: null },
           irFlight: mapId ? { flightId: null } : s.layers.irFlight,
+          userMap: mapId ? { id: null } : s.layers.userMap,
         },
       }));
     },
@@ -565,6 +588,7 @@ export const useStore = create<AppState>((set, get) => ({
           ...s.layers,
           incidentMap: { ...s.layers.incidentMap, mapId: null, series },
           irFlight: series ? { flightId: null } : s.layers.irFlight,
+          userMap: series ? { id: null } : s.layers.userMap,
         },
       }));
     },
@@ -581,9 +605,43 @@ export const useStore = create<AppState>((set, get) => ({
           incidentMap: flightId
             ? { ...s.layers.incidentMap, mapId: null, series: null }
             : s.layers.incidentMap,
+          userMap: flightId ? { id: null } : s.layers.userMap,
         },
       }));
     },
+    // The opacity stays the incident sheet's: one slider for whichever
+    // sheet-like overlay is up.
+    setUserMap: (id) => {
+      if (id) track('map_overlay_shown', { kind: 'user' });
+      set((s) => ({
+        layers: {
+          ...s.layers,
+          userMap: { id },
+          incidentMap: id
+            ? { ...s.layers.incidentMap, mapId: null, series: null }
+            : s.layers.incidentMap,
+          irFlight: id ? { flightId: null } : s.layers.irFlight,
+        },
+      }));
+    },
+    setUserMaps: (list, sessionOnly) =>
+      set((s) => {
+        // A map that left the list can't stay "shown" (the layer would drop
+        // it anyway, but the Maps tab would keep a toggle for no row).
+        const shown = s.layers.userMap.id;
+        const gone = shown != null && !list.some((m) => m.id === shown);
+        return {
+          userMaps: {
+            ...s.userMaps,
+            list,
+            loaded: true,
+            sessionOnly: sessionOnly ?? s.userMaps.sessionOnly,
+          },
+          ...(gone && { layers: { ...s.layers, userMap: { id: null } } }),
+        };
+      }),
+    setUserMapImport: (p) => set((s) => ({ userMaps: { ...s.userMaps, import: p } })),
+    setUserMapNotice: (notice) => set((s) => ({ userMaps: { ...s.userMaps, notice } })),
 
     toggleTraffic: () => {
       track('layer_toggled', { layer: 'traffic', on: !get().layers.traffic.visible });
@@ -795,6 +853,10 @@ export const useStore = create<AppState>((set, get) => ({
             incidents: { visible: L.incidents },
             incidentMap: { ...L.incidentMap },
             irFlight: { flightId: L.irFlight },
+            // a share never carries one of My maps (they stay on the
+            // sender's device), so ours comes down with the rest of this
+            // view — it would stack under the shared sheet otherwise
+            userMap: { id: null },
             trails: { mode: L.trails },
             vegetation: L.vegetation.visible
               ? { visible: true, opacity: L.vegetation.opacity ?? s.layers.vegetation.opacity }

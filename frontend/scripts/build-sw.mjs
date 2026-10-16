@@ -9,6 +9,8 @@
  *    the small fixed set below), cache-first since their names change per build;
  *  - the cache name embeds a content hash, and activate deletes every other
  *    cache — deploying anything (including a revert) replaces the shell.
+ *    The one exception is pdf.js (rd-pdfjs, cached on first use, see below):
+ *    activate trims it to the files of the new build instead.
  * Data (B2, fire-api) is NEVER touched here — offline data lives in OPFS
  * packs handled by the app itself.
  */
@@ -37,11 +39,23 @@ const base = baseMatch ? baseMatch[1] : '';
 const entryChunk = /\/assets\/(index-[^"]+\.js)"/.exec(indexHtml)?.[1];
 if (!entryChunk) throw new Error('build-sw: entry chunk not found in index.html');
 
+// pdf.js (My maps: lazy chunk, worker, wasm, ICC profile — vite.config.ts
+// puts all of it under assets/pdfjs/) is NOT precached: it is +0.72 MB gz
+// that every installed client would re-download on every deploy, for a
+// feature few use. It is cached on FIRST USE instead, all of it at once, in
+// its own cache that outlives deploys (trimmed to this build's files, which
+// mostly keep their names). So adding a map needs a connection only the
+// first time (the HTTP cache alone lasts 10 min on GitHub Pages); viewing
+// saved maps never does (they live in OPFS).
+const isPdfjs = (a) => a.startsWith(`${base}/assets/pdfjs/`);
+const built = walk(join(dist, 'assets'), `${base}/assets/`);
+const pdfjs = built.filter(isPdfjs);
+
 const assets = [
   `${base}/index.html`,
   `${base}/manifest.webmanifest`,
   `${base}/favicon.svg`,
-  ...walk(join(dist, 'assets'), `${base}/assets/`),
+  ...built.filter((a) => !isPdfjs(a)),
   ...walk(join(dist, 'fonts'), `${base}/fonts/`),
   ...walk(join(dist, 'icons'), `${base}/icons/`),
 ];
@@ -59,6 +73,19 @@ const ASSETS = ${JSON.stringify(assets)};
 const ASSET_SET = new Set(ASSETS);
 const INDEX = ${JSON.stringify(`${base}/index.html`)};
 const ENTRY_CHUNK = ${JSON.stringify(entryChunk)};
+const PDFJS = ${JSON.stringify(pdfjs)};
+const PDFJS_SET = new Set(PDFJS);
+// Not versioned: activate trims it to PDFJS rather than deleting it.
+const PDFJS_CACHE = 'rd-pdfjs';
+
+// Every pdf.js file of this build not cached yet, best-effort. All of them:
+// a first map without JPEG 2000 must still leave the decoder for the next.
+const fillPdfjs = (c) =>
+  Promise.all(
+    PDFJS.map((p) =>
+      c.match(p).then((hit) => hit || c.add(new Request(p, { cache: 'reload' })).catch(() => {})),
+    ),
+  );
 
 self.addEventListener('install', (e) => {
   e.waitUntil(
@@ -82,7 +109,21 @@ self.addEventListener('activate', (e) => {
   e.waitUntil(
     caches
       .keys()
-      .then((keys) => Promise.all(keys.filter((k) => k !== VERSION).map((k) => caches.delete(k))))
+      .then((keys) =>
+        Promise.all(
+          keys.filter((k) => k !== VERSION && k !== PDFJS_CACHE).map((k) => caches.delete(k)),
+        ),
+      )
+      .then(() => caches.open(PDFJS_CACHE))
+      .then(async (c) => {
+        const stale = (await c.keys()).filter((r) => !PDFJS_SET.has(new URL(r.url).pathname));
+        await Promise.all(stale.map((r) => c.delete(r)));
+        // Used before, and this deploy changed it: fetch the new files now
+        // (not awaited — activation must not wait on 0.7 MB) so maps can
+        // still be added offline after the update.
+        if (stale.length) fillPdfjs(c).catch(() => {});
+      })
+      .catch(() => {})
       .then(() => self.clients.claim()),
   );
 });
@@ -98,6 +139,25 @@ self.addEventListener('fetch', (e) => {
   }
   if (ASSET_SET.has(url.pathname)) {
     e.respondWith(caches.match(url.pathname).then((hit) => hit || fetch(req)));
+    return;
+  }
+  if (PDFJS_SET.has(url.pathname)) {
+    e.respondWith(
+      caches.open(PDFJS_CACHE).then(async (c) => {
+        const hit = await c.match(url.pathname);
+        if (hit) return hit;
+        const res = await fetch(req);
+        if (res.ok && res.type === 'basic') {
+          e.waitUntil(
+            c
+              .put(url.pathname, res.clone())
+              .then(() => fillPdfjs(c))
+              .catch(() => {}),
+          );
+        }
+        return res;
+      }),
+    );
   }
 });
 `;

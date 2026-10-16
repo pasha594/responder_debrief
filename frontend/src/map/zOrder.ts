@@ -7,10 +7,11 @@ import type { Map as MlMap } from 'maplibre-gl';
 
 /** Bottom → top. Layer ids owned by our layer managers (prefix rd-). */
 export const RD_LAYER_ORDER = [
-  // rasters (below basemap labels), bottom → top: incident-map sheets,
-  // then the fire forecast, then weather. An ops map at full opacity must
-  // never hide the forecast or smoke — those are the transient signal; the
-  // sheet is the reference underneath. The vegetation classes (the Walk
+  // rasters (below basemap labels), bottom → top: incident-map sheets (and
+  // the user's own PDF maps — one overlay at a time, so they share the
+  // slot), then the fire forecast, then weather. An ops map at full opacity
+  // must never hide the forecast or smoke — those are the transient signal;
+  // the sheet is the reference underneath. The vegetation classes (the Walk
   // router's terrain model) are pure reference, so they sit under all of it,
   // with land status tinting the ground just above them.
   'rd-vegetation',
@@ -18,6 +19,7 @@ export const RD_LAYER_ORDER = [
   'rd-land-line',
   'rd-traffic',
   'rd-incident-map',
+  'rd-user-map',
   'rd-spread-forecast',
   'rd-weather-tmpf-a', 'rd-weather-tmpf-b',
   'rd-weather-rh-a', 'rd-weather-rh-b',

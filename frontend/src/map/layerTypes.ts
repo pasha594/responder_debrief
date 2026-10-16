@@ -16,6 +16,7 @@ import type {
   WeatherRun,
 } from '../api/types';
 import type { AppState } from '../state/store';
+import type { UserMapMeta } from '../userMaps/types';
 
 /** Everything a layer manager may need, assembled by useMapLayerSync. */
 export interface LayerContext {
@@ -44,6 +45,8 @@ export interface LayerContext {
   originWeather: import('../timeline/weatherStripModel').HourlyWeather[] | undefined;
   /** [lon, lat] that point weather was queried at. */
   originCoords: [number, number] | null;
+  /** "My maps" saved on this device; layers.userMap.id picks one of them. */
+  userMaps: UserMapMeta[];
 
   /** Callbacks up into app state. */
   onSelectFire: (corneaId: string) => void;

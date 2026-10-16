@@ -1,7 +1,7 @@
 /**
  * The z-order contract, checked against a fake map: rasters stack
- * incident map < spread forecast < weather < basemap labels; vectors sit
- * above the labels. ensureOrder must reach that order from any starting
+ * incident map < user (My maps) PDF < spread forecast < weather < basemap
+ * labels; vectors sit above the labels. ensureOrder must reach that order from any starting
  * arrangement, since style swaps re-add layers in arbitrary sequence.
  */
 import { describe, expect, it } from 'vitest';
@@ -45,6 +45,13 @@ describe('RD_LAYER_ORDER', () => {
     expect(idx('rd-national-perimeters')).toBeLessThan(idx('rd-perimeter-fill'));
   });
 
+  it("puts the user's own PDF map in the sheet slot, below forecast and labels", () => {
+    const idx = (id: string) => RD_LAYER_ORDER.indexOf(id as (typeof RD_LAYER_ORDER)[number]);
+    expect(idx('rd-user-map')).toBe(idx('rd-incident-map') + 1);
+    expect(idx('rd-user-map')).toBeLessThan(idx('rd-spread-forecast'));
+    expect(idx('rd-user-map')).toBeLessThan(idx('rd-national-perimeters'));
+  });
+
   it('puts vegetation at the bottom, trail lines under labels, route legs on top', () => {
     const idx = (id: string) => RD_LAYER_ORDER.indexOf(id as (typeof RD_LAYER_ORDER)[number]);
     const sentinel = idx('rd-national-perimeters');
@@ -83,6 +90,29 @@ describe('ensureOrder', () => {
       'rd-perimeter-fill',
       'rd-hotspots',
     ]);
+  });
+
+  it('places a user map between the sheet and the forecast, under the labels', () => {
+    const map = fakeMap([
+      { id: 'rd-user-map', type: 'raster' },
+      ...basemap,
+      { id: 'rd-spread-forecast', type: 'raster' },
+      { id: 'rd-incident-map', type: 'raster' },
+      { id: 'rd-perimeter-fill', type: 'fill' },
+    ]);
+    ensureOrder(map);
+    expect(map.ids()).toEqual([
+      'water',
+      'roads',
+      'rd-incident-map',
+      'rd-user-map',
+      'rd-spread-forecast',
+      'place-labels',
+      'rd-perimeter-fill',
+    ]);
+    const after = map.moves();
+    ensureOrder(map);
+    expect(map.moves()).toBe(after);
   });
 
   it('touches nothing when the order is already canonical', () => {
@@ -138,5 +168,22 @@ describe('beforeIdFor', () => {
     expect(beforeIdFor(map, 'rd-weather-tmpf-a')).toBe('rd-weather-smoke-a');
     // Nothing of ours above it: cap at the first basemap label layer.
     expect(beforeIdFor(map, 'rd-weather-apcptot-b')).toBe('place-labels');
+  });
+
+  it('slots a user map under the forecast, else under the labels', () => {
+    const withForecast = fakeMap([
+      ...basemap,
+      { id: 'rd-incident-map', type: 'raster' },
+      { id: 'rd-spread-forecast', type: 'raster' },
+    ]);
+    expect(beforeIdFor(withForecast, 'rd-user-map')).toBe('rd-spread-forecast');
+    // a sheet only ever sits under it, never above
+    expect(beforeIdFor(withForecast, 'rd-incident-map')).toBe('rd-spread-forecast');
+
+    const bare = fakeMap([...basemap, { id: 'rd-perimeter-fill', type: 'fill' }]);
+    expect(beforeIdFor(bare, 'rd-user-map')).toBe('place-labels');
+
+    const withUserMap = fakeMap([...basemap, { id: 'rd-user-map', type: 'raster' }]);
+    expect(beforeIdFor(withUserMap, 'rd-incident-map')).toBe('rd-user-map');
   });
 });

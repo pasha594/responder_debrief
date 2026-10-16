@@ -3,6 +3,8 @@
  * runs — by operational date, newest first, then by product priority inside
  * the day. Each row's affordance follows the sheet's georeferencing:
  * overlayable sheets drape on the map, flat sheets open a lightbox.
+ * The user's own PDFs ("My maps", every fire) lead the tab, so it renders
+ * even for a fire with no incident maps.
  */
 import { useMemo, useState } from 'react';
 import { PackImg } from '../../utils/PackImg';
@@ -23,6 +25,7 @@ import {
 } from '../../utils/incidentMaps';
 import { IrHeatLegend } from '../IrHeatLegend';
 import { MapLightbox } from '../MapLightbox';
+import { MyMapsSection } from './MyMapsSection';
 
 /** Shared resolution: catalog fire → incident manifest. */
 export function useManifestForFire(corneaId: string | null) {
@@ -330,6 +333,9 @@ function IrFlightRow({ flight, timezone }: { flight: IrFlight; timezone: string 
 
 export function IncidentMapsTab({ corneaId }: { corneaId: string }) {
   const { data: manifest, isLoading } = useManifestForFire(corneaId);
+  // The catalog names the manifest, so until it lands the manifest query
+  // sits idle rather than loading (the tab used to stay disabled meanwhile).
+  const { isLoading: catalogLoading } = useMasterCatalog();
   const { data: fire } = useFire(corneaId);
   const [viewing, setViewing] = useState<string | null>(null);
 
@@ -353,38 +359,41 @@ export function IncidentMapsTab({ corneaId }: { corneaId: string }) {
     ? manifest?.maps.find((m) => m.id === viewing) ?? null
     : null;
 
-  if (isLoading) return <div className="rd-empty">Loading incident maps…</div>;
-  if (!manifest || (manifest.maps.length === 0 && manifest.ir_flights.length === 0)) {
-    return <div className="rd-empty">No incident maps published for this fire.</div>;
-  }
-
   return (
     <div className="rd-tab-body">
-      {groups.map((group) => {
-        const heading = friendlyOpDate(group.date, today);
-        return (
-          <section key={group.date ?? 'undated'} className="rd-map-group">
-            <h3 className="rd-section-title rd-map-date-head">
-              <span>{heading.primary}</span>
-              {heading.secondary && heading.secondary !== heading.primary && (
-                <span className="rd-map-date-sub">{heading.secondary}</span>
-              )}
-            </h3>
-            {group.entries.map((m) => (
-              <MapRow
-                key={m.id}
-                entry={m}
-                timezone={fire?.timezone ?? null}
-                seriesCount={seriesCounts.get(seriesKey(m)) ?? 0}
-                onView={() => setViewing(m.id)}
-              />
-            ))}
-            {group.irFlights.map((f) => (
-              <IrFlightRow key={f.flight_id} flight={f} timezone={fire?.timezone ?? null} />
-            ))}
-          </section>
-        );
-      })}
+      <MyMapsSection corneaId={corneaId} />
+
+      {isLoading || catalogLoading ? (
+        <div className="rd-empty">Loading incident maps…</div>
+      ) : !manifest || (manifest.maps.length === 0 && manifest.ir_flights.length === 0) ? (
+        <div className="rd-empty">No incident maps published for this fire.</div>
+      ) : (
+        groups.map((group) => {
+          const heading = friendlyOpDate(group.date, today);
+          return (
+            <section key={group.date ?? 'undated'} className="rd-map-group">
+              <h3 className="rd-section-title rd-map-date-head">
+                <span>{heading.primary}</span>
+                {heading.secondary && heading.secondary !== heading.primary && (
+                  <span className="rd-map-date-sub">{heading.secondary}</span>
+                )}
+              </h3>
+              {group.entries.map((m) => (
+                <MapRow
+                  key={m.id}
+                  entry={m}
+                  timezone={fire?.timezone ?? null}
+                  seriesCount={seriesCounts.get(seriesKey(m)) ?? 0}
+                  onView={() => setViewing(m.id)}
+                />
+              ))}
+              {group.irFlights.map((f) => (
+                <IrFlightRow key={f.flight_id} flight={f} timezone={fire?.timezone ?? null} />
+              ))}
+            </section>
+          );
+        })
+      )}
 
       {viewingEntry && (
         <MapLightbox entry={viewingEntry} onClose={() => setViewing(null)} />

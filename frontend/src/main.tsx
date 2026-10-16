@@ -33,12 +33,17 @@ import './app/tokens.css'; // includes vendored @font-face (public/fonts/*.woff2
 
 import { App } from './app/App';
 import { initOfflinePacks, installOfflineFetch } from './offline/packs';
+import { initUserMaps } from './userMaps/session';
+import { installFileDropGuard } from './panels/tabs/MyMapsSection';
 import { startAnalytics } from './app/analytics';
 
 // Offline packs: wrap fetch before anything (map, queries) issues a request,
 // then hydrate the pack index from OPFS in the background.
 installOfflineFetch();
 void initOfflinePacks();
+// My maps: load the PDF maps saved on this device (OPFS) the same way.
+void initUserMaps();
+installFileDropGuard(); // a PDF dropped outside My maps must not replace the app
 
 const queryClient = new QueryClient({
   defaultOptions: {

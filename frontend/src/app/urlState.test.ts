@@ -20,6 +20,7 @@ function mkState(): AppState {
       incidents: { visible: false },
       incidentMap: { mapId: null, series: null, opacity: 0.75 },
       irFlight: { flightId: null },
+      userMap: { id: null },
       trails: { mode: 'auto' },
       vegetation: { visible: false, opacity: 0.55 },
     },
@@ -116,6 +117,24 @@ describe('urlState buildSearch/decodeSearch', () => {
 
   it('series wins over single map id', () => {
     expect(decodeSearch('?map=abc&mv=ops%7CSheet%7Cportrait').series).toBe('ops|Sheet|portrait');
+  });
+
+  it("never puts one of My maps in the URL (it only exists on this device)", () => {
+    const s = mkState();
+    const id = '0123456789abcdef-p1';
+    const shown: AppState = { ...s, layers: { ...s.layers, userMap: { id } } };
+    expect(buildSearch(shown)).toBe('');
+
+    // alongside other params, still nothing of it
+    const busy: AppState = {
+      ...shown,
+      layers: { ...shown.layers, hotspots: { visible: false } },
+      ui: { ...shown.ui, basemap: 'satellite' },
+    };
+    const search = buildSearch(busy);
+    expect(search).toBe('?hs=0&bm=satellite');
+    expect(search).not.toContain('0123456789abcdef');
+    expect(decodeSearch(search)).toEqual({ hotspots: false, basemap: 'satellite' });
   });
 });
 

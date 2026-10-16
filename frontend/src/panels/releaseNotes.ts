@@ -27,6 +27,16 @@ export interface ReleaseDay {
 
 export const RELEASE_NOTES: ReleaseDay[] = [
   {
+    date: '2026-10-16',
+    notes: [
+      {
+        title: 'Your own PDF maps',
+        summary:
+          'In Maps, Add PDF map lays a georeferenced PDF, like an incident map, on the map. It stays on your device: no account, no upload.',
+      },
+    ],
+  },
+  {
     date: '2026-10-08',
     notes: [
       {

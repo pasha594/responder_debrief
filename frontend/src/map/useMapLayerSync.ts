@@ -50,6 +50,7 @@ import { spreadForecastLayer } from './layers/spreadForecastLayer';
 import { weatherLayers } from './layers/weatherLayers';
 import { windArrowsLayer } from './layers/windArrowsLayer';
 import { incidentMapLayer } from './layers/incidentMapLayer';
+import { userMapLayer } from './layers/userMapLayer';
 import { labelContrastLayer } from './layers/labelContrast';
 import { basemapUnderlay } from './layers/basemapUnderlay';
 import { drawLayer } from './layers/drawLayer';
@@ -71,6 +72,7 @@ const MANAGERS: LayerManager[] = [
   basemapUnderlay,
   weatherLayers,
   incidentMapLayer,
+  userMapLayer, // My maps: the user's own PDF, in the incident sheet's slot
   trailsLayer, // self-driven: resolves its PMTiles archive from the store
   vegetationLayer, // self-driven: the routing bundle's veg classes
   spreadForecastLayer,
@@ -139,6 +141,7 @@ export function useMapLayerSync(): boolean {
   const range = useStore((s) => s.range);
   const currentTime = useStore((s) => s.time.currentTime);
   const now = useStore((s) => s.time.now);
+  const userMaps = useStore((s) => s.userMaps.list);
   const actions = useStore((s) => s.actions);
   const invalidateForecasts = useInvalidateForecasts();
 
@@ -238,6 +241,7 @@ export function useMapLayerSync(): boolean {
       incidentManifest,
       originWeather,
       originCoords,
+      userMaps,
       onSelectFire: actions.selectFire,
       onFrameError: () => {
         invalidateForecasts();
@@ -267,6 +271,7 @@ export function useMapLayerSync(): boolean {
       incidentManifest,
       originWeather,
       originCoords,
+      userMaps,
     ],
   );
 
