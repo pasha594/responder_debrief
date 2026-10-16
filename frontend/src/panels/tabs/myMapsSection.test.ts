@@ -22,10 +22,6 @@ vi.mock('../../map/MapRoot', () => ({ useMap: () => null }));
 vi.mock('../../state/store', () => ({
   useStore: (sel: (s: unknown) => unknown) => sel(h.state),
 }));
-vi.mock('../../api/queries', () => ({
-  useFire: () => ({ data: { fire_coordinates: '45, -120' } }),
-  useMasterCatalog: () => ({ data: undefined }),
-}));
 vi.mock('../../userMaps/storage', () => ({
   readSource: vi.fn(async () => null),
   readThumb: vi.fn(async () => null),
@@ -48,27 +44,15 @@ describe('importStatusText', () => {
   });
 });
 
-describe('distanceFromFire / userMapMetaLine', () => {
-  const fire: [number, number] = [-120, 45];
-  it('rounds miles, under 1 mi, far beyond 300 mi, nothing without a fire', () => {
-    expect(m.distanceFromFire(null, [-120, 45])).toBeNull();
-    expect(m.distanceFromFire(fire, [-120, 45.001])).toBe('under 1 mi from this fire');
-    expect(m.distanceFromFire(fire, [-120, 45.1])).toBe('7 mi from this fire'); // 6.9 mi
-    expect(m.distanceFromFire(fire, [-120, 49.3])).toBe('297 mi from this fire');
-    expect(m.distanceFromFire(fire, [-120, 49.4])).toBe('far from this fire');
-  });
-  it('joins date, size and distance', () => {
+describe('userMapMetaLine', () => {
+  it('joins date and size, and never a distance from the fire', () => {
     const now = Date.parse('2026-10-16T18:00:00Z');
-    expect(
-      m.userMapMetaLine(
-        { addedAt: '2026-10-16T17:00:00Z', fileBytes: 8.3 * 1024 * 1024, center: [-120, 45.1] },
-        fire,
-        now,
-      ),
-    ).toBe('Added Oct 16 · 8.3 MB · 7 mi from this fire');
-    expect(
-      m.userMapMetaLine({ addedAt: '2025-07-04T17:00:00Z', fileBytes: 900_000, center: [0, 0] }, null, now),
-    ).toBe('Added Jul 4, 2025 · 879 KB');
+    expect(m.userMapMetaLine({ addedAt: '2026-10-16T17:00:00Z', fileBytes: 8.3 * 1024 * 1024 }, now)).toBe(
+      'Added Oct 16 · 8.3 MB',
+    );
+    expect(m.userMapMetaLine({ addedAt: '2025-07-04T17:00:00Z', fileBytes: 900_000 }, now)).toBe(
+      'Added Jul 4, 2025 · 879 KB',
+    );
   });
 });
 
@@ -289,7 +273,7 @@ describe('MyMapsSection render', () => {
       actions: {},
       userMaps,
     };
-    return renderToStaticMarkup(createElement(m.MyMapsSection, { corneaId: 'c' }));
+    return renderToStaticMarkup(createElement(m.MyMapsSection));
   };
 
   it('keeps file names out of analytics: the whole section, input included, is ph-no-capture', () => {

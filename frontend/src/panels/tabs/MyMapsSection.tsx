@@ -13,9 +13,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type React from 'react';
 import type { Map as MlMap } from 'maplibre-gl';
-import { distanceMiles, parseFireCoordinates } from '../../api/geo';
-import { sameFire } from '../../api/fireKey';
-import { useFire, useMasterCatalog } from '../../api/queries';
 import { useMap } from '../../map/MapRoot';
 import { useStore } from '../../state/store';
 import { formatBytes, formatDay } from '../../utils/format';
@@ -31,15 +28,11 @@ import { readSource, readThumb, sortUserMaps } from '../../userMaps/storage';
 import type {
   Box,
   ImportProgress,
-  LonLat,
   UserMapMeta,
   UserMapsState,
 } from '../../userMaps/types';
 
 // ---------- Pure helpers (exported for tests and reuse) ----------
-
-/** Beyond this, the row says "far from this fire" instead of a distance. */
-export const FAR_FROM_FIRE_MI = 300;
 
 /** The import status line (read out by the polite live region). */
 export function importStatusText(p: ImportProgress): string {
@@ -83,26 +76,16 @@ export function addedAnnouncement(
   return meta ? `Added ${meta.title}, shown on the map.` : null;
 }
 
-/** How far a map's center sits from the fire's origin; null without a fire location. */
-export function distanceFromFire(fireAt: LonLat | null, center: LonLat): string | null {
-  if (!fireAt) return null;
-  const mi = distanceMiles(fireAt, center);
-  if (!Number.isFinite(mi)) return null;
-  if (mi > FAR_FROM_FIRE_MI) return 'far from this fire';
-  if (mi < 1) return 'under 1 mi from this fire';
-  return `${Math.round(mi)} mi from this fire`;
-}
-
-/** "Added Oct 16 · 8.3 MB · 4 mi from this fire" (viewer-local date). */
+/**
+ * "Added Oct 16 · 8.3 MB" (viewer-local date). No distance from the fire: a
+ * sheet's centre to the fire's origin point reads as nonsense on a map that
+ * covers the whole fire ("2 mi from this fire").
+ */
 export function userMapMetaLine(
-  meta: Pick<UserMapMeta, 'addedAt' | 'fileBytes' | 'center'>,
-  fireAt: LonLat | null,
+  meta: Pick<UserMapMeta, 'addedAt' | 'fileBytes'>,
   nowMs: number = Date.now(),
 ): string {
-  const parts = [`Added ${formatDay(meta.addedAt, null, nowMs)}`, formatBytes(meta.fileBytes)];
-  const away = distanceFromFire(fireAt, meta.center);
-  if (away) parts.push(away);
-  return parts.join(' · ');
+  return `Added ${formatDay(meta.addedAt, null, nowMs)} · ${formatBytes(meta.fileBytes)}`;
 }
 
 /** True when a drag carries files (not text, a link or an image from the page). */
@@ -352,11 +335,9 @@ function OpenSourceLink({ meta }: { meta: UserMapMeta }) {
 
 function UserMapRow({
   meta,
-  fireAt,
   onRemoved,
 }: {
   meta: UserMapMeta;
-  fireAt: LonLat | null;
   /** Takes keyboard focus off this row's Remove button before the row goes. */
   onRemoved: () => void;
 }) {
@@ -394,7 +375,7 @@ function UserMapRow({
       <UserMapThumb meta={meta} />
       <div className="rd-map-row-body">
         <div className="rd-map-row-title rd-my-maps-title">{meta.title}</div>
-        <div className="rd-map-row-meta">{userMapMetaLine(meta, fireAt)}</div>
+        <div className="rd-map-row-meta">{userMapMetaLine(meta)}</div>
         {meta.warnings.includes('approximate_projection') && (
           <div className="rd-my-maps-approx">Position approximate</div>
         )}
@@ -507,10 +488,8 @@ export function NoticeCard({
   );
 }
 
-export function MyMapsSection({ corneaId }: { corneaId: string }) {
+export function MyMapsSection() {
   const { list, loaded, sessionOnly, import: progress, notice } = useStore((s) => s.userMaps);
-  const { data: fire } = useFire(corneaId);
-  const { data: catalog } = useMasterCatalog();
   const shownId = useStore((s) => s.layers.userMap.id);
   const fileRef = useRef<HTMLInputElement>(null);
   const addRef = useRef<HTMLButtonElement>(null);
@@ -537,13 +516,6 @@ export function MyMapsSection({ corneaId }: { corneaId: string }) {
     return () => clearTimeout(t);
   }, [added]);
 
-  const fireAt = useMemo<LonLat | null>(
-    () =>
-      parseFireCoordinates(fire?.fire_coordinates) ??
-      catalog?.fires.find((f) => sameFire(f.cornea_id, corneaId))?.coordinates ??
-      null,
-    [fire, catalog, corneaId],
-  );
   // Newest first, a PDF's pages together (the session's list should already
   // be in this order; sorting here keeps the rows stable whatever it does).
   const maps = useMemo(() => sortUserMaps(list), [list]);
@@ -659,7 +631,7 @@ export function MyMapsSection({ corneaId }: { corneaId: string }) {
       </div>
 
       {maps.map((m) => (
-        <UserMapRow key={m.id} meta={m} fireAt={fireAt} onRemoved={focusAdd} />
+        <UserMapRow key={m.id} meta={m} onRemoved={focusAdd} />
       ))}
 
       {sessionOnly && (

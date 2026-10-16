@@ -361,7 +361,7 @@ export function IncidentMapsTab({ corneaId }: { corneaId: string }) {
 
   return (
     <div className="rd-tab-body">
-      <MyMapsSection corneaId={corneaId} />
+      <MyMapsSection />
 
       {isLoading || catalogLoading ? (
         <div className="rd-empty">Loading incident maps…</div>
