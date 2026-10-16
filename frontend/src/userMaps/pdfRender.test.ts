@@ -39,7 +39,7 @@ vi.stubGlobal('document', {
 const fetchMock = vi.fn();
 vi.stubGlobal('fetch', fetchMock);
 
-const { openPdf } = await import('./pdfRender');
+const { openPdf, probePixelDrawn } = await import('./pdfRender');
 
 beforeEach(() => {
   fetchMock.mockReset();
@@ -82,5 +82,20 @@ describe('renderCrop', () => {
     ).rejects.toMatchObject({ name: 'RenderFailed' });
     expect(tried).toEqual([12e6, 6e6, 3e6, 2e6]);
     expect(h.page.render).not.toHaveBeenCalled(); // no canvas, no draw
+  });
+});
+
+describe('probePixelDrawn', () => {
+  it('accepts the red probe pixel through Safari Private Browsing noise (±3 on every channel)', () => {
+    expect(probePixelDrawn([255, 0, 0, 255])).toBe(true);
+    for (const n of [-3, -2, -1, 1, 2, 3]) {
+      const c = (v: number) => Math.min(255, Math.max(0, v + n));
+      expect(probePixelDrawn([c(255), c(0), c(0), c(255)])).toBe(true);
+    }
+  });
+
+  it('rejects the zeros a canvas without a backing store reads back', () => {
+    expect(probePixelDrawn([0, 0, 0, 0])).toBe(false);
+    expect(probePixelDrawn([0, 0, 0, 255])).toBe(false); // opaque black: the fill never landed
   });
 });

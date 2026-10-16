@@ -202,6 +202,18 @@ function release(c: HTMLCanvasElement): void {
 }
 
 /**
+ * Whether a probe pixel painted opaque red reads back as drawn. A canvas
+ * with no backing store reads back all zeros. The check must not demand
+ * exact values: Safari's Private Browsing (Advanced Fingerprinting
+ * Protection) shifts every channel of a read-back pixel by up to ±3
+ * (WebKit CanvasNoiseInjection.cpp), so alpha can come back as 252, and an
+ * `=== 255` test failed every budget there ("Couldn’t draw this map").
+ */
+export function probePixelDrawn(px: ArrayLike<number>): boolean {
+  return px[0] > 127 && px[3] > 127;
+}
+
+/**
  * Whether the canvas really got a backing store: an over-size or
  * out-of-memory canvas still hands out a context, draws nothing and reads
  * back zeros. Uses the exact context attributes pdf.js asks for (alpha off,
@@ -214,8 +226,7 @@ function canvasWorks(canvas: HTMLCanvasElement): boolean {
   const y = canvas.height - 1;
   ctx.fillStyle = '#ff0000';
   ctx.fillRect(x, y, 1, 1);
-  const px = ctx.getImageData(x, y, 1, 1).data;
-  return px[0] > 127 && px[3] === 255;
+  return probePixelDrawn(ctx.getImageData(x, y, 1, 1).data);
 }
 
 /** JPEG or bust: Safari silently answers unsupported types with PNG, and a failed canvas with null. */
