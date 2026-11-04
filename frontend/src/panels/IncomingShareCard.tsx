@@ -7,8 +7,8 @@
 import { useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import {
+  useFireManifest,
   useFires,
-  useIncidentManifest,
   useMasterCatalog,
   useWeatherRuns,
 } from '../api/queries';
@@ -76,7 +76,7 @@ function IncomingShareDialog({ share }: { share: ShareState }) {
 
   const cid = share.fire.corneaId;
   const catalogFire = catalog?.fires.find((f) => f.cornea_id === cid) ?? null;
-  const { data: manifest } = useIncidentManifest(catalogFire?.incident_manifest ?? null, cid);
+  const { data: manifest } = useFireManifest(cid);
   const name =
     fires?.fires.find((f) => f.cornea_id === cid)?.post_title
     ?? catalogFire?.name

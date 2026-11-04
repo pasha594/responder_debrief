@@ -22,7 +22,7 @@ import {
 import { parseFireCoordinates } from '../api/geo';
 import { resolvePerimeterVersion, weatherHours } from './framePlan';
 import { useFireHotspots } from '../api/useFireHotspots';
-import { useIncidentManifest } from '../api/queries';
+import { useFireManifest } from '../api/queries';
 import { seriesVersions } from '../utils/incidentMaps';
 import { useIsDesktop } from '../utils/useMediaQuery';
 import { makeLinearScale, type TimeScale } from './timeScale';
@@ -180,10 +180,7 @@ export function TimelineTrack() {
 
   const incidentSeries = useStore((st) => st.layers.incidentMap.series);
   const catalogFireEntry = catalog?.fires.find((f) => f.cornea_id === corneaId) ?? null;
-  const { data: incidentManifest } = useIncidentManifest(
-    incidentSeries ? (catalogFireEntry?.incident_manifest ?? null) : null,
-    corneaId,
-  );
+  const { data: incidentManifest } = useFireManifest(corneaId, !!incidentSeries);
 
   // Map-version pins (the Maps tab's "Timeline" button): one per overlayable
   // version of the active series; clicking snaps to that publication.

@@ -4,11 +4,13 @@ import {
   NEAR_RADIUS_MI,
   buildDirectoryRows,
   compareRows,
+  inactiveSearchRows,
   matchesFilter,
   matchesQuery,
   nearRows,
   perimeterFreshness,
   selectDirectoryRows,
+  selectInactiveRows,
   summarizeRows,
   type DirectoryRow,
 } from './rowModel';
@@ -528,5 +530,56 @@ describe('near mode', () => {
     expect(shown[0].distanceMi).toBeUndefined();
     // no near: identity passes straight through (DirectoryRow memo depends on it)
     expect(pool[0]).toBe(shown[0]);
+  });
+});
+
+describe('inactive search results', () => {
+  const dome = (over: Partial<FireSummary> = {}) =>
+    summary({ post_title: 'Dome', state: 'CA', active: false, ...over });
+  const found = firesList([
+    dome({ cornea_id: '4883092e-485f-429d-878d-819f01172840', created_on: '2026-09-15T15:28:00Z', containment: 100 }),
+    dome({ cornea_id: '{63E1A489}', state: 'AZ', created_on: '2025-08-24T23:08:24Z', acres: 0 }),
+    // the API's full-text search also matches descriptions ("Kettle Dome near…")
+    dome({ cornea_id: '{KETTLE}', post_title: 'Kettle', created_on: '2025-08-31T07:50:48Z' }),
+    dome({ cornea_id: '{MOVIE}', post_title: 'Movie Dome', state: 'FL', created_on: '2026-08-19T23:42:19Z', acres: 6222 }),
+  ]);
+
+  it('keeps name matches only, marked inactive', () => {
+    const rows = inactiveSearchRows(found, ' Dome ', []);
+    expect(rows.map((r) => r.corneaId)).toEqual([
+      '4883092e-485f-429d-878d-819f01172840',
+      '{63E1A489}',
+      '{MOVIE}',
+    ]);
+    expect(rows.every((r) => r.active === false)).toBe(true);
+  });
+
+  it('needs three characters', () => {
+    expect(inactiveSearchRows(found, 'do', [])).toEqual([]);
+    expect(inactiveSearchRows(found, 'dom', [])).toHaveLength(3);
+    expect(inactiveSearchRows(undefined, 'dome', [])).toEqual([]);
+  });
+
+  it('leaves out a fire the roster already lists, however its id is spelled', () => {
+    const roster = [row({ corneaId: '{4883092E-485F-429D-878D-819F01172840}', name: 'Dome' })];
+    expect(inactiveSearchRows(found, 'dome', roster).map((r) => r.corneaId)).toEqual([
+      '{63E1A489}',
+      '{MOVIE}',
+    ]);
+  });
+
+  it('lists the newest fire first when the column has nothing to compare', () => {
+    const rows = inactiveSearchRows(found, 'dome', []);
+    const sorted = selectInactiveRows(rows, { filter: 'all', sort: DEFAULT_DIRECTORY_SORT });
+    expect(sorted.map((r) => `${r.name} ${r.state}`)).toEqual(['Dome CA', 'Movie Dome FL', 'Dome AZ']);
+  });
+
+  it('follows a column sort that has values, and the chip filters', () => {
+    const rows = inactiveSearchRows(found, 'dome', []);
+    const bySize = selectInactiveRows(rows, { filter: 'all', sort: { key: 'acres', dir: 'desc' } });
+    expect(bySize.map((r) => r.acres)).toEqual([6222, 6000, 0]);
+    const large = selectInactiveRows(rows, { filter: 'large', sort: DEFAULT_DIRECTORY_SORT });
+    expect(large.map((r) => r.name)).toEqual(['Dome', 'Movie Dome']);
+    expect(selectInactiveRows(rows, { filter: 'maps', sort: DEFAULT_DIRECTORY_SORT })).toEqual([]);
   });
 });

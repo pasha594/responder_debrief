@@ -11,6 +11,7 @@
  * would cost one detail request per fire.
  */
 import { isPrescribed } from '../api/fireFields';
+import { fireKey } from '../api/fireKey';
 import { distanceMiles, parseFireCoordinates } from '../api/geo';
 import type { CatalogFire, FireSummary, FiresListResponse, MasterCatalog } from '../api/types';
 
@@ -369,6 +370,71 @@ export function selectDirectoryRows(
   return rows
     .filter((r) => matchesFilter(r, opts.filter) && matchesQuery(r, opts.query))
     .sort((a, b) => compareRows(a, b, opts.sort));
+}
+
+// ---------- inactive fires (search only) ----------
+
+/** Shortest query that also searches inactive fires. */
+export const INACTIVE_MIN_QUERY = 3;
+
+/**
+ * Inactive fires for the search box, listed below the active results. The
+ * API's full-text search also hits county and description text (it finds
+ * "Kettle" for "dome" by "Kettle Dome near…"), so only name matches are kept,
+ * the same as the active roster. A fire the roster already lists is left out
+ * (the hourly catalog can still call a fire active after it goes inactive).
+ */
+export function inactiveSearchRows(
+  resp: FiresListResponse | undefined,
+  query: string,
+  roster: DirectoryRow[],
+): DirectoryRow[] {
+  const q = query.trim().toLowerCase();
+  if (q.length < INACTIVE_MIN_QUERY || !resp?.fires) return [];
+  const skip = new Set(roster.map((r) => fireKey(r.corneaId)));
+  const out: DirectoryRow[] = [];
+  for (const f of resp.fires) {
+    const k = fireKey(f?.cornea_id);
+    if (!k || skip.has(k)) continue;
+    const row = fromSummary(f);
+    if (!row.name.toLowerCase().includes(q)) continue;
+    skip.add(k);
+    out.push({ ...row, active: false });
+  }
+  return out;
+}
+
+/** Newest start first, then name. */
+function newestFirst(a: DirectoryRow, b: DirectoryRow): number {
+  const ta = a.createdOn ? Date.parse(a.createdOn) : NaN;
+  const tb = b.createdOn ? Date.parse(b.createdOn) : NaN;
+  const fa = Number.isFinite(ta);
+  const fb = Number.isFinite(tb);
+  if (fa && fb && ta !== tb) return tb - ta;
+  if (fa !== fb) return fa ? -1 : 1;
+  return a.name.localeCompare(b.name);
+}
+
+/**
+ * The inactive results: chip filters apply as on the roster, and the column
+ * sort orders them. Where the column has nothing to compare (inactive fires
+ * carry no FTP or forecast facts, so the default FTP sort never does), the
+ * newest fire comes first: a search for "dome" wants this year's Dome, not
+ * a 2024 one.
+ */
+export function selectInactiveRows(
+  rows: DirectoryRow[],
+  opts: { filter: DirectoryFilter; sort: DirectorySort },
+): DirectoryRow[] {
+  return rows
+    .filter((r) => matchesFilter(r, opts.filter))
+    .sort((a, b) => {
+      const ha = sortValue(a, opts.sort.key) != null;
+      const hb = sortValue(b, opts.sort.key) != null;
+      if (ha && hb) return compareRows(a, b, opts.sort);
+      if (ha !== hb) return ha ? -1 : 1;
+      return newestFirst(a, b);
+    });
 }
 
 export interface DirectorySummary {

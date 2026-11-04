@@ -1,7 +1,8 @@
 /**
  * The app's default view: a full-screen roster of every active fire. No map is
  * mounted here — clicking a row routes to '#/fire/{corneaId}', which swaps in
- * the single-fire map shell.
+ * the single-fire map shell. A search also lists matching inactive fires,
+ * below the active results.
  */
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { DisclaimerFooter } from '../panels/DisclaimerFooter';
@@ -10,18 +11,21 @@ import { ScanCodeButton } from '../panels/QrShareControl';
 import { OfflineFiresStrip } from './OfflineFiresStrip';
 import { pickBestCity, searchPlaces } from '../api/geocode';
 import { track } from '../app/analytics';
-import { useFires, useMasterCatalog } from '../api/queries';
+import { useFires, useInactiveFireSearch, useMasterCatalog } from '../api/queries';
 import { packForFire } from '../offline/packModel';
 import { useStore } from '../state/store';
 import { useIsDesktop } from '../utils/useMediaQuery';
 import { DirectoryRow } from './DirectoryRow';
 import {
   DIRECTORY_FILTERS,
+  INACTIVE_MIN_QUERY,
   NEAR_RADIUS_MI,
   buildDirectoryRows,
+  inactiveSearchRows,
   matchesQuery,
   nearRows,
   selectDirectoryRows,
+  selectInactiveRows,
   summarizeRows,
   type DirectorySortKey,
 } from './rowModel';
@@ -124,6 +128,31 @@ export function DirectoryView() {
   );
   const shown = cityMode ? nearShown : direct;
 
+  // Inactive fires join any search, below the active results in either mode:
+  // one API search per settled query, online only (offline, only downloaded
+  // fires can open).
+  const [inactiveQ, setInactiveQ] = useState(q);
+  useEffect(() => {
+    const t = setTimeout(() => setInactiveQ(q), 300);
+    return () => clearTimeout(t);
+  }, [q]);
+  const inactiveSearch = useInactiveFireSearch(
+    inactiveQ,
+    online && inactiveQ.length >= INACTIVE_MIN_QUERY,
+  );
+  const inactiveRows = useMemo(
+    () => (online ? inactiveSearchRows(inactiveSearch.data, q, allRows) : []),
+    [online, inactiveSearch.data, q, allRows],
+  );
+  const inactiveShown = useMemo(
+    () => selectInactiveRows(inactiveRows, { filter, sort }),
+    [inactiveRows, filter, sort],
+  );
+  const hasInactive = inactiveShown.length > 0;
+  const page = inactiveSearch.data?.pagination;
+  // The API capped its answer: older matches exist past the newest few.
+  const moreInactive = hasInactive && !!page && page.total > (inactiveSearch.data?.fires.length ?? 0);
+
   // ---- background city resolution. One debounced Photon request per
   // settled no-match query; a resolved place is remembered in the store
   // (keyed by its query) so fire round-trips replay it with zero requests.
@@ -193,6 +222,17 @@ export function DirectoryView() {
   const loading = fires.isLoading || catalog.isLoading;
   const failed = fires.isError && catalog.isError;
   const hasRows = rows.length > 0;
+  const noActiveMatch = !failed && !loading && hasRows && shown.length === 0;
+  const emptyText = resolving
+    ? `No active fire or state names match — checking cities…`
+    : cityMode && pool.length === 0
+      ? `No fires within ${NEAR_RADIUS_MI} miles of ${near.label}.`
+      : cityMode
+        ? `No fires near ${near.label} match these filters.`
+        : hasInactive
+          ? 'No active fires match this search.'
+          : 'No fires match this search.';
+  const moreInactiveText = 'Showing the most recently updated inactive fires. Type more of the name to find older ones.';
 
   const nf = (n: number) => n.toLocaleString('en-US');
   const subtitle = hasRows
@@ -265,13 +305,14 @@ export function DirectoryView() {
           <div className="rd-dir-count">
             {nf(shown.length)}
             {shown.length === rows.length ? '' : ` of ${nf(rows.length)}`} shown
+            {hasInactive ? ` · ${nf(inactiveShown.length)} inactive` : ''}
           </div>
         )}
       </div>
 
       {cityMode && shown.length > 0 && (
         <div className="rd-dir-nearline">
-          No fire or state names match “{query.trim()}” — showing fires within{' '}
+          No active fire or state names match “{query.trim()}” — showing fires within{' '}
           {NEAR_RADIUS_MI} mi of <strong>{near.label}</strong>, closest first.
         </div>
       )}
@@ -324,6 +365,38 @@ export function DirectoryView() {
                     onOpen={open}
                   />
                 ))}
+                {noActiveMatch && hasInactive && (
+                  <tr className="rd-dir-note-row">
+                    <td colSpan={columns.length}>{emptyText}</td>
+                  </tr>
+                )}
+              </tbody>
+            )}
+            {hasInactive && !(loading && !hasRows) && (
+              <tbody className="rd-dir-section-group">
+                <tr>
+                  <th colSpan={columns.length} scope="rowgroup" className="rd-dir-section">
+                    Inactive fires
+                  </th>
+                </tr>
+              </tbody>
+            )}
+            {hasInactive && !(loading && !hasRows) && (
+              <tbody className="rd-dir-inactive">
+                {inactiveShown.map((r) => (
+                  <DirectoryRow
+                    key={r.corneaId}
+                    row={r}
+                    nowMs={nowMs}
+                    variant="row"
+                    onOpen={open}
+                  />
+                ))}
+                {moreInactive && (
+                  <tr className="rd-dir-note-row">
+                    <td colSpan={columns.length}>{moreInactiveText}</td>
+                  </tr>
+                )}
               </tbody>
             )}
           </table>
@@ -333,31 +406,41 @@ export function DirectoryView() {
           loading && !hasRows ? (
             <SkeletonRows desktop={false} />
           ) : (
-            <ul className="rd-dir-cards">
-              {shown.map((r) => (
-                <DirectoryRow
-                  key={r.corneaId}
-                  row={r}
-                  nowMs={nowMs}
-                  variant="card"
-                  onOpen={open}
-                />
-              ))}
-            </ul>
+            <>
+              <ul className="rd-dir-cards">
+                {shown.map((r) => (
+                  <DirectoryRow
+                    key={r.corneaId}
+                    row={r}
+                    nowMs={nowMs}
+                    variant="card"
+                    onOpen={open}
+                  />
+                ))}
+              </ul>
+              {hasInactive && (
+                <>
+                  {noActiveMatch && <div className="rd-empty">{emptyText}</div>}
+                  <h2 className="rd-dir-section rd-dir-section--cards">Inactive fires</h2>
+                  <ul className="rd-dir-cards rd-dir-inactive">
+                    {inactiveShown.map((r) => (
+                      <DirectoryRow
+                        key={r.corneaId}
+                        row={r}
+                        nowMs={nowMs}
+                        variant="card"
+                        onOpen={open}
+                      />
+                    ))}
+                  </ul>
+                  {moreInactive && <div className="rd-dir-more">{moreInactiveText}</div>}
+                </>
+              )}
+            </>
           )
         )}
 
-        {!failed && !loading && hasRows && shown.length === 0 && (
-          <div className="rd-empty">
-            {resolving
-              ? `No fire or state names match — checking cities…`
-              : cityMode && pool.length === 0
-                ? `No fires within ${NEAR_RADIUS_MI} miles of ${near.label}.`
-                : cityMode
-                  ? `No fires near ${near.label} match these filters.`
-                  : 'No fires match this search.'}
-          </div>
-        )}
+        {noActiveMatch && !hasInactive && <div className="rd-empty">{emptyText}</div>}
         {!failed && !loading && !hasRows && (
           <div className="rd-empty">No active fires are listed right now.</div>
         )}

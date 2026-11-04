@@ -25,4 +25,6 @@ def test_fetch_active_fires_reports_raw_row_count():
         assert [f["fire_slug"] for f in got] == ["austin", "austin-nv"]
         assert got[0]["coordinates"] == [-119.2, 44.1]
         assert seen["limit"] == str(fires.ACTIVE_FIRES_LIMIT)
+        # prescribed burns must not fill the page and push wildfires off it
+        assert seen["fire_type"] == "Wildfire"
         assert len(fires.fetch_active_fires(client)) == 2  # meta is optional

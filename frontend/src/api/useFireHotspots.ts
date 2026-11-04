@@ -8,6 +8,7 @@
  */
 import { useMemo } from 'react';
 import {
+  fireFilePaths,
   latestRun,
   useFire,
   useHotspotArchive,
@@ -17,7 +18,13 @@ import {
 } from './queries';
 import type { HotspotQuery } from './fireApi';
 import { HOTSPOT_BBOX_SNAP_DEG, HOTSPOT_HISTORY_MAX_DAYS } from '../app/config';
-import { boundsToLatFirst, padBounds, snapBoundsOut, type Bounds4326 } from './geo';
+import {
+  boundsToLatFirst,
+  padBounds,
+  parseFireCoordinates,
+  snapBoundsOut,
+  type Bounds4326,
+} from './geo';
 
 function daysAgoIso(days: number): string {
   return new Date(Date.now() - days * 864e5).toISOString().slice(0, 10);
@@ -49,7 +56,12 @@ export function useFireHotspotQuery(corneaId: string | null): HotspotQuery | nul
     // catalogs omit it). The model domain can be SMALLER than the fire
     // itself, so never let it clip the box: union it with a generous
     // centroid-padded rectangle.
-    const center = spreadRun?.centroid ?? catalogFire?.coordinates ?? null;
+    // An inactive fire has no catalog entry: its origin comes from the API.
+    const center =
+      spreadRun?.centroid ??
+      catalogFire?.coordinates ??
+      parseFireCoordinates(fire?.fire_coordinates) ??
+      null;
     const centerBox: Bounds4326 | null = center
       ? [center[0] - 0.5, center[1] - 0.4, center[0] + 0.5, center[1] + 0.4]
       : null;
@@ -83,10 +95,10 @@ export function useFireHotspotQuery(corneaId: string | null): HotspotQuery | nul
  */
 export function useFireHotspots(corneaId: string | null) {
   const { data: catalog, isError: catalogFailed } = useMasterCatalog();
-  const archivePath =
-    catalog?.fires.find((f) => f.cornea_id === corneaId)?.hotspot_archive ?? null;
+  // An inactive fire's archive is probed at its fire-ID path (fireFilePaths).
+  const { hotspotArchive: archivePath, probe } = fireFilePaths(catalog, corneaId);
   const q = useFireHotspotQuery(corneaId);
-  const archived = useHotspotArchive(archivePath);
+  const archived = useHotspotArchive(archivePath, probe);
   // Direct API path only when the archive can't serve: no archive advertised
   // (wait for the catalog to settle first — the direct pull is tens of MB,
   // don't fire it just because the catalog is still loading), or the archive

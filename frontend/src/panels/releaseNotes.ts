@@ -27,6 +27,22 @@ export interface ReleaseDay {
 
 export const RELEASE_NOTES: ReleaseDay[] = [
   {
+    date: '2026-11-04',
+    notes: [
+      {
+        title: 'Search finds fires that are no longer active',
+        summary:
+          'A search now also lists matching fires that are no longer active, below the active ones, newest first. Open one for its last perimeter; fires that went out since early October keep their incident maps and hotspots too.',
+      },
+      {
+        title: 'Every active fire is listed',
+        summary:
+          'The fire list stopped at 500 fires, and with many prescribed burns active, the fires updated longest ago were left off, wildfires among them. All active fires are listed again.',
+        fix: true,
+      },
+    ],
+  },
+  {
     date: '2026-10-16',
     notes: [
       {

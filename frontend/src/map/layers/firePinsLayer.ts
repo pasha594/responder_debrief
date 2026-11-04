@@ -71,6 +71,7 @@ function selectedFeatureCollection(
   const coords =
     parseFireCoordinates(summary?.fire_coordinates) ??
     ctx.catalog?.fires.find((f) => f.cornea_id === selectedId)?.coordinates ??
+    parseFireCoordinates(ctx.selectedFire?.fire_coordinates) ??
     null;
   if (!coords) return EMPTY_FC;
 

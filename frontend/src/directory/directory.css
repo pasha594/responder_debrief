@@ -381,6 +381,38 @@
 .rd-dir-nearline strong { color: var(--color-text); font-weight: 600; }
 
 
+/* ---------- inactive fires (search results) ---------- */
+
+.rd-dir-section {
+  margin: 0;
+  padding: 22px 16px 8px;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  text-align: left;
+  color: var(--color-text-muted);
+  border-bottom: 1px solid var(--color-border);
+}
+.rd-dir-section--cards {
+  max-width: var(--rd-dir-width);
+  margin-inline: auto;
+}
+.rd-dir-table tbody tr.rd-dir-note-row td {
+  height: auto;
+  padding: 22px 16px;
+  font-size: 13px;
+  text-align: center;
+  color: var(--color-text-muted);
+  background: none;
+}
+.rd-dir-more {
+  padding: 16px 16px 22px;
+  font-size: 12.5px;
+  text-align: center;
+  color: var(--color-text-muted);
+}
+
 /* ---------- offline fires strip ---------- */
 .rd-offline-strip {
   display: flex;

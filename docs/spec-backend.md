@@ -16,7 +16,7 @@ worker/
   responder_worker/
     config.py        # region roots, product allowlists, retention windows,
                      # concurrency caps, B2 bucket/prefixes, GACC->states map
-    fires.py         # fetch_active_fires(): GET /fires?active=true&limit=500&fields=...
+    fires.py         # fetch_active_fires(): GET /fires?active=true&fire_type=Wildfire&limit=500&fields=...
                      # parse "lat, lon" string -> [lon, lat]; slugify helpers
     ftp_index.py     # Apache autoindex parser: list_dir(url) -> [Entry(name, href,
                      # mtime, is_dir, size_hint)]; handles %20 and sort params

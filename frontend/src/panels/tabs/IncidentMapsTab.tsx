@@ -8,7 +8,7 @@
  */
 import { useMemo, useState } from 'react';
 import { PackImg } from '../../utils/PackImg';
-import { useFire, useIncidentManifest, useMasterCatalog } from '../../api/queries';
+import { useFire, useFireManifest, useMasterCatalog } from '../../api/queries';
 import { dataUrl } from '../../api/catalogs';
 import type { IncidentMapEntry, IrFlight } from '../../api/types';
 import type React from 'react';
@@ -27,14 +27,9 @@ import { IrHeatLegend } from '../IrHeatLegend';
 import { MapLightbox } from '../MapLightbox';
 import { MyMapsSection } from './MyMapsSection';
 
-/** Shared resolution: catalog fire → incident manifest. */
+/** Shared resolution: fire → incident manifest (inactive fires included). */
 export function useManifestForFire(corneaId: string | null) {
-  const { data: catalog } = useMasterCatalog();
-  const catalogFire = useMemo(
-    () => catalog?.fires.find((f) => f.cornea_id === corneaId) ?? null,
-    [catalog, corneaId],
-  );
-  return useIncidentManifest(catalogFire?.incident_manifest ?? null, corneaId);
+  return useFireManifest(corneaId);
 }
 
 function Thumb({ previewUrl }: { previewUrl: string | null | undefined }) {

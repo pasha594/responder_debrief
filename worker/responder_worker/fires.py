@@ -77,9 +77,12 @@ def fire_slug(fire: dict) -> str:
     return slugify(fire.get("post_title") or fire.get("cornea_id") or "unknown")
 
 
-#: One page of the active-fires index. The fetch is not paginated, so a page
-#: this full may be truncated: jobs that act on a fire's ABSENCE (migration,
-#: prune) refuse to run on one.
+#: One page of the active-WILDFIRE index (the API filters by fire_type; 153
+#: on 2026-11-04). The fetch is not paginated, so a page this full may be
+#: truncated: jobs that act on a fire's ABSENCE (migration, prune) refuse to
+#: run on one. Unfiltered, prescribed burns filled the page (547 active), so
+#: the least recently updated wildfires were dropped and every list looked
+#: truncated.
 ACTIVE_FIRES_LIMIT = 500
 #: A list under this share of the previous catalog's active fires is taken
 #: for a partial answer, not for that many fires going out at once.
@@ -100,15 +103,17 @@ def fire_list_suspect(raw_rows: int, n_fires: int, prev_active: int | None) -> s
 
 
 def fetch_active_fires(client: httpx.Client, meta: dict | None = None) -> list[dict]:
-    """GET /fires?active=true&limit=500&fields=... -> wildfires with parsed coords.
+    """GET /fires?active=true&fire_type=Wildfire&limit=500&fields=... ->
+    wildfires with parsed coords.
 
     `meta`, when given, receives `raw_rows`: how many rows the API returned
-    before the wildfire filter (compare with ACTIVE_FIRES_LIMIT)."""
+    before the local wildfire filter (compare with ACTIVE_FIRES_LIMIT)."""
     resp = get(
         client,
         f"{config.FIRE_API}/fires",
         params={
             "active": "true",
+            "fire_type": "Wildfire",
             "limit": ACTIVE_FIRES_LIMIT,
             "fields": ",".join(FIRE_FIELDS),
         },

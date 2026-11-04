@@ -11,8 +11,8 @@ import {
   latestWeatherRun,
   useFire,
   useFires,
+  useFireManifest,
   useHotspots,
-  useIncidentManifest,
   useInvalidateForecasts,
   useMasterCatalog,
   usePerimeterIndex,
@@ -39,11 +39,6 @@ import { firePinsLayer } from './layers/firePinsLayer';
 import { perimeterLayer } from './layers/perimeterLayer';
 import { useFireLandStatus, useHistoricPerimeters, useIncidents } from '../api/queries';
 
-function histBoxForIncidents(
-  catalogFire: { coordinates?: [number, number] | null } | null,
-): [number, number, number, number] | null {
-  return fireAreaBox(catalogFire?.coordinates);
-}
 import { hotspotLayer } from './layers/hotspotLayer';
 import { hotspotFlamesLayer } from './layers/hotspotFlamesLayer';
 import { spreadForecastLayer } from './layers/spreadForecastLayer';
@@ -171,19 +166,23 @@ export function useMapLayerSync(): boolean {
   const domainStart = useStore((s) => s.time.domain[0]);
   const { data: originWeather, coords: originCoords } = useOriginWeather(corneaId, domainStart);
 
-  const { data: incidentManifest } = useIncidentManifest(
-    catalogFire?.incident_manifest ?? null,
-    corneaId,
+  const { data: incidentManifest } = useFireManifest(corneaId);
+
+  // The fire's origin. An inactive fire has no catalog entry, so the API's
+  // own coordinates stand in.
+  const fireOrigin = useMemo(
+    () => catalogFire?.coordinates ?? parseFireCoordinates(selectedFire?.fire_coordinates),
+    [catalogFire, selectedFire],
   );
 
   // Road incidents: lazy, short-lived (closures change), same box family.
   const { data: incidents } = useIncidents(
-    histBoxForIncidents(catalogFire),
+    fireAreaBox(fireOrigin),
     view.mode === 'fire' && layers.incidents.visible,
   );
 
   // Historic burn scars: lazy — the query runs only once the layer is on.
-  const histBox = useMemo(() => fireAreaBox(catalogFire?.coordinates), [catalogFire]);
+  const histBox = useMemo(() => fireAreaBox(fireOrigin), [fireOrigin]);
   const { data: historicPerimeters } = useHistoricPerimeters(
     histBox, corneaId, view.mode === 'fire' && layers.historicPerimeters.visible,
   );
@@ -432,12 +431,13 @@ export function useMapLayerSync(): boolean {
       catalogFire?.coordinates ??
       parseFireCoordinates(
         fires?.fires.find((x) => x.cornea_id === view.corneaId)?.fire_coordinates,
-      );
+      ) ??
+      parseFireCoordinates(selectedFire?.fire_coordinates);
     if (center) {
       flownTo.current = view.corneaId;
       map.flyTo({ center, zoom: 10, duration: 1200 });
     }
-  }, [map, view, spreadRun, catalogFire, fires, perimeterFeature, sharedCamera, actions]);
+  }, [map, view, spreadRun, catalogFire, fires, selectedFire, perimeterFeature, sharedCamera, actions]);
 
   // Diffalo records once this is true — the perimeter GeoJSON has landed.
   return perimeterFeature != null;

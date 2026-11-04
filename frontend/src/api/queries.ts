@@ -8,6 +8,7 @@ import {
   normalizeHotspots,
   fetchPerimeterByPath,
   fetchPerimeterIndex,
+  searchInactiveFires,
   type HotspotQuery,
 } from './fireApi';
 import {
@@ -19,11 +20,17 @@ import {
   fetchPyrecastRuns,
   fetchWeatherRuns,
 } from './catalogs';
-import type { IncidentManifest, PerimeterIndexItem, PyrecastRun, WeatherRun } from './types';
-import { entryForFire, sameFire } from './fireKey';
+import type {
+  IncidentManifest,
+  MasterCatalog,
+  PerimeterIndexItem,
+  PyrecastRun,
+  WeatherRun,
+} from './types';
+import { entryForFire, fireKey, sameFire } from './fireKey';
 import { fetchHistoricPerimeters } from './nifcHistory';
 import { fetchLandStatus } from './nifcLandStatus';
-import { fireAreaBox } from './geo';
+import { fireAreaBox, parseFireCoordinates } from './geo';
 import { fetchIncidents } from './tomtomTraffic';
 import { reverseStreetAddress } from './geocode';
 
@@ -33,6 +40,22 @@ export const useFires = () =>
     queryFn: fetchFires,
     staleTime: 60_000,
     refetchOnWindowFocus: true,
+  });
+
+/**
+ * Inactive fires matching the directory search (pass the debounced, trimmed,
+ * lowercased query). The previous answer stays up while the next one loads;
+ * the caller re-filters it by the current text, so it never shows a fire
+ * that doesn't match.
+ */
+export const useInactiveFireSearch = (query: string, enabled: boolean) =>
+  useQuery({
+    queryKey: ['fires-inactive', query],
+    queryFn: () => searchInactiveFires(query),
+    enabled: enabled && query.length > 0,
+    staleTime: 300_000,
+    retry: 1,
+    placeholderData: (prev) => prev,
   });
 
 export const useFire = (corneaId: string | null) =>
@@ -136,8 +159,15 @@ export const useHistoricPerimeters = (
  * card only speaks for points inside it. */
 export const useFireLandStatus = (corneaId: string | null, enabled: boolean) => {
   const { data: catalog } = useMasterCatalog();
-  const c = catalog?.fires.find((f) => f.cornea_id === corneaId)?.coordinates;
-  const bbox = useMemo(() => fireAreaBox(c), [c]);
+  const { data: fire } = useFire(corneaId);
+  const bbox = useMemo(
+    () =>
+      fireAreaBox(
+        catalog?.fires.find((f) => f.cornea_id === corneaId)?.coordinates ??
+          parseFireCoordinates(fire?.fire_coordinates),
+      ),
+    [catalog, fire, corneaId],
+  );
   const { data, isLoading, isError } = useQuery({
     queryKey: ['nifc-land-status', bbox],
     queryFn: () => fetchLandStatus(bbox!),
@@ -162,7 +192,8 @@ export const useStreetAddress = (at: [number, number] | null, enabled: boolean) 
   });
 
 /** Worker-archived hotspot history (daily chunks; index revalidates). */
-export const useHotspotArchive = (indexPath: string | null) =>
+/** `probe`: a guessed path (unlistedFirePaths), where a miss is an answer. */
+export const useHotspotArchive = (indexPath: string | null, probe = false) =>
   useQuery({
     queryKey: ['hotspot-archive', indexPath],
     queryFn: async () => {
@@ -173,6 +204,7 @@ export const useHotspotArchive = (indexPath: string | null) =>
     enabled: !!indexPath,
     staleTime: 300_000,
     placeholderData: (prev) => prev,
+    ...(probe ? { retry: false } : {}),
   });
 
 export const useMasterCatalog = () =>
@@ -217,21 +249,67 @@ export const useWeatherRuns = () =>
     retry: 1,
   });
 
+export interface FireFilePaths {
+  /** Root-relative incident-map manifest; null = none (or catalog loading). */
+  manifest: string | null;
+  /** Root-relative hotspot archive index; null = none (or catalog loading). */
+  hotspotArchive: string | null;
+  /** True when the paths are guesses for a fire the catalog does not list:
+   * a miss then means the fire has no such file, not a fault to retry. */
+  probe: boolean;
+}
+
 /**
- * A fire's incident-map manifest, or undefined when the file belongs to a
- * different fire: older manifests are filed by name (a cached catalog can
- * still name one), and a stale record once put Idaho's Sawmill maps on
- * three later Sawmill fires.
+ * Where a fire's worker files live. A listed fire uses its catalog entry.
+ * catalog.json lists active fires only, but an inactive fire's incident maps
+ * and hotspot archive stay on the bucket (user policy: FTP data is never
+ * pruned), filed by fire key exactly as the worker writes them
+ * (fire_manifests.manifest_key, hotspots/{fk}/). Nothing until the catalog
+ * loads, so a listed fire is never probed.
  */
-export const useIncidentManifest = (manifestPath: string | null, corneaId: string | null) =>
-  useQuery({
-    queryKey: ['incident-manifest', manifestPath],
-    queryFn: () => fetchIncidentManifest(manifestPath!),
-    enabled: !!manifestPath,
+export function fireFilePaths(
+  catalog: MasterCatalog | undefined,
+  corneaId: string | null,
+): FireFilePaths {
+  const none = { manifest: null, hotspotArchive: null, probe: false };
+  if (!catalog || !corneaId) return none;
+  const entry = catalog.fires.find((f) => sameFire(f.cornea_id, corneaId));
+  if (entry) {
+    return {
+      manifest: entry.incident_manifest ?? null,
+      hotspotArchive: entry.hotspot_archive ?? null,
+      probe: false,
+    };
+  }
+  const fk = fireKey(corneaId);
+  if (!fk) return none;
+  return {
+    manifest: `/catalogs/incidents/id/${fk}.json`,
+    hotspotArchive: `/hotspots/${fk}/index.json`,
+    probe: true,
+  };
+}
+
+/**
+ * A fire's incident-map manifest, or undefined when it has none or the file
+ * belongs to a different fire: older manifests are filed by name (a cached
+ * catalog can still name one), and a stale record once put Idaho's Sawmill
+ * maps on three later Sawmill fires.
+ */
+export function useFireManifest(corneaId: string | null, enabled = true) {
+  const { data: catalog } = useMasterCatalog();
+  const { manifest: path, probe } = fireFilePaths(catalog, corneaId);
+  return useQuery({
+    queryKey: ['incident-manifest', path],
+    queryFn: () => fetchIncidentManifest(path!),
+    enabled: enabled && !!path,
     staleTime: 300_000,
-    retry: 1,
+    // B2 answers a missing file without CORS headers, so a probe's miss
+    // surfaces as a network error: the fire simply has no maps.
+    retry: probe ? false : 1,
     select: (m) => (manifestBelongsTo(m, corneaId) ? m : undefined),
   });
+}
 
 export function manifestBelongsTo(m: IncidentManifest, corneaId: string | null): boolean {
   return !m.cornea_id || sameFire(m.cornea_id, corneaId);

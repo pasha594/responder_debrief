@@ -1,7 +1,9 @@
 /** Typed client for fire-api-prod.web.app (direct from browser; CORS `*`). */
 import { FIRE_API, HOTSPOT_LIMIT } from '../app/config';
+import { fireKey } from './fireKey';
 import type {
   FireDetail,
+  FireSummary,
   FiresListResponse,
   HotspotFeatureCollection,
   PerimeterFeature,
@@ -19,7 +21,7 @@ async function getJson<T>(url: string): Promise<T> {
   return res.json() as Promise<T>;
 }
 
-/** Slim fields for the national index — one ~125 KB page covers all actives. */
+/** Slim fields for the national index (~250 B a fire). */
 const INDEX_FIELDS = [
   'cornea_id',
   'unique_slug',
@@ -35,13 +37,65 @@ const INDEX_FIELDS = [
   'active',
 ].join(',');
 
-/** The exact national-index URL (also snapshot into offline packs). */
-export function firesIndexUrl(): string {
-  return `${FIRE_API}/fires?active=true&limit=500&fields=${INDEX_FIELDS}`;
+/**
+ * Rows per national-index page. The API takes up to 1000; prescribed burns
+ * alone pushed the active list past the old 500 (547 on 2026-11-04), which
+ * silently dropped the least recently updated fires.
+ */
+export const FIRES_PAGE_SIZE = 1000;
+/** Pages fetchFires follows past the first, at most. */
+const MAX_EXTRA_PAGES = 4;
+
+/** A national-index page URL. Page one is also snapshot into offline packs. */
+export function firesIndexUrl(offset = 0): string {
+  const page = offset > 0 ? `&offset=${offset}` : '';
+  return `${FIRE_API}/fires?active=true&limit=${FIRES_PAGE_SIZE}${page}&fields=${INDEX_FIELDS}`;
 }
 
-export function fetchFires(): Promise<FiresListResponse> {
-  return getJson<FiresListResponse>(firesIndexUrl());
+/**
+ * Every active fire: page one, then any further pages the API reports. The
+ * index sorts by last_updated, so a fire updated between two page requests
+ * can land on both (kept once) or neither (back on the next refetch). A
+ * failed later page keeps the fires already in hand rather than failing the
+ * roster; offline packs only carry page one.
+ */
+export async function fetchFires(): Promise<FiresListResponse> {
+  const first = await getJson<FiresListResponse>(firesIndexUrl());
+  const step = first.fires?.length ?? 0;
+  const total = first.pagination?.total ?? 0;
+  if (step === 0 || total <= step) return first;
+  const offsets: number[] = [];
+  for (let off = step; off < total && offsets.length < MAX_EXTRA_PAGES; off += step) {
+    offsets.push(off);
+  }
+  const pages = await Promise.allSettled(
+    offsets.map((off) => getJson<FiresListResponse>(firesIndexUrl(off))),
+  );
+  const seen = new Set<string>();
+  const fires: FireSummary[] = [];
+  for (const page of [first, ...pages.flatMap((p) => (p.status === 'fulfilled' ? [p.value] : []))]) {
+    for (const f of page.fires ?? []) {
+      const k = fireKey(f?.cornea_id);
+      if (!k || seen.has(k)) continue;
+      seen.add(k);
+      fires.push(f);
+    }
+  }
+  return { ...first, fires, pagination: { ...first.pagination, returned: fires.length } };
+}
+
+/** Inactive fires per search, newest update first. */
+export const INACTIVE_SEARCH_LIMIT = 50;
+
+/**
+ * Inactive fires the API's full-text search finds for `query` (name, county,
+ * state and description; prefixes match). Callers keep the name matches.
+ */
+export function searchInactiveFires(query: string): Promise<FiresListResponse> {
+  const q = encodeURIComponent(query);
+  return getJson<FiresListResponse>(
+    `${FIRE_API}/fires?active=false&search=${q}&limit=${INACTIVE_SEARCH_LIMIT}&fields=${INDEX_FIELDS}`,
+  );
 }
 
 export function fetchFire(corneaId: string): Promise<FireDetail> {

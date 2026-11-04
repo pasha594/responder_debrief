@@ -95,7 +95,7 @@ async function fetchActiveFires() {
   const fields = 'cornea_id,unique_slug,post_title,acres,poly_last_updated';
   // The whole active list, not a page of it: /fires is ordered by last update,
   // so limit=20 left out a 172k-acre fire and picked a 0-acre one instead.
-  const url = `${FIRE_API}/fires?active=true&limit=500&fields=${fields}`;
+  const url = `${FIRE_API}/fires?active=true&limit=1000&fields=${fields}`;
   const body = await fetchJson(url).catch((error) => {
     throw new Error(`fire-api ${error.message}`);
   });
