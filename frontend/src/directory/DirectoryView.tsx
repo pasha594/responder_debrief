@@ -297,7 +297,12 @@ export function DirectoryView() {
   const nf = (n: number) => n.toLocaleString('en-US');
   // A count waits for its data: the roster's, or the inactive list's (a
   // search fills it in from the API even when the worker's file is missing).
+  // The roster merges two sources that land at different times: the live
+  // index (several pages, and the only one with the prescribed burns) and
+  // the worker catalog (the only one with forecast and FTP facts). Every
+  // count waits for both rather than showing one source's share and jumping.
   const chipCount = (id: DirectoryFilter): string | null => {
+    if (loading) return null;
     if (id === 'inactive') {
       if (!online && !q) return null;
       if (!q && !inactiveCatalog.data) return null;
