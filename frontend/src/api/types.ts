@@ -139,6 +139,18 @@ export interface CatalogFire {
   spread_latest_run: string | null;
 }
 
+/**
+ * catalogs/inactive.json: fires off the active list that hold incident maps,
+ * as catalog rows (no forecast fields: runs are matched to active fires).
+ * Absent until the first worker sync that writes it.
+ */
+export interface InactiveCatalog {
+  schema_version: number;
+  generated_at: string;
+  fires: (CatalogFire & { inactive_since?: string | null })[];
+  counts?: Record<string, number>;
+}
+
 export interface MasterCatalog {
   schema_version: number;
   version: number;

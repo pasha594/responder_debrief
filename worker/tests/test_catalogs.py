@@ -607,3 +607,47 @@ def test_catalog_incident_index_none_before_migration():
     # migrated with nothing built yet: advertise nothing, never fall back
     assert catalogs.catalog_incident_index(
         {"migrations": {"incident_ids": "2026-10-09T00:00:00Z"}}) == {}
+
+
+def test_inactive_catalog_lists_out_fires_with_maps_only():
+    # Chipmunk FL went out (the API says so) and holds maps; Chipmunk WI is
+    # still active; a fire missing from a partial active list but active in
+    # the API stays off; an entry with no manifest written is never listed.
+    gone = "aaaa0000-0000-4000-8000-000000000001"
+    still_on = "bbbb0000-0000-4000-8000-000000000002"
+    unwritten = "cccc0000-0000-4000-8000-000000000003"
+    index = {
+        FL_FK: _index_entry(FL_FK, ["southern/2026/2026_Chipmunk"], maps=4),
+        WI_FK: _index_entry(WI_FK, ["eastern/2026/2026_Chipmunk"], maps=1),
+        gone: _index_entry(gone, ["x/2026/2026_Gone"], maps=2),
+        still_on: _index_entry(still_on, ["x/2026/2026_On"], maps=2),
+        unwritten: {**_index_entry(unwritten, ["x/2026/2026_U"], maps=2), "manifest": None},
+    }
+    index[gone]["counts"]["latest_upload_ts"] = "2026-10-09T00:00:00Z"
+    facts = {
+        FL_FK: {**FL, "active": False, "acres": 900},
+        gone: {"fire_slug": "gone", "post_title": "Gone", "cornea_id": "{" + gone + "}",
+               "active": False},
+        still_on: {"fire_slug": "on", "post_title": "On", "cornea_id": still_on, "active": True},
+        unwritten: {"fire_slug": "u", "post_title": "U", "cornea_id": unwritten, "active": False},
+    }
+    ids = catalogs.inactive_fire_ids(index, {WI_FK})
+    assert sorted(ids) == sorted([FL_FK, gone, still_on])
+    assert ids[FL_FK] == "{" + FL_FK.upper() + "}"  # the API's own spelling
+    doc = catalogs.build_inactive_catalog(
+        index, {WI_FK}, facts, perimeter_counts={FL_FK: 7},
+        hotspot_archives={FL_FK}, inactive_since={FL_FK: "2026-10-20T00:00:00Z"})
+    assert [r["name"] for r in doc["fires"]] == ["Gone", "Chipmunk"]  # newest upload first
+    assert doc["counts"] == {"inactive_fires": 2}
+    fl = doc["fires"][1]
+    assert fl["active"] is False and fl["acres"] == 900
+    assert fl["has_incident_maps"] is True
+    assert fl["incident_manifest"] == f"/catalogs/incidents/id/{FL_FK}.json"
+    assert fl["incident_map_count"] == 4 and fl["perimeter_count"] == 7
+    assert fl["hotspot_archive"] == f"/hotspots/{FL_FK}/index.json"
+    assert fl["has_spread_forecast"] is False and fl["spread_latest_run"] is None
+    assert fl["inactive_since"] == "2026-10-20T00:00:00Z"
+    assert doc["fires"][0]["inactive_since"] is None
+    # every catalog.json field is there, so the frontend reads both alike
+    active_row = build_catalog([WI], version=1, incident_fires=index)["fires"][0]
+    assert set(active_row) | {"inactive_since"} == set(fl)

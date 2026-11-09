@@ -6,6 +6,7 @@ import type {
   HotspotFeatureCollection,
   IncidentManifest,
   ImsrCatalog,
+  InactiveCatalog,
   MasterCatalog,
   PyrecastRunsCatalog,
   WeatherRunsCatalog,
@@ -18,6 +19,7 @@ async function getJson<T>(path: string): Promise<T> {
 }
 
 export const fetchMasterCatalog = () => getJson<MasterCatalog>('/catalogs/catalog.json');
+export const fetchInactiveCatalog = () => getJson<InactiveCatalog>('/catalogs/inactive.json');
 export const fetchImsr = () => getJson<ImsrCatalog>('/catalogs/imsr.json');
 export const fetchHealth = () => getJson<HealthDoc>('/catalogs/health.json');
 export const fetchPyrecastRuns = () => getJson<PyrecastRunsCatalog>('/catalogs/pyrecast_runs.json');

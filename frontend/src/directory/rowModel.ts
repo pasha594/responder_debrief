@@ -13,7 +13,13 @@
 import { isPrescribed } from '../api/fireFields';
 import { fireKey } from '../api/fireKey';
 import { distanceMiles, parseFireCoordinates } from '../api/geo';
-import type { CatalogFire, FireSummary, FiresListResponse, MasterCatalog } from '../api/types';
+import type {
+  CatalogFire,
+  FireSummary,
+  FiresListResponse,
+  InactiveCatalog,
+  MasterCatalog,
+} from '../api/types';
 
 export interface DirectoryRow {
   corneaId: string;
@@ -199,18 +205,23 @@ export function perimeterFreshness(
 
 // ---------- filtering ----------
 
-export type DirectoryFilter = 'all' | 'forecast' | 'maps' | 'large' | 'uncontained';
+/** 'all' is every active fire (the chip reads "Active"); 'inactive' swaps
+ * the roster for the inactive fires that hold incident maps. */
+export type DirectoryFilter = 'all' | 'forecast' | 'maps' | 'large' | 'uncontained' | 'inactive';
 
 export const DIRECTORY_FILTERS: { id: DirectoryFilter; label: string }[] = [
-  { id: 'all', label: 'All' },
+  { id: 'all', label: 'Active' },
   { id: 'forecast', label: 'Has forecast' },
   { id: 'maps', label: 'Has incident maps' },
   { id: 'large', label: '>1000 acres' },
   { id: 'uncontained', label: '<50% contained' },
+  { id: 'inactive', label: 'Inactive' },
 ];
 
 export function matchesFilter(row: DirectoryRow, filter: DirectoryFilter): boolean {
   switch (filter) {
+    case 'inactive':
+      return !row.active;
     case 'forecast':
       return row.hasForecast;
     case 'maps':
@@ -378,28 +389,86 @@ export function selectDirectoryRows(
 export const INACTIVE_MIN_QUERY = 3;
 
 /**
+ * The worker's inactive fires (catalogs/inactive.json: off the active list,
+ * holding incident maps), as rows. A fire the roster lists is left out: the
+ * live index can call it active again before the worker's next sync.
+ */
+export function buildInactiveRows(
+  doc: InactiveCatalog | undefined,
+  roster: DirectoryRow[],
+): DirectoryRow[] {
+  if (!doc?.fires) return [];
+  const skip = new Set(roster.map((r) => fireKey(r.corneaId)));
+  const out: DirectoryRow[] = [];
+  for (const f of doc.fires) {
+    const k = fireKey(f?.cornea_id);
+    if (!k || skip.has(k)) continue;
+    skip.add(k);
+    out.push({ ...fromCatalog(f), active: false });
+  }
+  return out;
+}
+
+/**
  * Inactive fires for the search box, listed below the active results. The
  * API's full-text search also hits county and description text (it finds
  * "Kettle" for "dome" by "Kettle Dome near…"), so only name matches are kept,
  * the same as the active roster. A fire the roster already lists is left out
  * (the hourly catalog can still call a fire active after it goes inactive).
+ * A hit the worker's inactive list carries keeps that row's incident-map
+ * facts, so the chips judge it by them.
  */
 export function inactiveSearchRows(
   resp: FiresListResponse | undefined,
   query: string,
   roster: DirectoryRow[],
+  known: DirectoryRow[] = [],
 ): DirectoryRow[] {
   const q = query.trim().toLowerCase();
   if (q.length < INACTIVE_MIN_QUERY || !resp?.fires) return [];
   const skip = new Set(roster.map((r) => fireKey(r.corneaId)));
+  const byKey = new Map(known.map((r) => [fireKey(r.corneaId), r]));
   const out: DirectoryRow[] = [];
   for (const f of resp.fires) {
     const k = fireKey(f?.cornea_id);
     if (!k || skip.has(k)) continue;
-    const row = fromSummary(f);
-    if (!row.name.toLowerCase().includes(q)) continue;
+    const live = fromSummary(f);
+    if (!live.name.toLowerCase().includes(q)) continue;
     skip.add(k);
-    out.push({ ...row, active: false });
+    const base = byKey.get(k);
+    out.push(
+      base
+        ? {
+            ...base,
+            name: live.name || base.name,
+            acres: live.acres ?? base.acres,
+            containment: live.containment ?? base.containment,
+          }
+        : { ...live, active: false },
+    );
+  }
+  return out;
+}
+
+/** Two inactive lists as one, each fire once (the first list's row wins). */
+export function mergeInactiveRows(a: DirectoryRow[], b: DirectoryRow[]): DirectoryRow[] {
+  if (b.length === 0) return a;
+  if (a.length === 0) return b;
+  const seen = new Set(a.map((r) => fireKey(r.corneaId)));
+  return [...a, ...b.filter((r) => !seen.has(fireKey(r.corneaId)))];
+}
+
+/**
+ * The number each chip would show: the active chips count `active` (the
+ * roster under the current search), the Inactive chip `inactive.length`.
+ */
+export function countByFilter(
+  active: DirectoryRow[],
+  inactive: DirectoryRow[],
+): Record<DirectoryFilter, number> {
+  const out = {} as Record<DirectoryFilter, number>;
+  for (const { id } of DIRECTORY_FILTERS) {
+    out[id] = id === 'inactive' ? inactive.length : active.filter((r) => matchesFilter(r, id)).length;
   }
   return out;
 }
@@ -418,9 +487,9 @@ function newestFirst(a: DirectoryRow, b: DirectoryRow): number {
 /**
  * The inactive results: chip filters apply as on the roster, and the column
  * sort orders them. Where the column has nothing to compare (inactive fires
- * carry no FTP or forecast facts, so the default FTP sort never does), the
- * newest fire comes first: a search for "dome" wants this year's Dome, not
- * a 2024 one.
+ * have no forecast, and only those on the worker's inactive list carry FTP
+ * facts), the newest fire comes first: a search for "dome" wants this
+ * year's Dome, not a 2024 one.
  */
 export function selectInactiveRows(
   rows: DirectoryRow[],
@@ -435,23 +504,4 @@ export function selectInactiveRows(
       if (ha !== hb) return ha ? -1 : 1;
       return newestFirst(a, b);
     });
-}
-
-export interface DirectorySummary {
-  total: number;
-  active: number;
-  withForecast: number;
-  withIncidentMaps: number;
-}
-
-export function summarizeRows(rows: DirectoryRow[]): DirectorySummary {
-  let active = 0;
-  let withForecast = 0;
-  let withIncidentMaps = 0;
-  for (const r of rows) {
-    if (r.active) active += 1;
-    if (r.hasForecast) withForecast += 1;
-    if (r.hasIncidentMaps) withIncidentMaps += 1;
-  }
-  return { total: rows.length, active, withForecast, withIncidentMaps };
 }

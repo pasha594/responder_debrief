@@ -47,6 +47,7 @@ from .fires import (
     fire_key,
     fire_list_suspect,
     is_fire_id,
+    refresh_fire_facts,
 )
 from .ftp_index import list_dir
 from .http import get_optional, make_client
@@ -143,6 +144,20 @@ def cmd_sync_catalogs(args) -> int:
                 perimeter_counts[fk] = cached["count"]
         log(f"[catalogs] perimeter counts: {len(perimeter_counts)} fires "
             f"({pc_fetched} fetched, rest cached)")
+
+        # Inactive fires holding incident maps (catalogs/inactive.json): the
+        # active list no longer carries them, so their facts come from one
+        # detail GET each, cached in state.
+        incident_index = cat.catalog_incident_index(state)
+        active_fks = {fk for f in fires if (fk := fire_key(f.get("cornea_id")))}
+        facts_cache = state.setdefault("inactive_facts", {})
+        if incident_index is not None:
+            facts_deadline = time.monotonic() + 60
+            n_facts = refresh_fire_facts(
+                client, facts_cache, cat.inactive_fire_ids(incident_index, active_fks),
+                deadline_passed=lambda: time.monotonic() > facts_deadline,
+                now_s=time.time(), log=log)
+            log(f"[inactive] fire facts: {len(facts_cache)} cached ({n_facts} fetched)")
 
         log("[catalogs] fetching forecast-archive manifest + fire matches ...")
         pyre = archives.sync(client, storage, state, fires,
@@ -250,7 +265,21 @@ def cmd_sync_catalogs(args) -> int:
         national_layers=national_layers,
     )
 
+    inactive_catalog = None
+    if incident_fires is not None:
+        inactive_catalog = cat.build_inactive_catalog(
+            incident_fires, active_fks,
+            {fk: e["fire"] for fk, e in facts_cache.items() if e.get("fire")},
+            perimeter_counts={fk: rec["count"] for fk, rec in pc_state.items()
+                              if rec.get("count") is not None},
+            hotspot_archives=hotspot_archives,
+            inactive_since=(state.get("prune") or {}).get("inactive_since_by_id"))
+        log(f"[inactive] {inactive_catalog['counts']['inactive_fires']} inactive fires "
+            "with incident maps")
+
     # upload order: runs catalogs -> catalog.json LAST
+    if inactive_catalog is not None:
+        storage.put_json("catalogs/inactive.json", inactive_catalog)
     if imsr_catalog:
         storage.put_json("catalogs/imsr.json", imsr_catalog)
     storage.put_json("catalogs/pyrecast_runs.json", pyre)

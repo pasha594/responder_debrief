@@ -153,3 +153,58 @@ def fetch_perimeter_count(client: httpx.Client, cornea_id: str) -> int | None:
         return len(d) if isinstance(d, list) else None
     except Exception:
         return None
+
+
+def fetch_fire_facts(client: httpx.Client, cornea_id: str) -> dict | None:
+    """One fire's FIRE_FIELDS from its detail record, shaped like a
+    fetch_active_fires row (parsed coordinates, a name slug), or None when
+    the API has no such fire or does not answer."""
+    try:
+        # per-fire loop -> dev instance (prod is reserved for live-site traffic)
+        r = client.get(f"{config.FIRE_API_DEV}/fires/{cornea_id}", timeout=15)
+        r.raise_for_status()
+        d = r.json()
+    except Exception:
+        return None
+    if not isinstance(d, dict) or fire_key(d.get("cornea_id")) != fire_key(cornea_id):
+        return None
+    f = {k: d.get(k) for k in FIRE_FIELDS}
+    f["coordinates"] = parse_fire_coordinates(f.get("fire_coordinates"))
+    f["fire_slug"] = fire_slug(f)
+    return f
+
+
+#: Cached facts of an inactive fire are fetched again after this long (its
+#: final acres and containment can land after it goes inactive).
+FACTS_REFRESH_S = 7 * 86400
+#: Detail fetches per sync, at most (the first run backfills in a few runs).
+FACTS_MAX_FETCHES = 60
+
+
+def refresh_fire_facts(client: httpx.Client, cache: dict, want: dict[str, str], *,
+                       deadline_passed=lambda: False, now_s: float,
+                       log=print) -> int:
+    """Keep `cache` (fire_key -> {"at": epoch s, "fire": facts}) holding the
+    facts of exactly the fires in `want` (fire_key -> cornea_id as the API
+    spells it: the detail route 404s a braced id written bare or lowercased,
+    so never fetch by fire_key): entries for other fires are
+    dropped (a fire back on the active list is fetched afresh when it goes
+    out again), missing ones fetched, and the stalest past FACTS_REFRESH_S
+    refetched, up to FACTS_MAX_FETCHES and the deadline. A failed fetch
+    keeps the cached entry. Returns the number fetched."""
+    for fk in [k for k in cache if k not in want]:
+        del cache[fk]
+    due = sorted((fk for fk in want
+                  if fk not in cache or now_s - (cache[fk].get("at") or 0) > FACTS_REFRESH_S),
+                 key=lambda fk: (fk in cache, (cache.get(fk) or {}).get("at") or 0, fk))
+    fetched = 0
+    for fk in due[:FACTS_MAX_FETCHES]:
+        if deadline_passed():
+            log("[inactive] wall-clock reached — remaining fires next run")
+            break
+        f = fetch_fire_facts(client, want[fk])
+        if f is None:
+            continue
+        cache[fk] = {"at": int(now_s), "fire": f}
+        fetched += 1
+    return fetched

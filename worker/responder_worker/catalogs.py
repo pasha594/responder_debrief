@@ -264,6 +264,42 @@ def migrate_perim_counts(state: dict, fires: list[dict]) -> dict:
     return by_id
 
 
+def _catalog_row(f: dict, inc: dict, *, perimeter_count: int | None,
+                 hotspot_archives: set[str], spread: dict | None) -> dict:
+    """One fire's catalog row (catalog.json and inactive.json share it)."""
+    return {
+        "fire_slug": f["fire_slug"],
+        "cornea_id": f.get("cornea_id"),
+        "unique_fire_id": f.get("unique_fire_id"),
+        "name": f.get("post_title"),
+        "coordinates": f.get("coordinates"),
+        "state": f.get("state"),
+        "acres": f.get("acres"),
+        "containment": f.get("containment"),
+        "active": f.get("active"),
+        "last_updated": f.get("last_updated"),
+        "poly_last_updated": f.get("poly_last_updated"),
+        "timezone": f.get("timezone"),
+        "created_on": f.get("created_on"),
+        "has_incident_maps": inc["has_incident_maps"],
+        "incident_manifest": inc["incident_manifest"],
+        "incident_last_synced": inc["incident_last_synced"],
+        # directory-view summary (avoids fetching every per-fire manifest)
+        "incident_map_count": inc["incident_map_count"],
+        "incident_ir_count": inc["incident_ir_count"],
+        "incident_latest_upload": inc["incident_latest_upload"],
+        "incident_latest_upload_ts": inc["incident_latest_upload_ts"],
+        "perimeter_count": perimeter_count,
+        "hotspot_archive": (f"/{hotspots.index_key(aid)}"
+                            if (aid := hotspots.archive_id(f)) in hotspot_archives
+                            else None),
+        "ftp_match": inc["ftp_match"],
+        "has_spread_forecast": spread is not None,
+        "spread_latest_run": (spread or {}).get("latest"),
+        "spread_run_count": (spread or {}).get("count"),
+    }
+
+
 def catalog_incident_index(state: dict) -> dict[str, dict] | None:
     """build_catalog's `incident_fires`: the fire-ID manifest index once the
     incident-ID migration has run, None before (the slug-keyed path)."""
@@ -308,37 +344,9 @@ def build_catalog(
                 m = None  # never advertise a path that was not written
             inc = _incident_fields_by_id(m)
             matched_dirs += len((m or {}).get("dirs") or ())
-        fires_out.append({
-            "fire_slug": slug,
-            "cornea_id": f.get("cornea_id"),
-            "unique_fire_id": f.get("unique_fire_id"),
-            "name": f.get("post_title"),
-            "coordinates": f.get("coordinates"),
-            "state": f.get("state"),
-            "acres": f.get("acres"),
-            "containment": f.get("containment"),
-            "active": f.get("active"),
-            "last_updated": f.get("last_updated"),
-            "poly_last_updated": f.get("poly_last_updated"),
-            "timezone": f.get("timezone"),
-            "created_on": f.get("created_on"),
-            "has_incident_maps": inc["has_incident_maps"],
-            "incident_manifest": inc["incident_manifest"],
-            "incident_last_synced": inc["incident_last_synced"],
-            # directory-view summary (avoids fetching every per-fire manifest)
-            "incident_map_count": inc["incident_map_count"],
-            "incident_ir_count": inc["incident_ir_count"],
-            "incident_latest_upload": inc["incident_latest_upload"],
-            "incident_latest_upload_ts": inc["incident_latest_upload_ts"],
-            "perimeter_count": perimeter_counts.get(fk),
-            "hotspot_archive": (f"/{hotspots.index_key(aid)}"
-                                if (aid := hotspots.archive_id(f)) in hotspot_archives
-                                else None),
-            "ftp_match": inc["ftp_match"],
-            "has_spread_forecast": fk in spread_index,
-            "spread_latest_run": (spread_index.get(fk) or {}).get("latest"),
-            "spread_run_count": (spread_index.get(fk) or {}).get("count"),
-        })
+        fires_out.append(_catalog_row(f, inc, perimeter_count=perimeter_counts.get(fk),
+                                      hotspot_archives=hotspot_archives,
+                                      spread=spread_index.get(fk)))
     out = {
         "schema_version": SCHEMA_VERSION,
         "version": version,
@@ -356,6 +364,55 @@ def build_catalog(
     if national_layers:
         out["national_layers"] = national_layers
     return out
+
+
+# ---------------------------------------------------------------------------
+# catalogs/inactive.json (the directory's Inactive list)
+# ---------------------------------------------------------------------------
+
+def inactive_fire_ids(incident_fires: dict[str, dict], active_fks: set[str]) -> dict[str, str]:
+    """Fires the inactive list may show, fire_key -> cornea_id (as the API
+    spells it): an ID manifest was written for them and they are off the
+    active list."""
+    return {fk: m.get("cornea_id") or fk for fk, m in sorted(incident_fires.items())
+            if m.get("manifest") and fk not in active_fks}
+
+
+def build_inactive_catalog(
+    incident_fires: dict[str, dict],
+    active_fks: set[str],
+    facts: dict[str, dict],                            # fire_key -> fire_facts entry
+    *,
+    perimeter_counts: dict[str, int] | None = None,
+    hotspot_archives: set[str] | None = None,
+    inactive_since: dict[str, str] | None = None,      # prune clock, by fire key
+) -> dict:
+    """Inactive fires that hold incident maps, as catalog rows (same shape
+    as catalog.json's, plus `inactive_since`). A fire is listed only once
+    the fire API itself calls it inactive: a fire missing from a partial
+    active list stays off. No forecast fields: forecast runs are matched to
+    active fires only."""
+    perimeter_counts = perimeter_counts or {}
+    hotspot_archives = hotspot_archives or set()
+    inactive_since = inactive_since or {}
+    rows = []
+    for fk in inactive_fire_ids(incident_fires, active_fks):
+        f = facts.get(fk)
+        if not f or f.get("active") is not False:
+            continue
+        row = _catalog_row(f, _incident_fields_by_id(incident_fires[fk]),
+                           perimeter_count=perimeter_counts.get(fk),
+                           hotspot_archives=hotspot_archives, spread=None)
+        row["inactive_since"] = inactive_since.get(fk)
+        rows.append(row)
+    rows.sort(key=lambda r: (r["incident_latest_upload_ts"] or r["incident_latest_upload"] or "",
+                             r["cornea_id"] or ""), reverse=True)
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "generated_at": now_iso(),
+        "fires": rows,
+        "counts": {"inactive_fires": len(rows)},
+    }
 
 
 # ---------------------------------------------------------------------------

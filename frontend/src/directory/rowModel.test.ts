@@ -2,21 +2,30 @@ import { describe, expect, it } from 'vitest';
 import {
   DEFAULT_DIRECTORY_SORT,
   NEAR_RADIUS_MI,
+  DIRECTORY_FILTERS,
   buildDirectoryRows,
+  buildInactiveRows,
   compareRows,
+  countByFilter,
   inactiveSearchRows,
   matchesFilter,
   matchesQuery,
   nearRows,
   perimeterFreshness,
   selectDirectoryRows,
+  mergeInactiveRows,
   selectInactiveRows,
-  summarizeRows,
   type DirectoryRow,
 } from './rowModel';
 import { distanceMiles } from '../api/geo';
 import { isPrescribed } from '../api/fireFields';
-import type { CatalogFire, FireSummary, FiresListResponse, MasterCatalog } from '../api/types';
+import type {
+  CatalogFire,
+  FireSummary,
+  FiresListResponse,
+  InactiveCatalog,
+  MasterCatalog,
+} from '../api/types';
 
 const NOW = Date.parse('2026-08-17T12:00:00Z');
 
@@ -329,15 +338,23 @@ describe('selectDirectoryRows', () => {
   });
 });
 
-describe('summarizeRows', () => {
-  it('counts totals for the header subtitle', () => {
-    expect(
-      summarizeRows([
-        row({ hasForecast: true }),
-        row({ hasIncidentMaps: true }),
-        row({ active: false }),
-      ]),
-    ).toEqual({ total: 3, active: 2, withForecast: 1, withIncidentMaps: 1 });
+describe('countByFilter', () => {
+  it('counts each active chip over the rows given, and Inactive over its own list', () => {
+    const counts = countByFilter(
+      [
+        row({ hasForecast: true, acres: 5000, containment: 80 }),
+        row({ hasIncidentMaps: true, containment: null }),
+        row({ acres: 2000, containment: 10 }),
+      ],
+      [row({ active: false }), row({ active: false })],
+    );
+    expect(counts).toEqual({ all: 3, forecast: 1, maps: 1, large: 2, uncontained: 2, inactive: 2 });
+    expect(Object.keys(counts)).toEqual(DIRECTORY_FILTERS.map((f) => f.id));
+  });
+
+  it('labels the every-active-fire chip Active, with Inactive last', () => {
+    expect(DIRECTORY_FILTERS[0]).toEqual({ id: 'all', label: 'Active' });
+    expect(DIRECTORY_FILTERS.at(-1)).toEqual({ id: 'inactive', label: 'Inactive' });
   });
 });
 
@@ -581,5 +598,63 @@ describe('inactive search results', () => {
     const large = selectInactiveRows(rows, { filter: 'large', sort: DEFAULT_DIRECTORY_SORT });
     expect(large.map((r) => r.name)).toEqual(['Dome', 'Movie Dome']);
     expect(selectInactiveRows(rows, { filter: 'maps', sort: DEFAULT_DIRECTORY_SORT })).toEqual([]);
+  });
+});
+
+describe('inactive fires with incident maps (catalogs/inactive.json)', () => {
+  const doc = (fires: CatalogFire[]): InactiveCatalog => ({
+    schema_version: 1,
+    generated_at: '2026-11-09T00:00:00Z',
+    fires,
+  });
+  const domeFk = '4883092e-485f-429d-878d-819f01172840';
+  const inactive = doc([
+    catalogFire({
+      cornea_id: domeFk,
+      name: 'Dome',
+      state: 'CA',
+      active: false,
+      acres: 6788,
+      has_incident_maps: true,
+      incident_manifest: `/catalogs/incidents/id/${domeFk}.json`,
+      incident_map_count: 195,
+      incident_latest_upload: '2026-10-17',
+      has_spread_forecast: false,
+      spread_latest_run: null,
+    }),
+    catalogFire({ cornea_id: '{TIMBER}', name: 'Timber', active: false, has_incident_maps: true }),
+  ]);
+
+  it('reads rows as inactive, leaving out fires the roster lists', () => {
+    const rows = buildInactiveRows(inactive, [row({ corneaId: '{timber}' })]);
+    expect(rows.map((r) => r.name)).toEqual(['Dome']);
+    expect(rows[0]).toMatchObject({ active: false, hasIncidentMaps: true, mapCount: 195, hasForecast: false });
+    expect(buildInactiveRows(undefined, [])).toEqual([]);
+  });
+
+  it('the Inactive chip passes every inactive row and no active one', () => {
+    expect(matchesFilter(row({ active: false }), 'inactive')).toBe(true);
+    expect(matchesFilter(row({ active: true }), 'inactive')).toBe(false);
+  });
+
+  it('a search hit on the inactive list keeps its map facts, with the live acres', () => {
+    const known = buildInactiveRows(inactive, []);
+    const found = firesList([
+      summary({ cornea_id: '{4883092E-485F-429D-878D-819F01172840}', post_title: 'Dome', active: false, acres: 6800 }),
+      summary({ cornea_id: '{OTHER}', post_title: 'Dome', state: 'AZ', active: false }),
+    ]);
+    const rows = inactiveSearchRows(found, 'dome', [], known);
+    expect(rows[0]).toMatchObject({ corneaId: domeFk, hasIncidentMaps: true, mapCount: 195, acres: 6800 });
+    expect(rows[1]).toMatchObject({ corneaId: '{OTHER}', hasIncidentMaps: false, active: false });
+    // so the maps chip keeps it
+    expect(selectInactiveRows(rows, { filter: 'maps', sort: DEFAULT_DIRECTORY_SORT }).map((r) => r.state)).toEqual(['CA']);
+  });
+
+  it('merges two lists, each fire once and the first row winning', () => {
+    const a = [row({ corneaId: '{AAA}', name: 'From the list' })];
+    const b = [row({ corneaId: 'aaa', name: 'From search' }), row({ corneaId: 'bbb' })];
+    expect(mergeInactiveRows(a, b).map((r) => r.name)).toEqual(['From the list', 'X']);
+    expect(mergeInactiveRows(a, [])).toBe(a);
+    expect(mergeInactiveRows([], b)).toBe(b);
   });
 });

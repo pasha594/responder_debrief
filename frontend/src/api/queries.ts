@@ -15,6 +15,7 @@ import {
   fetchHealth,
   fetchHotspotArchive,
   fetchImsr,
+  fetchInactiveCatalog,
   fetchIncidentManifest,
   fetchMasterCatalog,
   fetchPyrecastRuns,
@@ -213,6 +214,20 @@ export const useMasterCatalog = () =>
     queryFn: fetchMasterCatalog,
     staleTime: 300_000,
     retry: 1,
+  });
+
+/**
+ * Inactive fires holding incident maps (the directory's Inactive chip). May
+ * 404 until the worker first writes it, and a B2 404 carries no CORS headers
+ * (the browser sees a network error), so it is never retried.
+ */
+export const useInactiveCatalog = (enabled: boolean) =>
+  useQuery({
+    queryKey: ['catalog-inactive'],
+    queryFn: fetchInactiveCatalog,
+    enabled,
+    staleTime: 300_000,
+    retry: false,
   });
 
 /** Ingestion heartbeat (may 404 until the first post-deploy worker run). */

@@ -133,7 +133,8 @@ State shape (fields of the fire-ID records; all optional, and `load_state` keeps
                                   "needs_preview": true}},  // key audit: preview found nowhere
   "ir": {"vectors/ir/…": {"v": 3, "heat_types": ["Perimeter", …], "flown_at": "…", "flown_date": null} | {"v": 3, "failed": true}},
   "prune": {"inactive_since": {},                             // legacy, unused
-            "inactive_since_by_id": {"<fire_key>": "…"}, "last_seen_active": {"<fire_key>": "…"}} }
+            "inactive_since_by_id": {"<fire_key>": "…"}, "last_seen_active": {"<fire_key>": "…"}},
+  "inactive_facts": {"<fire_key>": {"at": 1794264000, "fire": {…}}} }   // catalogs/inactive.json's fire facts
 ```
 
 A file shows on no fire while its record is unresolved or ignored, or once it is `pruned_at`. A fresh deployment (no `state/state.json`, or no incident records) starts with `migrations.incident_ids` set. Until that flag is set, sync-incidents publishes a mirror health failure ("paused: awaiting incident-ID migration") and writes nothing else.
@@ -157,6 +158,16 @@ Authoritative shapes in plan.md §Data contracts. Full examples:
     "ftp_match": {"method": "unit_id", "confidence": 1.0, "dir_url": "https://ftp.wildfire.gov/…/2026_BigGrass/"},   // the primary folder's
     "has_spread_forecast": true, "spread_latest_run": "2026-08-17T11:25:00Z" }],
   "counts": {"active_fires": 372, "matched_incident_dirs": 34, "spread_forecast_fires": 26} }
+```
+
+`catalogs/inactive.json` (the directory's Inactive chip; written by sync-catalogs once migrated to fire IDs, before catalog.json): every fire with a written ID manifest (`state["incident_fires"]`) that is off the active list and that the fire API itself calls inactive (`active: false`; a fire missing from a partial list stays off). Rows have catalog.json's shape plus `inactive_since` (prune's clock), with no forecast (runs are matched to active fires only), newest FTP upload first. Fire facts come from one detail GET per fire on the dev API, by the `cornea_id` as the API spells it (a braced id written bare 404s), cached in `state["inactive_facts"]` (`{"<fire_key>": {"at": <epoch s>, "fire": {…FIRE_FIELDS, coordinates, fire_slug}}}`): fetched when missing, refetched after 7 days, at most 60 per run inside 60 s; entries for fires back on the active list are dropped.
+```jsonc
+{ "schema_version": 1, "generated_at": "…",
+  "fires": [{ "fire_slug": "dome", "cornea_id": "4883092e-…", "name": "Dome", "active": false,
+    "has_incident_maps": true, "incident_manifest": "/catalogs/incidents/id/4883092e-….json",
+    "incident_map_count": 195, "incident_latest_upload": "2026-10-17", "perimeter_count": 91,
+    "has_spread_forecast": false, "spread_latest_run": null, "inactive_since": "2026-10-18T06:00:45Z", "…": "…" }],
+  "counts": {"inactive_fires": 43} }
 ```
 
 `catalogs/pyrecast_runs.json`:

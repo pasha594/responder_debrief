@@ -27,6 +27,16 @@ export interface ReleaseDay {
 
 export const RELEASE_NOTES: ReleaseDay[] = [
   {
+    date: '2026-11-09',
+    notes: [
+      {
+        title: 'Browse inactive fires with incident maps',
+        summary:
+          'A new Inactive button on the fire list shows fires that are no longer active but still have incident maps, newest maps first. Every filter button now shows how many fires it holds, and the counts follow your search.',
+      },
+    ],
+  },
+  {
     date: '2026-11-04',
     notes: [
       {
